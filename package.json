@@ -10,6 +10,10 @@
     "start": "node server.js"
   },
   "keywords": ["llm", "proxy", "context", "anthropic", "openai", "visualization"],
-  "author": "OpenClaw",
+  "author": "Lars de Ridder",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/larsderidder/context-lens"
+  },
   "license": "MIT"
 }
