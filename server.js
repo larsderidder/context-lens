@@ -881,13 +881,15 @@ function getHTMLUI() {
     function renderSingleCard(req) {
       const info = req.contextInfo;
       const detailsId = 'details-' + req.id;
-      return '<div class="request-card clickable" onclick="toggle(\\'' + detailsId + '\\')">'
-        + '<div class="request-header"><div>'
+      return '<div class="request-card">'
+        + '<div class="request-header clickable" onclick="toggle(\\'' + detailsId + '\\')"><div>'
         + '<span class="provider-badge provider-' + esc(info.provider) + '">' + esc(info.provider) + '</span>'
         + (req.source && req.source !== 'unknown' ? '<span class="source-badge">' + esc(req.source) + '</span>' : '')
         + ' <span class="model-name">' + esc(info.model) + '</span>'
         + '</div><span class="timestamp">' + esc(formatTimestamp(req.timestamp)) + '</span></div>'
+        + '<div class="clickable" onclick="toggle(\\'' + detailsId + '\\')">'
         + renderContextBar(info, req.contextLimit)
+        + '</div>'
         + renderDetails(req, detailsId)
         + '</div>';
     }
@@ -923,8 +925,10 @@ function getHTMLUI() {
         const detailsId = 'details-' + entry.id;
         html += '<div class="turn-label">Turn ' + (entries.length - i) + ' / ' + entries.length
           + ' &mdash; ' + esc(formatTimestamp(entry.timestamp)) + '</div>';
-        html += '<div class="turn-card clickable" onclick="event.stopPropagation();toggle(\\'' + detailsId + '\\')">';
+        html += '<div class="turn-card">';
+        html += '<div class="clickable" onclick="event.stopPropagation();toggle(\\'' + detailsId + '\\')">';
         html += renderContextBar(entry.contextInfo, entry.contextLimit);
+        html += '</div>';
         html += renderDetails(entry, detailsId);
         html += '</div>';
       });
