@@ -44,11 +44,11 @@ OPENAI_BASE_URL=http://localhost:4040/aider aider "prompt"
 
 ### Codex Subscription Mode
 
-Codex with a ChatGPT subscription uses Cloudflare-protected endpoints that can't go through a reverse proxy. Use the included mitmproxy addon instead:
+Codex with a ChatGPT subscription needs mitmproxy for HTTPS interception (Cloudflare blocks reverse proxies). The CLI handles this automatically — just make sure `mitmdump` is installed:
 
 ```bash
-mitmdump -s mitm_addon.py &
-https_proxy=http://localhost:8080 SSL_CERT_FILE=~/.mitmproxy/mitmproxy-ca-cert.pem codex "prompt"
+pipx install mitmproxy
+npx context-lens codex "your prompt"
 ```
 
 ## Data
