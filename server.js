@@ -4,6 +4,8 @@ const http = require('http');
 const https = require('https');
 const url = require('url');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 
 // Upstream targets — configurable via env vars
 const UPSTREAM_OPENAI_URL = process.env.UPSTREAM_OPENAI_URL || 'https://api.openai.com/v1';
@@ -16,20 +18,123 @@ const MAX_STORED = 100;
 
 // Conversation threading — group requests by fingerprint
 const conversations = new Map(); // fingerprint -> { id, label, source, firstSeen }
+// Responses API chaining: response_id -> conversationId
+const responseIdToConvo = new Map();
 
-function computeFingerprint(contextInfo) {
+// Disk logging — append JSONL to data/requests.jsonl
+const DATA_DIR = path.join(__dirname, 'data');
+try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch {}
+const LOG_FILE = path.join(DATA_DIR, 'requests.jsonl');
+
+function logToDisk(entry, rawBody) {
+  const line = JSON.stringify({ ...entry, rawBody }) + '\n';
+  fs.appendFile(LOG_FILE, line, err => { if (err) console.error('Log write error:', err.message); });
+}
+
+// Extract the actual user prompt from a Responses API input array.
+// Codex wraps user messages as [{"type":"input_text","text":"..."}] JSON strings.
+// Skip boilerplate (AGENTS.md, env context) by finding the first input_text
+// that doesn't start with known prefixes.
+function extractUserPrompt(messages) {
+  for (const m of messages) {
+    if (m.role !== 'user' || !m.content) continue;
+    try {
+      const parsed = JSON.parse(m.content);
+      if (Array.isArray(parsed) && parsed[0] && parsed[0].type === 'input_text') {
+        const text = parsed[0].text || '';
+        // Skip AGENTS.md / environment boilerplate
+        if (text.startsWith('#') || text.startsWith('<environment')) continue;
+        return m.content;
+      }
+    } catch {}
+  }
+  return null;
+}
+
+// Extract session ID from Anthropic metadata.user_id (contains _session_<uuid>)
+function extractSessionId(rawBody) {
+  const userId = rawBody?.metadata?.user_id;
+  if (!userId) return null;
+  const match = userId.match(/session_([a-f0-9-]+)/);
+  return match ? match[0] : null;
+}
+
+// Compute a sub-key to distinguish agents within a session
+function computeAgentKey(contextInfo) {
+  const userMsgs = (contextInfo.messages || []).filter(m => m.role === 'user');
+  let realText = '';
+  for (const msg of userMsgs) {
+    const t = extractReadableText(msg.content);
+    if (t) { realText = t; break; }
+  }
+  if (!realText) return null;
+  return crypto.createHash('sha256').update(realText).digest('hex').slice(0, 12);
+}
+
+function computeFingerprint(contextInfo, rawBody) {
+  // Anthropic session ID = one group per CLI session
+  const sessionId = extractSessionId(rawBody);
+  if (sessionId) {
+    return crypto.createHash('sha256').update(sessionId).digest('hex').slice(0, 16);
+  }
+
+  // Responses API chaining: if previous_response_id exists, reuse that conversation
+  if (rawBody && rawBody.previous_response_id) {
+    const existing = responseIdToConvo.get(rawBody.previous_response_id);
+    if (existing) return existing;
+  }
+
+  const userMsgs = (contextInfo.messages || []).filter(m => m.role === 'user');
+
+  let promptText;
+  if (contextInfo.apiFormat === 'responses' && userMsgs.length > 1) {
+    // Codex: find the actual user prompt, skipping injected context
+    promptText = extractUserPrompt(userMsgs) || '';
+  } else {
+    // Chat Completions / other: first user message
+    const firstUser = userMsgs[0];
+    promptText = firstUser ? firstUser.content : '';
+  }
+
+  // For non-session providers, use system prompt + prompt text
   const systemText = (contextInfo.systemPrompts || []).map(sp => sp.content).join('\n');
-  const firstUserMsg = (contextInfo.messages || []).find(m => m.role === 'user');
-  const firstUserText = firstUserMsg ? firstUserMsg.content : '';
-  if (!systemText && !firstUserText) return null;
-  return crypto.createHash('sha256').update(systemText + '\0' + firstUserText).digest('hex').slice(0, 16);
+  if (!systemText && !promptText) return null;
+  return crypto.createHash('sha256').update(systemText + '\0' + promptText).digest('hex').slice(0, 16);
+}
+
+// Extract readable text from a message content string, stripping JSON wrappers and system-reminder blocks
+function extractReadableText(content) {
+  if (!content) return null;
+  let text = content;
+  try {
+    const parsed = JSON.parse(text);
+    if (Array.isArray(parsed)) {
+      // Anthropic content blocks or Codex input_text blocks
+      const textBlock = parsed.find(b =>
+        (b.type === 'text' && b.text && !b.text.startsWith('<system-reminder>'))
+        || (b.type === 'input_text' && b.text && !b.text.startsWith('#') && !b.text.startsWith('<environment'))
+      );
+      if (textBlock) text = textBlock.text;
+    }
+  } catch {}
+  text = text.replace(/\s+/g, ' ').trim();
+  return text || null;
 }
 
 function extractConversationLabel(contextInfo) {
-  const firstUser = (contextInfo.messages || []).find(m => m.role === 'user');
-  if (firstUser && firstUser.content) {
-    const text = firstUser.content.replace(/\s+/g, ' ').trim();
-    return text.length > 80 ? text.slice(0, 77) + '...' : text;
+  const userMsgs = (contextInfo.messages || []).filter(m => m.role === 'user');
+
+  // For Responses API (Codex): skip boilerplate
+  if (contextInfo.apiFormat === 'responses' && userMsgs.length > 1) {
+    const prompt = extractUserPrompt(userMsgs);
+    const text = extractReadableText(prompt);
+    if (text) return text.length > 80 ? text.slice(0, 77) + '...' : text;
+  }
+
+  // Try each user message until we find readable text
+  for (const msg of userMsgs) {
+    const text = extractReadableText(msg.content);
+    if (text) return text.length > 80 ? text.slice(0, 77) + '...' : text;
   }
   return 'Unnamed conversation';
 }
@@ -234,9 +339,26 @@ function getContextLimit(model) {
   return 128000; // default fallback
 }
 
+// Auto-detect source tool from system prompt when not explicitly tagged
+const SOURCE_SIGNATURES = [
+  { pattern: 'Act as an expert software developer', source: 'aider' },
+  { pattern: 'You are Claude Code', source: 'claude' },
+  { pattern: 'You are Kimi Code CLI', source: 'kimi' },
+];
+
+function detectSource(contextInfo, source) {
+  if (source && source !== 'unknown') return source;
+  const systemText = (contextInfo.systemPrompts || []).map(sp => sp.content).join('\n');
+  for (const sig of SOURCE_SIGNATURES) {
+    if (systemText.includes(sig.pattern)) return sig.source;
+  }
+  return source || 'unknown';
+}
+
 // Store captured request
-function storeRequest(contextInfo, responseData, source) {
-  const fingerprint = computeFingerprint(contextInfo);
+function storeRequest(contextInfo, responseData, source, rawBody) {
+  source = detectSource(contextInfo, source);
+  const fingerprint = computeFingerprint(contextInfo, rawBody);
 
   // Register or look up conversation
   let conversationId = null;
@@ -252,6 +374,10 @@ function storeRequest(contextInfo, responseData, source) {
     conversationId = fingerprint;
   }
 
+  // Agent key: distinguishes agents within a session (main vs subagents)
+  const agentKey = computeAgentKey(contextInfo);
+  const agentLabel = extractConversationLabel(contextInfo);
+
   const entry = {
     id: Date.now() + Math.random(),
     timestamp: new Date().toISOString(),
@@ -260,7 +386,15 @@ function storeRequest(contextInfo, responseData, source) {
     contextLimit: getContextLimit(contextInfo.model),
     source: source || 'unknown',
     conversationId,
+    agentKey,
+    agentLabel,
   };
+
+  // Track response IDs for Responses API chaining
+  const respId = responseData && (responseData.id || responseData.response_id);
+  if (respId && conversationId) {
+    responseIdToConvo.set(respId, conversationId);
+  }
 
   capturedRequests.unshift(entry);
   if (capturedRequests.length > MAX_STORED) {
@@ -274,6 +408,7 @@ function storeRequest(contextInfo, responseData, source) {
     }
   }
 
+  logToDisk(entry, rawBody);
   return entry;
 }
 
@@ -427,7 +562,7 @@ function handleProxy(req, res) {
         });
 
         proxyRes.on('end', () => {
-          storeRequest(contextInfo, { streaming: true, chunks: capturedChunks }, source);
+          storeRequest(contextInfo, { streaming: true, chunks: capturedChunks }, source, bodyData);
           res.end();
         });
       } else {
@@ -441,9 +576,9 @@ function handleProxy(req, res) {
         proxyRes.on('end', () => {
           try {
             const responseData = JSON.parse(responseBody);
-            storeRequest(contextInfo, responseData, source);
+            storeRequest(contextInfo, responseData, source, bodyData);
           } catch (e) {
-            storeRequest(contextInfo, { raw: responseBody }, source);
+            storeRequest(contextInfo, { raw: responseBody }, source, bodyData);
           }
           res.end();
         });
@@ -477,7 +612,7 @@ function handleIngest(req, res) {
       const apiFormat = data.apiFormat || 'unknown';
       const source = data.source || 'unknown';
       const contextInfo = parseContextInfo(provider, data.body || {}, apiFormat);
-      storeRequest(contextInfo, data.response || {}, source);
+      storeRequest(contextInfo, data.response || {}, source, data.body || {});
       console.log(`  📥 Ingested: [${provider}] ${contextInfo.model} from ${source}`);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true }));
@@ -512,7 +647,25 @@ function handleWebUI(req, res) {
     const convos = [];
     for (const [id, entries] of grouped) {
       const meta = conversations.get(id) || { id, label: 'Unknown', source: 'unknown', firstSeen: entries[entries.length - 1].timestamp };
-      convos.push({ ...meta, entries: entries.slice() }); // newest-first within group
+      // Sub-group entries by agentKey
+      const agentMap = new Map();
+      for (const e of entries) {
+        const ak = e.agentKey || '_default';
+        if (!agentMap.has(ak)) agentMap.set(ak, []);
+        agentMap.get(ak).push(e);
+      }
+      const agents = [];
+      for (const [ak, agentEntries] of agentMap) {
+        agents.push({
+          key: ak,
+          label: agentEntries[agentEntries.length - 1].agentLabel || 'Unnamed',
+          model: agentEntries[0].contextInfo.model,
+          entries: agentEntries, // newest-first (inherited from capturedRequests order)
+        });
+      }
+      // Sort agents: most recent activity first
+      agents.sort((a, b) => new Date(b.entries[0].timestamp) - new Date(a.entries[0].timestamp));
+      convos.push({ ...meta, agents, entries: entries.slice() });
     }
     // Sort conversations newest-first (by most recent entry)
     convos.sort((a, b) => new Date(b.entries[0].timestamp) - new Date(a.entries[0].timestamp));
@@ -692,6 +845,26 @@ function getHTMLUI() {
     .turn-card .request-header { margin-bottom: 8px; }
 
     .clickable { cursor: pointer; }
+
+    /* Agent sub-groups within a session */
+    .agent-group {
+      border-top: 1px solid #2a2a2a;
+    }
+    .agent-header {
+      padding: 8px 16px; cursor: pointer; user-select: none;
+      display: flex; justify-content: space-between; align-items: center;
+      background: #161616;
+    }
+    .agent-header:hover { background: #1e1e1e; }
+    .agent-label {
+      font-size: 12px; color: #aaa; max-width: 400px;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .agent-model {
+      font-size: 11px; color: #666; font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+    }
+    .agent-body { display: none; }
+    .agent-body.expanded { display: block; }
 
     .empty-state { text-align: center; padding: 60px 20px; color: #666; }
   </style>
@@ -894,33 +1067,9 @@ function getHTMLUI() {
         + '</div>';
     }
 
-    function renderConversationGroup(convo) {
-      const entries = convo.entries; // newest-first
-      const latest = entries[0];
-      const info = latest.contextInfo;
-      const bodyId = 'convo-body-' + convo.id;
-      const isExp = expandedState.has(bodyId);
-
-      let html = '<div class="conversation-group">';
-      // Header
-      html += '<div class="conversation-header" onclick="toggle(\\'' + bodyId + '\\')">';
-      html += '<div>';
-      html += '<span class="provider-badge provider-' + esc(info.provider) + '">' + esc(info.provider) + '</span>';
-      if (convo.source && convo.source !== 'unknown') html += '<span class="source-badge">' + esc(convo.source) + '</span>';
-      html += ' <span class="model-name">' + esc(info.model) + '</span>';
-      html += '<span class="turn-count">' + entries.length + ' turns</span>';
-      html += '</div>';
-      html += '<div>';
-      html += '<span class="conversation-label">' + esc(convo.label) + '</span>';
-      html += ' <span class="timestamp">' + esc(formatTimestamp(latest.timestamp)) + '</span>';
-      html += '</div></div>';
-
-      // Summary (always visible): latest request's context bar
-      html += '<div style="padding:12px 16px;background:#1a1a1a;">'
-        + renderContextBar(info, latest.contextLimit) + '</div>';
-
-      // Expandable body: all turns
-      html += '<div id="' + bodyId + '" class="conversation-body' + (isExp ? ' expanded' : '') + '">';
+    function renderAgentTurns(agent, convoId) {
+      const entries = agent.entries;
+      let html = '';
       entries.forEach(function(entry, i) {
         const detailsId = 'details-' + entry.id;
         html += '<div class="turn-label">Turn ' + (entries.length - i) + ' / ' + entries.length
@@ -932,6 +1081,66 @@ function getHTMLUI() {
         html += renderDetails(entry, detailsId);
         html += '</div>';
       });
+      return html;
+    }
+
+    function renderConversationGroup(convo) {
+      const entries = convo.entries; // newest-first
+      const agents = convo.agents || [];
+      const latest = entries[0];
+      const info = latest.contextInfo;
+      const bodyId = 'convo-body-' + convo.id;
+      const isExp = expandedState.has(bodyId);
+      const hasAgents = agents.length > 1;
+
+      let html = '<div class="conversation-group">';
+      // Header
+      html += '<div class="conversation-header" onclick="toggle(\\'' + bodyId + '\\')">';
+      html += '<div>';
+      html += '<span class="provider-badge provider-' + esc(info.provider) + '">' + esc(info.provider) + '</span>';
+      if (convo.source && convo.source !== 'unknown') html += '<span class="source-badge">' + esc(convo.source) + '</span>';
+      if (hasAgents) {
+        html += '<span class="turn-count">' + agents.length + ' agents, ' + entries.length + ' calls</span>';
+      } else {
+        html += ' <span class="model-name">' + esc(info.model) + '</span>';
+        html += '<span class="turn-count">' + entries.length + ' turns</span>';
+      }
+      html += '</div>';
+      html += '<div>';
+      html += '<span class="conversation-label">' + esc(convo.label) + '</span>';
+      html += ' <span class="timestamp">' + esc(formatTimestamp(latest.timestamp)) + '</span>';
+      html += '</div></div>';
+
+      // Summary (always visible): latest request's context bar
+      html += '<div style="padding:12px 16px;background:#1a1a1a;">'
+        + renderContextBar(info, latest.contextLimit) + '</div>';
+
+      // Expandable body
+      html += '<div id="' + bodyId + '" class="conversation-body' + (isExp ? ' expanded' : '') + '">';
+
+      if (hasAgents) {
+        // Multi-agent: render each agent as a collapsible sub-group
+        agents.forEach(function(agent) {
+          const agentBodyId = 'agent-' + convo.id + '-' + agent.key;
+          const aExp = expandedState.has(agentBodyId);
+          const turnText = agent.entries.length === 1 ? '1 turn' : agent.entries.length + ' turns';
+          html += '<div class="agent-group">';
+          html += '<div class="agent-header" onclick="event.stopPropagation();toggle(\\'' + agentBodyId + '\\')">';
+          html += '<div>';
+          html += '<span class="agent-model">' + esc(agent.model) + '</span> ';
+          html += '<span class="agent-label">' + esc(agent.label) + '</span>';
+          html += '</div>';
+          html += '<span class="turn-count">' + turnText + '</span>';
+          html += '</div>';
+          html += '<div id="' + agentBodyId + '" class="agent-body' + (aExp ? ' expanded' : '') + '">';
+          html += renderAgentTurns(agent, convo.id);
+          html += '</div></div>';
+        });
+      } else {
+        // Single agent: render turns directly
+        html += renderAgentTurns(agents[0] || { entries: entries }, convo.id);
+      }
+
       html += '</div></div>';
       return html;
     }

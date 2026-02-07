@@ -1,0 +1,13 @@
+data/
+.aider*
+test-demo.sh
+test-request.json
+mitm_addon.py
+__pycache__/
+.claude/
+update
+docs/
+SUMMARY.md
+CLI-IMPLEMENTATION.md
+MULTI-CLIENT.md
+QUICKSTART.md
