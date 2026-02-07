@@ -1,5 +1,7 @@
 # 🔍 Context Lens
 
+> ⚠️ **Early Development** — This is a proof of concept. Expect rough edges. Contributions welcome.
+
 A zero-config HTTP proxy that intercepts LLM API calls and visualizes what's in the context window.
 
 ## What Is This?
