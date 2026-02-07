@@ -1,7 +1,26 @@
+# Node
 node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+dist/
+build/
+coverage/
 *.log
-.DS_Store
+
+# Env (keep real secrets out of git)
 .env
-test-request.json
+.env.*
+!.env.example
+
+# OS
+.DS_Store
+
+# Python
 __pycache__/
+*.py[cod]
+
+# Local tool state
 .claude/
+.aider*
