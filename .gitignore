@@ -34,3 +34,4 @@ QUICKSTART.md
 # Local tool state
 .claude/
 .aider*
+.idea/
