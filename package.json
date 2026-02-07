@@ -1,0 +1,15 @@
+{
+  "name": "context-lens",
+  "version": "0.1.0",
+  "description": "Local HTTP proxy that intercepts LLM API calls and visualizes context windows",
+  "main": "server.js",
+  "bin": {
+    "context-lens": "./cli.js"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": ["llm", "proxy", "context", "anthropic", "openai", "visualization"],
+  "author": "OpenClaw",
+  "license": "MIT"
+}
