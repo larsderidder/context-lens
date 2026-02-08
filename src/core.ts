@@ -82,7 +82,11 @@ export function parseContextInfo(provider: string, body: Record<string, any>, ap
 
   if (provider === 'anthropic') {
     if (body.system) {
-      const systemText = typeof body.system === 'string' ? body.system : JSON.stringify(body.system);
+      const systemText = typeof body.system === 'string'
+        ? body.system
+        : Array.isArray(body.system)
+          ? body.system.map((b: any) => b.text || '').join('\n')
+          : JSON.stringify(body.system);
       info.systemPrompts.push({ content: systemText });
       info.systemTokens = estimateTokens(systemText);
     }
@@ -138,7 +142,11 @@ export function parseContextInfo(provider: string, body: Record<string, any>, ap
       info.systemTokens = estimateTokens(body.instructions);
     }
     if (body.system) {
-      const systemText = typeof body.system === 'string' ? body.system : JSON.stringify(body.system);
+      const systemText = typeof body.system === 'string'
+        ? body.system
+        : Array.isArray(body.system)
+          ? body.system.map((b: any) => b.text || '').join('\n')
+          : JSON.stringify(body.system);
       info.systemPrompts.push({ content: systemText });
       info.systemTokens += estimateTokens(systemText);
     }
@@ -379,8 +387,8 @@ export function extractConversationLabel(contextInfo: ContextInfo): string {
     if (text) return text.length > 80 ? text.slice(0, 77) + '...' : text;
   }
 
-  for (const msg of userMsgs) {
-    const text = extractReadableText(msg.content);
+  for (let i = userMsgs.length - 1; i >= 0; i--) {
+    const text = extractReadableText(userMsgs[i].content);
     if (text) return text.length > 80 ? text.slice(0, 77) + '...' : text;
   }
   return 'Unnamed conversation';

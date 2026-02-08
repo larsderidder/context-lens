@@ -563,10 +563,10 @@ describe('computeAgentKey', () => {
 // --- extractConversationLabel ---
 
 describe('extractConversationLabel', () => {
-  it('extracts label from first user message', () => {
+  it('extracts label from latest user message', () => {
     const info = parseContextInfo('anthropic', anthropicBasic, 'anthropic-messages');
     const label = extractConversationLabel(info);
-    assert.ok(label.includes('weather'));
+    assert.ok(label.includes('capital of France'));
   });
 
   it('skips codex boilerplate and finds real prompt', () => {
