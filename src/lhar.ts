@@ -304,19 +304,33 @@ export function buildLharRecord(
     : analyzeComposition(ci, entry.rawBody);
   const usage = parseResponseUsage(entry.response);
 
-  // Sequence: count entries in this conversation that came before this one (by timestamp)
-  const sequence = prevEntries.filter(
-    e => e.conversationId === entry.conversationId
-      && e.id !== entry.id
-      && new Date(e.timestamp).getTime() <= new Date(entry.timestamp).getTime()
-  ).length + 1;
+  // Sequence + growth must be derived from a stable ordering.
+  // Use oldest-first timestamp ordering within the conversation; tie-break by id.
+  let convoEntries = entry.conversationId
+    ? prevEntries.filter(e => e.conversationId === entry.conversationId)
+    : [entry];
 
-  // Growth tracking
-  const prevInConvo = prevEntries
-    .filter(e => e.conversationId === entry.conversationId && e.id !== entry.id)
-    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-  const prevTokens = prevInConvo.length > 0 ? prevInConvo[0].contextInfo.totalTokens : 0;
-  const tokensAdded = prevInConvo.length > 0 ? ci.totalTokens - prevTokens : null;
+  // Make buildLharRecord robust even if the caller doesn't include `entry` in `prevEntries`.
+  if (entry.conversationId) {
+    const found = convoEntries.some(e => e.id === entry.id && e.timestamp === entry.timestamp);
+    if (!found) convoEntries = [...convoEntries, entry];
+  }
+
+  convoEntries.sort((a, b) => {
+    const dt = new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
+    if (dt !== 0) return dt;
+    return a.id - b.id;
+  });
+
+  let convoIndex = convoEntries.findIndex(e => e.id === entry.id && e.timestamp === entry.timestamp);
+  if (convoIndex < 0) convoIndex = convoEntries.findIndex(e => e.id === entry.id);
+  if (convoIndex < 0) convoIndex = 0;
+  const sequence = convoIndex + 1;
+
+  // Growth tracking: compare to the immediately previous entry in the conversation.
+  const prevEntry = convoIndex > 0 ? convoEntries[convoIndex - 1] : null;
+  const prevTokens = prevEntry ? prevEntry.contextInfo.totalTokens : 0;
+  const tokensAdded = prevEntry ? ci.totalTokens - prevTokens : null;
   const compactionDetected = tokensAdded !== null && tokensAdded < 0;
 
   // Agent role
