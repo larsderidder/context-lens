@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Context Lens — UI Mockup v2 (Subagents)</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: #0a0a0a; color: #e5e5e5; font-size: 13px; }
+
+.app { display: grid; grid-template-columns: 280px 1fr; grid-template-rows: 48px 1fr; height: 100vh; }
+
+/* Header */
+.header { grid-column: 1 / -1; background: #141414; border-bottom: 1px solid #262626; display: flex; align-items: center; padding: 0 16px; gap: 12px; }
+.header h1 { font-size: 15px; font-weight: 600; }
+.header .icon { font-size: 18px; }
+.header-right { margin-left: auto; display: flex; gap: 12px; align-items: center; }
+.header select { background: #1e1e1e; border: 1px solid #333; color: #e5e5e5; padding: 4px 12px; border-radius: 4px; font-size: 12px; }
+.header .total-cost { font-size: 12px; color: #10b981; font-weight: 600; }
+
+/* Sidebar */
+.sidebar { background: #111; border-right: 1px solid #262626; overflow-y: auto; }
+.sidebar-header { padding: 12px; border-bottom: 1px solid #1e1e1e; }
+.sidebar-search { width: 100%; background: #1a1a1a; border: 1px solid #262626; color: #e5e5e5; padding: 6px 10px; border-radius: 4px; font-size: 12px; }
+.sidebar-section { padding: 10px 12px 4px; font-size: 10px; color: #555; text-transform: uppercase; letter-spacing: 0.08em; }
+
+/* Session items */
+.session-item { padding: 8px 12px; cursor: pointer; border-left: 2px solid transparent; }
+.session-item:hover { background: #1a1a1a; }
+.session-item.active { background: #111827; border-left-color: #3b82f6; }
+.session-head { display: flex; align-items: center; gap: 8px; }
+.session-meta { display: flex; gap: 12px; margin-top: 4px; padding-left: 14px; font-size: 11px; color: #555; }
+.badge { font-size: 9px; padding: 2px 6px; border-radius: 3px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; }
+.badge-claude { background: #451a03; color: #fb923c; }
+.badge-codex { background: #052e16; color: #34d399; }
+.session-name { font-size: 12px; font-weight: 500; }
+.dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.dot-live { background: #3b82f6; box-shadow: 0 0 4px #3b82f6; }
+.dot-done { background: #444; }
+
+/* Turn groups */
+.turn-group { margin-left: 14px; border-left: 1px solid #1e1e1e; }
+.turn-group-item { padding: 5px 12px; cursor: pointer; display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.turn-group-item:hover { background: #151515; }
+.turn-group-item.active { background: #111827; }
+.tg-number { color: #555; width: 16px; text-align: right; }
+.tg-model { font-size: 10px; padding: 1px 4px; border-radius: 2px; }
+.tg-opus { background: #1e1e1e; color: #fb923c; }
+.tg-haiku { background: #1e1e1e; color: #a78bfa; }
+.tg-gpt { background: #1e1e1e; color: #34d399; }
+.tg-tokens { margin-left: auto; color: #444; font-size: 11px; }
+.tg-sub { font-size: 11px; color: #555; padding: 2px 12px 2px 46px; }
+
+/* Subagent indicator */
+.subagent-row { display: flex; align-items: center; gap: 4px; padding: 2px 12px 2px 40px; font-size: 10px; color: #555; }
+.subagent-dot { width: 4px; height: 4px; border-radius: 50%; background: #a78bfa; }
+
+/* Main */
+.main { overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 14px; }
+
+/* Panels */
+.panel { background: #141414; border: 1px solid #262626; border-radius: 8px; overflow: hidden; }
+.panel-header { padding: 10px 16px; font-size: 11px; font-weight: 600; color: #666; text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 1px solid #1e1e1e; display: flex; justify-content: space-between; align-items: center; }
+.panel-body { padding: 16px; }
+
+/* Overview row */
+.overview-row { display: flex; gap: 16px; }
+.overview-row .panel { flex: 1; }
+
+/* Stats */
+.stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.stat { padding: 8px; background: #0f0f0f; border-radius: 6px; }
+.stat-value { font-size: 24px; font-weight: 700; }
+.stat-label { font-size: 10px; color: #555; margin-top: 2px; }
+.blue { color: #3b82f6; }
+.green { color: #10b981; }
+.amber { color: #f59e0b; }
+.red { color: #ef4444; }
+.white { color: #e5e5e5; }
+
+/* Treemap */
+.treemap { display: flex; height: 64px; border-radius: 4px; overflow: hidden; gap: 2px; margin-top: 12px; }
+.treemap-block { display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 500; color: rgba(255,255,255,0.9); flex-direction: column; gap: 1px; cursor: pointer; transition: opacity 0.15s; }
+.treemap-block:hover { opacity: 0.85; }
+.treemap-block.system { background: #1e40af; }
+.treemap-block.tools { background: #be185d; }
+.treemap-block.messages { background: #059669; }
+.treemap-block span { font-size: 8px; opacity: 0.7; }
+
+/* Agent breakdown */
+.agent-breakdown { margin-top: 12px; }
+.agent-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 12px; }
+.agent-bar-container { flex: 1; height: 6px; background: #1a1a1a; border-radius: 3px; overflow: hidden; }
+.agent-bar { height: 100%; border-radius: 3px; }
+.agent-bar.opus { background: #fb923c; }
+.agent-bar.haiku { background: #a78bfa; }
+.agent-label { width: 100px; color: #888; font-size: 11px; }
+.agent-value { width: 80px; text-align: right; color: #555; font-size: 11px; }
+
+/* Timeline */
+.timeline-container { position: relative; }
+.timeline-chart { display: flex; align-items: flex-end; gap: 2px; height: 80px; }
+.timeline-bar { flex: 1; min-width: 8px; border-radius: 2px 2px 0 0; cursor: pointer; position: relative; transition: opacity 0.15s; }
+.timeline-bar:hover { opacity: 0.8; }
+.timeline-bar.opus { background: linear-gradient(to top, #92400e, #fb923c); }
+.timeline-bar.haiku { background: linear-gradient(to top, #4c1d95, #a78bfa); }
+.timeline-bar.active { box-shadow: 0 0 0 1px #3b82f6; }
+.timeline-labels { display: flex; gap: 2px; margin-top: 4px; }
+.timeline-labels span { flex: 1; min-width: 8px; text-align: center; font-size: 8px; color: #333; }
+.timeline-legend { display: flex; gap: 16px; margin-top: 8px; }
+.legend-item { display: flex; align-items: center; gap: 4px; font-size: 10px; color: #666; }
+.legend-dot { width: 8px; height: 8px; border-radius: 2px; }
+.legend-dot.opus { background: #fb923c; }
+.legend-dot.haiku { background: #a78bfa; }
+.legend-dot.cost { background: #10b981; }
+
+/* Cost overlay */
+.cost-line { position: absolute; top: 0; left: 0; right: 0; bottom: 0; pointer-events: none; }
+.cost-line svg { width: 100%; height: 100%; }
+.cost-line path { fill: none; stroke: #10b981; stroke-width: 1.5; opacity: 0.7; }
+
+/* Turn detail */
+.turn-group-detail { background: #0f0f0f; border-radius: 6px; padding: 12px; margin-bottom: 12px; }
+.turn-group-title { font-size: 12px; font-weight: 600; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+.tg-badge { font-size: 9px; padding: 1px 5px; border-radius: 2px; }
+
+.call-row { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 4px; font-size: 12px; margin-bottom: 2px; }
+.call-row:hover { background: #141414; }
+.call-model { font-size: 10px; padding: 1px 5px; border-radius: 2px; width: 50px; text-align: center; }
+.call-purpose { color: #888; flex: 1; }
+.call-tokens { color: #555; font-size: 11px; }
+.call-cost { color: #10b981; font-size: 11px; width: 60px; text-align: right; }
+
+/* Diff */
+.diff-section { margin-top: 12px; border-top: 1px solid #1e1e1e; padding-top: 12px; }
+.diff-header { font-size: 11px; color: #555; margin-bottom: 6px; display: flex; justify-content: space-between; }
+.diff-line { font-family: 'SF Mono', 'Fira Code', Consolas, monospace; font-size: 11px; padding: 2px 8px; border-radius: 2px; margin-bottom: 1px; }
+.diff-add { background: #071f0e; color: #4ade80; }
+.diff-remove { background: #1f0707; color: #f87171; }
+.diff-same { color: #333; }
+
+/* Messages */
+.msg-list { margin-top: 12px; border-top: 1px solid #1e1e1e; padding-top: 12px; }
+.msg-item { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-bottom: 1px solid #111; font-size: 12px; }
+.msg-expand { color: #333; cursor: pointer; width: 14px; }
+.msg-role { font-weight: 600; width: 65px; font-size: 11px; }
+.msg-role.system { color: #3b82f6; }
+.msg-role.tools { color: #ec4899; }
+.msg-role.user { color: #10b981; }
+.msg-role.assistant { color: #f59e0b; }
+.msg-role.tool_use { color: #a78bfa; }
+.msg-content { flex: 1; color: #888; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.msg-tokens { color: #444; font-size: 11px; white-space: nowrap; }
+
+/* Recommendations */
+.rec-item { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; font-size: 12px; border-bottom: 1px solid #111; }
+.rec-item:last-child { border-bottom: none; }
+.rec-icon { font-size: 14px; margin-top: 1px; }
+.rec-body { flex: 1; }
+.rec-title { font-weight: 500; }
+.rec-detail { font-size: 11px; color: #555; margin-top: 2px; }
+.rec-impact { font-size: 10px; padding: 2px 6px; border-radius: 3px; white-space: nowrap; }
+.rec-impact.high { background: #451a03; color: #fb923c; }
+.rec-impact.medium { background: #1c1917; color: #a8a29e; }
+.rec-impact.low { background: #052e16; color: #34d399; }
+
+/* Toggle */
+.toggle-group { display: flex; gap: 0; }
+.toggle { font-size: 10px; padding: 3px 10px; background: #1a1a1a; border: 1px solid #262626; color: #666; cursor: pointer; }
+.toggle:first-child { border-radius: 4px 0 0 4px; }
+.toggle:last-child { border-radius: 0 4px 4px 0; }
+.toggle.active { background: #1e3a5f; border-color: #3b82f6; color: #93c5fd; }
+
+/* Sidebar footer */
+.sidebar-footer { padding: 12px; border-top: 1px solid #1e1e1e; margin-top: auto; }
+.sidebar-footer-stat { display: flex; justify-content: space-between; font-size: 11px; color: #444; padding: 2px 0; }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- Header -->
+  <div class="header">
+    <span class="icon">🔍</span>
+    <h1>Context Lens</h1>
+    <div class="header-right">
+      <span class="total-cost">Session: $0.47</span>
+      <select>
+        <option>All sources</option>
+        <option>claude</option>
+        <option>codex</option>
+        <option>aider</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- Sidebar -->
+  <div class="sidebar" style="display: flex; flex-direction: column;">
+    <div class="sidebar-header">
+      <input class="sidebar-search" placeholder="Filter sessions..." />
+    </div>
+
+    <div style="flex: 1; overflow-y: auto;">
+      <div class="sidebar-section">Active Sessions</div>
+
+      <!-- Claude session -->
+      <div class="session-item active">
+        <div class="session-head">
+          <span class="dot dot-live"></span>
+          <span class="badge badge-claude">claude</span>
+          <span class="session-name">claude-opus-4-6</span>
+        </div>
+        <div class="session-meta">
+          <span>12 turns</span>
+          <span>142K tok</span>
+          <span style="color: #10b981;">$0.38</span>
+        </div>
+      </div>
+
+      <div class="turn-group">
+        <div class="turn-group-item">
+          <span class="tg-number">1</span>
+          <span class="tg-model tg-opus">opus</span>
+          <span style="color: #888;">Initial prompt</span>
+          <span class="tg-tokens">19.8K</span>
+        </div>
+        <div class="subagent-row">
+          <span class="subagent-dot"></span> haiku classifier (128 tok)
+          <span class="subagent-dot" style="margin-left: 8px;"></span> haiku topic (430 tok)
+        </div>
+
+        <div class="turn-group-item">
+          <span class="tg-number">2</span>
+          <span class="tg-model tg-opus">opus</span>
+          <span style="color: #888;">Refactor auth</span>
+          <span class="tg-tokens">19.8K</span>
+        </div>
+        <div class="subagent-row">
+          <span class="subagent-dot"></span> haiku classifier (128 tok)
+        </div>
+
+        <div class="turn-group-item active">
+          <span class="tg-number">3</span>
+          <span class="tg-model tg-opus">opus</span>
+          <span style="color: #888;">Fix tests</span>
+          <span class="tg-tokens">20.3K</span>
+        </div>
+        <div class="subagent-row">
+          <span class="subagent-dot"></span> haiku classifier (128 tok)
+          <span class="subagent-dot" style="margin-left: 8px;"></span> haiku summarizer (618 tok)
+          <span class="subagent-dot" style="margin-left: 8px;"></span> haiku topic (389 tok)
+        </div>
+
+        <div class="turn-group-item">
+          <span class="tg-number">4</span>
+          <span class="tg-model tg-opus">opus</span>
+          <span style="color: #888;">Write docs</span>
+          <span class="tg-tokens">21.9K</span>
+        </div>
+
+        <div style="padding: 4px 12px; font-size: 11px; color: #333; cursor: pointer;">+ 8 more turns...</div>
+      </div>
+
+      <!-- Codex session -->
+      <div class="session-item">
+        <div class="session-head">
+          <span class="dot dot-done"></span>
+          <span class="badge badge-codex">codex</span>
+          <span class="session-name">gpt-5.3-codex</span>
+        </div>
+        <div class="session-meta">
+          <span>5 turns</span>
+          <span>37K tok</span>
+          <span style="color: #10b981;">$0.09</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="sidebar-footer">
+      <div class="sidebar-footer-stat"><span>Total requests</span><span style="color: #999;">72</span></div>
+      <div class="sidebar-footer-stat"><span>Main agent calls</span><span style="color: #fb923c;">18</span></div>
+      <div class="sidebar-footer-stat"><span>Subagent calls</span><span style="color: #a78bfa;">54</span></div>
+      <div class="sidebar-footer-stat"><span>Total cost</span><span style="color: #10b981;">$0.47</span></div>
+    </div>
+  </div>
+
+  <!-- Main Content -->
+  <div class="main">
+
+    <!-- Overview Row -->
+    <div class="overview-row">
+      <!-- Stats -->
+      <div class="panel" style="flex: 1;">
+        <div class="panel-header">Session Overview</div>
+        <div class="panel-body">
+          <div class="stats-grid">
+            <div class="stat">
+              <div class="stat-value blue">16%</div>
+              <div class="stat-label">Context used (of 200K)</div>
+            </div>
+            <div class="stat">
+              <div class="stat-value green">$0.38</div>
+              <div class="stat-label">Session cost</div>
+            </div>
+            <div class="stat">
+              <div class="stat-value amber">72</div>
+              <div class="stat-label">Health score</div>
+            </div>
+            <div class="stat">
+              <div class="stat-value white">33.9K</div>
+              <div class="stat-label">Current tokens</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Agent breakdown -->
+      <div class="panel" style="flex: 1;">
+        <div class="panel-header">Agent Breakdown</div>
+        <div class="panel-body">
+          <div class="agent-breakdown">
+            <div class="agent-row">
+              <span class="agent-label">opus (main)</span>
+              <div class="agent-bar-container">
+                <div class="agent-bar opus" style="width: 92%;"></div>
+              </div>
+              <span class="agent-value">130K tok · $0.35</span>
+            </div>
+            <div class="agent-row">
+              <span class="agent-label">haiku (classify)</span>
+              <div class="agent-bar-container">
+                <div class="agent-bar haiku" style="width: 5%;"></div>
+              </div>
+              <span class="agent-value">4.2K tok · $0.01</span>
+            </div>
+            <div class="agent-row">
+              <span class="agent-label">haiku (topic)</span>
+              <div class="agent-bar-container">
+                <div class="agent-bar haiku" style="width: 3%;"></div>
+              </div>
+              <span class="agent-value">2.8K tok · $0.01</span>
+            </div>
+            <div class="agent-row">
+              <span class="agent-label">haiku (summary)</span>
+              <div class="agent-bar-container">
+                <div class="agent-bar haiku" style="width: 4%;"></div>
+              </div>
+              <span class="agent-value">5.1K tok · $0.01</span>
+            </div>
+          </div>
+          <div style="margin-top: 10px; font-size: 11px; color: #444;">
+            75% of calls are subagents, but only 8% of tokens
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Treemap -->
+    <div class="panel">
+      <div class="panel-header">
+        Context Composition — Turn 3
+        <div class="toggle-group">
+          <div class="toggle active">Main agent</div>
+          <div class="toggle">All agents</div>
+        </div>
+      </div>
+      <div class="panel-body">
+        <div class="treemap">
+          <div class="treemap-block system" style="flex: 4256;">System<span>4,256 tok (21%)</span></div>
+          <div class="treemap-block tools" style="flex: 14556;">Tools<span>14,556 tok (69%)</span></div>
+          <div class="treemap-block messages" style="flex: 1467;">Messages<span>1,467 tok (7%)</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Timeline -->
+    <div class="panel">
+      <div class="panel-header">
+        Timeline
+        <div class="toggle-group">
+          <div class="toggle active">Tokens</div>
+          <div class="toggle">Cost</div>
+          <div class="toggle">All calls</div>
+        </div>
+      </div>
+      <div class="panel-body">
+        <div class="timeline-container">
+          <div class="timeline-chart">
+            <!-- Turn 1 -->
+            <div class="timeline-bar haiku" style="height: 2%;"></div>
+            <div class="timeline-bar opus" style="height: 58%;"></div>
+            <div class="timeline-bar haiku" style="height: 4%;"></div>
+            <!-- Turn 2 -->
+            <div class="timeline-bar haiku" style="height: 2%;"></div>
+            <div class="timeline-bar opus" style="height: 59%;"></div>
+            <div class="timeline-bar haiku" style="height: 2%;"></div>
+            <!-- Turn 3 -->
+            <div class="timeline-bar haiku" style="height: 2%;"></div>
+            <div class="timeline-bar opus active" style="height: 62%;"></div>
+            <div class="timeline-bar haiku" style="height: 5%;"></div>
+            <div class="timeline-bar haiku" style="height: 3%;"></div>
+            <!-- Turn 4 -->
+            <div class="timeline-bar haiku" style="height: 2%;"></div>
+            <div class="timeline-bar opus" style="height: 68%;"></div>
+            <!-- Turn 5+ -->
+            <div class="timeline-bar haiku" style="height: 2%;"></div>
+            <div class="timeline-bar opus" style="height: 75%;"></div>
+            <div class="timeline-bar haiku" style="height: 5%;"></div>
+            <div class="timeline-bar haiku" style="height: 2%;"></div>
+            <div class="timeline-bar opus" style="height: 78%;"></div>
+            <div class="timeline-bar haiku" style="height: 8%;"></div>
+            <div class="timeline-bar opus" style="height: 82%;"></div>
+            <div class="timeline-bar haiku" style="height: 3%;"></div>
+            <div class="timeline-bar opus" style="height: 88%;"></div>
+            <div class="timeline-bar haiku" style="height: 4%;"></div>
+            <div class="timeline-bar haiku" style="height: 7%;"></div>
+            <div class="timeline-bar opus" style="height: 95%;"></div>
+            <div class="timeline-bar haiku" style="height: 3%;"></div>
+            <div class="timeline-bar opus" style="height: 100%;"></div>
+          </div>
+        </div>
+        <div class="timeline-legend">
+          <div class="legend-item"><span class="legend-dot opus"></span> Main agent (opus)</div>
+          <div class="legend-item"><span class="legend-dot haiku"></span> Subagent (haiku)</div>
+          <div class="legend-item"><span class="legend-dot cost"></span> Cumulative cost</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Turn Group Detail -->
+    <div class="panel">
+      <div class="panel-header">
+        Turn Group 3 — Detail
+        <div class="toggle-group">
+          <div class="toggle active">Calls</div>
+          <div class="toggle">Diff</div>
+          <div class="toggle">Messages</div>
+        </div>
+      </div>
+      <div class="panel-body">
+        <div class="turn-group-detail">
+          <div class="turn-group-title">
+            <span style="color: #555;">3 API calls in this turn group</span>
+          </div>
+
+          <div class="call-row">
+            <span class="call-model tg-haiku">haiku</span>
+            <span class="call-purpose">Topic classifier — "Is this a new topic?"</span>
+            <span class="call-tokens">128 tok</span>
+            <span class="call-cost">$0.001</span>
+          </div>
+          <div class="call-row" style="background: #111827; border-radius: 4px;">
+            <span class="call-model tg-opus">opus</span>
+            <span class="call-purpose" style="color: #e5e5e5;">Main response — fix tests, read files</span>
+            <span class="call-tokens">20,279 tok</span>
+            <span class="call-cost">$0.04</span>
+          </div>
+          <div class="call-row">
+            <span class="call-model tg-haiku">haiku</span>
+            <span class="call-purpose">Summarizer — compress conversation</span>
+            <span class="call-tokens">618 tok</span>
+            <span class="call-cost">$0.001</span>
+          </div>
+          <div class="call-row">
+            <span class="call-model tg-haiku">haiku</span>
+            <span class="call-purpose">Post-classifier — update topic state</span>
+            <span class="call-tokens">389 tok</span>
+            <span class="call-cost">$0.001</span>
+          </div>
+        </div>
+
+        <!-- Diff view -->
+        <div class="diff-section">
+          <div class="diff-header">
+            <span>Turn 2 → Turn 3 (main agent)</span>
+            <span>+1,251 tokens</span>
+          </div>
+          <div class="diff-line diff-same">  system: 4,256 tokens (unchanged)</div>
+          <div class="diff-line diff-same">  tools: 14,556 tokens (unchanged)</div>
+          <div class="diff-line diff-add">+ user: "Can you fix the failing tests?" (186 tok)</div>
+          <div class="diff-line diff-add">+ assistant: "Let me look at the test failures..." (445 tok)</div>
+          <div class="diff-line diff-add">+ tool_use: read_file("tests/auth.test.ts") (312 tok)</div>
+          <div class="diff-line diff-add">+ tool_result: [file contents] (308 tok)</div>
+        </div>
+
+        <!-- Messages -->
+        <div class="msg-list">
+          <div style="font-size: 11px; color: #555; margin-bottom: 8px;">Main agent context (5 items)</div>
+          <div class="msg-item">
+            <span class="msg-expand">▸</span>
+            <span class="msg-role system">system</span>
+            <span class="msg-content">You are Claude Code, Anthropic's official CLI for Claude...</span>
+            <span class="msg-tokens">4,256 tok</span>
+          </div>
+          <div class="msg-item">
+            <span class="msg-expand">▸</span>
+            <span class="msg-role tools">tools</span>
+            <span class="msg-content">read_file, write_file, search, exec, glob + 11 more</span>
+            <span class="msg-tokens">14,556 tok</span>
+          </div>
+          <div class="msg-item">
+            <span class="msg-expand">▸</span>
+            <span class="msg-role user">user</span>
+            <span class="msg-content">Can you fix the failing tests?</span>
+            <span class="msg-tokens">186 tok</span>
+          </div>
+          <div class="msg-item">
+            <span class="msg-expand">▸</span>
+            <span class="msg-role assistant">assistant</span>
+            <span class="msg-content">Let me look at the test failures. I'll start by reading...</span>
+            <span class="msg-tokens">445 tok</span>
+          </div>
+          <div class="msg-item">
+            <span class="msg-expand">▸</span>
+            <span class="msg-role tool_use">tool_use</span>
+            <span class="msg-content">read_file("tests/auth.test.ts") → 308 tok result</span>
+            <span class="msg-tokens">620 tok</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Recommendations -->
+    <div class="panel">
+      <div class="panel-header">
+        Recommendations
+        <span style="font-size: 10px; color: #555;">4 findings</span>
+      </div>
+      <div class="panel-body">
+        <div class="rec-item">
+          <span class="rec-icon">⚠️</span>
+          <div class="rec-body">
+            <div class="rec-title">5 tool definitions never called this session</div>
+            <div class="rec-detail">mcp_search, mcp_calendar, mcp_email, browser_action, notebook_edit have been loaded but unused across 12 turns</div>
+          </div>
+          <span class="rec-impact high">~4,200 tok</span>
+        </div>
+        <div class="rec-item">
+          <span class="rec-icon">🔴</span>
+          <div class="rec-body">
+            <div class="rec-title">Tools consume 69% of context overhead</div>
+            <div class="rec-detail">14,556 of 18,812 non-message tokens are tool definitions. Consider disabling unused MCP servers.</div>
+          </div>
+          <span class="rec-impact high">Structural</span>
+        </div>
+        <div class="rec-item">
+          <span class="rec-icon">💡</span>
+          <div class="rec-body">
+            <div class="rec-title">75% of API calls are subagent overhead</div>
+            <div class="rec-detail">54 of 72 calls are Haiku classifiers/summarizers. They use only 8% of tokens but add latency.</div>
+          </div>
+          <span class="rec-impact medium">Informational</span>
+        </div>
+        <div class="rec-item">
+          <span class="rec-icon">✅</span>
+          <div class="rec-body">
+            <div class="rec-title">Context utilization healthy</div>
+            <div class="rec-detail">16% of 200K context window used. Well within safe range (&lt;85%).</div>
+          </div>
+          <span class="rec-impact low">OK</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+</body>
+</html>

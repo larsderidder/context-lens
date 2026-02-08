@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Context Lens — UI Mockup</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace; background: #0a0a0a; color: #e5e5e5; }
+
+.app { display: grid; grid-template-columns: 240px 1fr; grid-template-rows: 48px 1fr; height: 100vh; }
+
+/* Header */
+.header { grid-column: 1 / -1; background: #141414; border-bottom: 1px solid #262626; display: flex; align-items: center; padding: 0 16px; gap: 12px; }
+.header h1 { font-size: 15px; font-weight: 600; }
+.header .icon { font-size: 18px; }
+.header .session-select { margin-left: auto; background: #1e1e1e; border: 1px solid #333; color: #e5e5e5; padding: 4px 12px; border-radius: 4px; font-size: 12px; }
+
+/* Sidebar */
+.sidebar { background: #111; border-right: 1px solid #262626; overflow-y: auto; padding: 8px 0; }
+.sidebar-section { padding: 8px 12px; font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 0.05em; }
+.session-item { padding: 6px 12px 6px 16px; font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+.session-item:hover { background: #1a1a1a; }
+.session-item.active { background: #1e2a3a; border-left: 2px solid #3b82f6; }
+.badge { font-size: 10px; padding: 1px 6px; border-radius: 3px; font-weight: 600; }
+.badge-claude { background: #2d1f0e; color: #f59e0b; }
+.badge-codex { background: #0e2d1f; color: #10b981; }
+.badge-haiku { background: #1f0e2d; color: #a78bfa; }
+.turn { padding: 4px 12px 4px 36px; font-size: 12px; color: #888; cursor: pointer; }
+.turn:hover { color: #ccc; background: #151515; }
+.turn.active { color: #3b82f6; }
+.dot { width: 6px; height: 6px; border-radius: 50%; }
+.dot-active { background: #3b82f6; }
+.dot-idle { background: #444; }
+
+/* Main */
+.main { overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 16px; }
+
+/* Panels */
+.panel { background: #141414; border: 1px solid #262626; border-radius: 8px; overflow: hidden; }
+.panel-header { padding: 10px 16px; font-size: 12px; font-weight: 600; color: #999; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid #1e1e1e; display: flex; justify-content: space-between; align-items: center; }
+.panel-body { padding: 16px; }
+
+/* Overview */
+.overview-stats { display: flex; gap: 32px; margin-bottom: 16px; }
+.stat { text-align: center; }
+.stat-value { font-size: 28px; font-weight: 700; }
+.stat-value.blue { color: #3b82f6; }
+.stat-value.green { color: #10b981; }
+.stat-value.amber { color: #f59e0b; }
+.stat-label { font-size: 11px; color: #666; margin-top: 2px; }
+
+/* Treemap */
+.treemap { display: flex; height: 80px; border-radius: 4px; overflow: hidden; gap: 2px; }
+.treemap-block { display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 500; color: rgba(255,255,255,0.9); flex-direction: column; gap: 2px; }
+.treemap-block.system { background: #1e40af; flex: 3712; }
+.treemap-block.tools { background: #be185d; flex: 14556; }
+.treemap-block.messages { background: #059669; flex: 2999; }
+.treemap-block span { font-size: 9px; opacity: 0.7; }
+
+/* Timeline chart */
+.chart-area { height: 100px; display: flex; align-items: flex-end; gap: 3px; padding: 8px 0; }
+.chart-bar { background: linear-gradient(to top, #1e40af, #3b82f6); border-radius: 2px 2px 0 0; min-width: 20px; flex: 1; position: relative; }
+.chart-bar .label { position: absolute; bottom: -18px; left: 50%; transform: translateX(-50%); font-size: 9px; color: #555; }
+.chart-row { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+.chart-label { font-size: 11px; color: #666; width: 50px; }
+
+/* Cost line */
+.cost-area { height: 60px; display: flex; align-items: flex-end; gap: 3px; padding: 8px 0; }
+.cost-bar { background: linear-gradient(to top, #065f46, #10b981); border-radius: 2px 2px 0 0; min-width: 20px; flex: 1; }
+
+/* Diff */
+.diff-line { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 12px; padding: 3px 12px; }
+.diff-add { background: #0d2818; color: #4ade80; }
+.diff-remove { background: #2d0f0f; color: #f87171; }
+.diff-unchanged { color: #555; }
+
+/* Messages */
+.msg-item { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid #1a1a1a; font-size: 12px; }
+.msg-role { font-weight: 600; width: 70px; }
+.msg-role.system { color: #3b82f6; }
+.msg-role.tools { color: #ec4899; }
+.msg-role.user { color: #10b981; }
+.msg-role.assistant { color: #f59e0b; }
+.msg-tokens { margin-left: auto; color: #555; font-size: 11px; }
+.msg-expand { color: #444; cursor: pointer; }
+
+/* Recommendations */
+.rec-item { display: flex; align-items: center; gap: 10px; padding: 8px 0; font-size: 13px; border-bottom: 1px solid #1a1a1a; }
+.rec-item:last-child { border-bottom: none; }
+.rec-icon { font-size: 16px; }
+.rec-warn { color: #f59e0b; }
+.rec-ok { color: #10b981; }
+.rec-crit { color: #ef4444; }
+.rec-text { flex: 1; }
+.rec-impact { font-size: 11px; color: #666; }
+
+/* Toggle */
+.toggle { font-size: 11px; padding: 3px 10px; background: #1e1e1e; border: 1px solid #333; color: #999; border-radius: 4px; cursor: pointer; }
+.toggle.active { background: #1e3a5f; border-color: #3b82f6; color: #3b82f6; }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- Header -->
+  <div class="header">
+    <span class="icon">🔍</span>
+    <h1>Context Lens</h1>
+    <select class="session-select">
+      <option>All sessions</option>
+      <option>claude only</option>
+      <option>codex only</option>
+    </select>
+  </div>
+
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <div class="sidebar-section">Sessions</div>
+
+    <div class="session-item active">
+      <span class="dot dot-active"></span>
+      <span class="badge badge-claude">claude</span>
+      claude-opus-4-6
+    </div>
+    <div class="turn">turn 1 — 18,646 tok</div>
+    <div class="turn">turn 2 — 19,091 tok</div>
+    <div class="turn active">turn 3 — 20,631 tok</div>
+    <div class="turn">turn 4 — 21,267 tok</div>
+
+    <div class="session-item">
+      <span class="dot dot-active"></span>
+      <span class="badge badge-codex">codex</span>
+      gpt-4o
+    </div>
+    <div class="turn">turn 1 — 8,204 tok</div>
+    <div class="turn">turn 2 — 12,891 tok</div>
+
+    <div class="session-item">
+      <span class="dot dot-idle"></span>
+      <span class="badge badge-haiku">haiku</span>
+      claude-haiku-4.5
+    </div>
+    <div class="turn">turn 1 — 505 tok</div>
+
+    <div style="padding: 16px 12px; border-top: 1px solid #262626; margin-top: 8px;">
+      <div style="font-size: 11px; color: #555;">Total requests: 7</div>
+      <div style="font-size: 11px; color: #555;">Total cost: $0.47</div>
+    </div>
+  </div>
+
+  <!-- Main Content -->
+  <div class="main">
+
+    <!-- Overview Panel -->
+    <div class="panel">
+      <div class="panel-header">
+        Overview — Turn 3
+        <span style="font-size: 11px; color: #555;">9:47:07 PM</span>
+      </div>
+      <div class="panel-body">
+        <div class="overview-stats">
+          <div class="stat">
+            <div class="stat-value blue">10%</div>
+            <div class="stat-label">Context used</div>
+          </div>
+          <div class="stat">
+            <div class="stat-value green">$0.12</div>
+            <div class="stat-label">Session cost</div>
+          </div>
+          <div class="stat">
+            <div class="stat-value amber">72</div>
+            <div class="stat-label">Health score</div>
+          </div>
+          <div class="stat">
+            <div class="stat-value" style="color: #e5e5e5;">20,631</div>
+            <div class="stat-label">Total tokens</div>
+          </div>
+        </div>
+        <div class="treemap">
+          <div class="treemap-block system">System<span>3,712 tok (18%)</span></div>
+          <div class="treemap-block tools">Tools<span>14,556 tok (69%)</span></div>
+          <div class="treemap-block messages">Messages<span>2,363 tok (11%)</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Timeline Panel -->
+    <div class="panel">
+      <div class="panel-header">
+        Timeline
+        <div>
+          <span class="toggle active">Tokens</span>
+          <span class="toggle">Cost</span>
+        </div>
+      </div>
+      <div class="panel-body">
+        <div class="chart-area">
+          <div class="chart-bar" style="height: 70%;"><div class="label">t1</div></div>
+          <div class="chart-bar" style="height: 75%;"><div class="label">t2</div></div>
+          <div class="chart-bar" style="height: 85%; background: linear-gradient(to top, #1e40af, #60a5fa);"><div class="label">t3</div></div>
+          <div class="chart-bar" style="height: 92%;"><div class="label">t4</div></div>
+        </div>
+        <div style="display: flex; justify-content: space-between; font-size: 10px; color: #444; margin-top: 24px;">
+          <span>18,646</span>
+          <span>19,091</span>
+          <span style="color: #3b82f6;">20,631</span>
+          <span>21,267</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Turn Detail Panel -->
+    <div class="panel">
+      <div class="panel-header">
+        Turn Detail
+        <div>
+          <span class="toggle active">Diff</span>
+          <span class="toggle">Raw</span>
+        </div>
+      </div>
+      <div class="panel-body">
+        <div style="margin-bottom: 12px; font-size: 12px; color: #666;">Turn 2 → Turn 3 (+1,540 tokens)</div>
+        <div class="diff-line diff-unchanged">  system: 3,712 tokens (unchanged)</div>
+        <div class="diff-line diff-unchanged">  tools: 14,556 tokens (unchanged)</div>
+        <div class="diff-line diff-add">+ user: "Can you also refactor the auth module?" (428 tok)</div>
+        <div class="diff-line diff-add">+ assistant: "I'll refactor the auth module..." (892 tok)</div>
+        <div class="diff-line diff-add">+ tool_result: read_file auth/middleware.ts (220 tok)</div>
+
+        <div style="margin-top: 16px; border-top: 1px solid #1e1e1e; padding-top: 12px;">
+          <div style="font-size: 12px; color: #666; margin-bottom: 8px;">Messages (5)</div>
+          <div class="msg-item">
+            <span class="msg-expand">▸</span>
+            <span class="msg-role system">system</span>
+            <span>You are Claude Code, Anthropic's official...</span>
+            <span class="msg-tokens">3,712 tok</span>
+          </div>
+          <div class="msg-item">
+            <span class="msg-expand">▸</span>
+            <span class="msg-role tools">tools</span>
+            <span>read_file, write_file, search, exec + 12 more</span>
+            <span class="msg-tokens">14,556 tok</span>
+          </div>
+          <div class="msg-item">
+            <span class="msg-expand">▸</span>
+            <span class="msg-role user">user</span>
+            <span>Can you also refactor the auth module?</span>
+            <span class="msg-tokens">428 tok</span>
+          </div>
+          <div class="msg-item">
+            <span class="msg-expand">▸</span>
+            <span class="msg-role assistant">assistant</span>
+            <span>I'll refactor the auth module. Let me first...</span>
+            <span class="msg-tokens">892 tok</span>
+          </div>
+          <div class="msg-item">
+            <span class="msg-expand">▸</span>
+            <span class="msg-role assistant">tool_use</span>
+            <span>read_file("auth/middleware.ts")</span>
+            <span class="msg-tokens">220 tok</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Recommendations Panel -->
+    <div class="panel">
+      <div class="panel-header">
+        Recommendations
+        <span style="font-size: 11px; color: #666;">3 findings</span>
+      </div>
+      <div class="panel-body">
+        <div class="rec-item">
+          <span class="rec-icon rec-warn">⚠️</span>
+          <span class="rec-text">5 tool definitions never called this session</span>
+          <span class="rec-impact">~4,200 tokens wasted</span>
+        </div>
+        <div class="rec-item">
+          <span class="rec-icon rec-crit">🔴</span>
+          <span class="rec-text">Tools consume 69% of non-message context</span>
+          <span class="rec-impact">Consider dynamic loading</span>
+        </div>
+        <div class="rec-item">
+          <span class="rec-icon rec-ok">✅</span>
+          <span class="rec-text">No contradictions detected in context</span>
+          <span class="rec-impact"></span>
+        </div>
+        <div class="rec-item">
+          <span class="rec-icon rec-ok">✅</span>
+          <span class="rec-text">Context utilization within healthy range</span>
+          <span class="rec-impact">10% of 200K</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+</body>
+</html>
