@@ -301,13 +301,14 @@ describe('buildLharRecord', () => {
     assert.notEqual(r1.trace_id, r2.trace_id);
   });
 
-  it('computes sequence from previous entries', () => {
-    const e1 = makeEntry({ id: 1, conversationId: 'c1' });
-    const e2 = makeEntry({ id: 2, conversationId: 'c1' });
-    const e3 = makeEntry({ id: 3, conversationId: 'c1' });
+  it('computes sequence from entries before by timestamp', () => {
+    const e1 = makeEntry({ id: 1, conversationId: 'c1', timestamp: '2026-02-08T12:00:00Z' });
+    const e2 = makeEntry({ id: 2, conversationId: 'c1', timestamp: '2026-02-08T12:01:00Z' });
+    const e3 = makeEntry({ id: 3, conversationId: 'c1', timestamp: '2026-02-08T12:02:00Z' });
     const all = [e1, e2, e3];
-    assert.equal(buildLharRecord(e1, all).sequence, 3); // 2 others + 1
-    assert.equal(buildLharRecord(e3, all).sequence, 3);
+    assert.equal(buildLharRecord(e1, all).sequence, 1); // first entry
+    assert.equal(buildLharRecord(e2, all).sequence, 2); // 1 before + 1
+    assert.equal(buildLharRecord(e3, all).sequence, 3); // 2 before + 1
   });
 
   it('detects growth from previous entries', () => {
@@ -330,6 +331,45 @@ describe('buildLharRecord', () => {
     const entry = makeEntry({ timings: null });
     const record = buildLharRecord(entry, []);
     assert.equal(record.timings, null);
+  });
+
+  it('uses pre-computed costUsd in usage_ext.cost_usd', () => {
+    const entry = makeEntry({ costUsd: 0.042 });
+    const record = buildLharRecord(entry, []);
+    assert.equal(record.usage_ext.cost_usd, 0.042);
+  });
+
+  it('passes null costUsd through to usage_ext.cost_usd', () => {
+    const entry = makeEntry({ costUsd: null });
+    const record = buildLharRecord(entry, []);
+    assert.equal(record.usage_ext.cost_usd, null);
+  });
+
+  it('uses pre-computed composition instead of recomputing', () => {
+    const fakeComposition = [{ category: 'system_prompt' as const, tokens: 999, pct: 100, count: 1 }];
+    const entry = makeEntry({ composition: fakeComposition });
+    const record = buildLharRecord(entry, []);
+    // Should use the fake composition, not recompute from rawBody
+    assert.equal(record.context_lens.composition.length, 1);
+    assert.equal(record.context_lens.composition[0].tokens, 999);
+  });
+
+  it('falls back to recomputing composition when empty', () => {
+    const entry = makeEntry({ composition: [] });
+    const record = buildLharRecord(entry, []);
+    // Should recompute from rawBody
+    assert.ok(record.context_lens.composition.length > 0);
+  });
+
+  it('excludes entries from other conversations in sequence count', () => {
+    const e1 = makeEntry({ id: 1, conversationId: 'c1', timestamp: '2026-02-08T12:00:00Z' });
+    const e2 = makeEntry({ id: 2, conversationId: 'c2', timestamp: '2026-02-08T12:01:00Z' });
+    const e3 = makeEntry({ id: 3, conversationId: 'c1', timestamp: '2026-02-08T12:02:00Z' });
+    const all = [e1, e2, e3];
+    // e3 is in c1, only e1 is before it in c1 -> sequence 2
+    assert.equal(buildLharRecord(e3, all).sequence, 2);
+    // e2 is in c2, no other entries in c2 -> sequence 1
+    assert.equal(buildLharRecord(e2, all).sequence, 1);
   });
 });
 
