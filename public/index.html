@@ -442,7 +442,6 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
       var turnNum = 0;
 
       // Group entries into turns: each main entry is a turn, subagent entries between them are listed as dots
-      var lastMainIdx = -1;
       classified.forEach(function(item, idx) {
         if (!item.isMain) return;
         turnNum++;
@@ -480,7 +479,6 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
           html += '</div>';
         }
 
-        lastMainIdx = idx;
       });
 
       html += '</div>'; // turn-group
@@ -677,35 +675,35 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
 
   // --- Agent Breakdown ---
   function renderAgentBreakdown(session, classified) {
-    // Group by agentKey
+    // Group by agentKey — track latest (most recent) context size per agent, not cumulative sum
     var agents = {};
-    var totalTok = 0;
     classified.forEach(function(item) {
       var ak = item.entry.agentKey || '_main';
       if (!agents[ak]) {
-        agents[ak] = { key: ak, label: item.entry.agentLabel || 'Main', model: item.entry.contextInfo.model, tokens: 0, cost: 0, count: 0, isMain: item.isMain };
+        agents[ak] = { key: ak, label: item.entry.agentLabel || 'Main', model: item.entry.contextInfo.model, latestTokens: 0, cost: 0, count: 0, isMain: item.isMain };
       }
-      agents[ak].tokens += item.entry.contextInfo.totalTokens;
+      // Latest context size (entries are chronological, so last write wins)
+      agents[ak].latestTokens = item.entry.contextInfo.totalTokens;
       agents[ak].cost += item.entry.costUsd || 0;
       agents[ak].count += 1;
-      totalTok += item.entry.contextInfo.totalTokens;
     });
 
     var agentList = Object.values(agents);
-    agentList.sort(function(a, b) { return b.tokens - a.tokens; });
+    agentList.sort(function(a, b) { return b.latestTokens - a.latestTokens; });
+    var totalTok = agentList.reduce(function(s, ag) { return s + ag.latestTokens; }, 0);
 
     var html = '<div class="panel">';
     html += '<div class="panel-header">Agent Breakdown</div>';
     html += '<div class="panel-body">';
 
     agentList.forEach(function(ag) {
-      var pct = totalTok > 0 ? Math.round(ag.tokens / totalTok * 100) : 0;
+      var pct = totalTok > 0 ? Math.round(ag.latestTokens / totalTok * 100) : 0;
       var role = ag.isMain ? 'main' : 'sub';
       var color = modelBarColor(ag.model);
       html += '<div class="agent-row">';
       html += '<span class="agent-lbl">' + esc(shortModel(ag.model)) + ' (' + role + ')</span>';
       html += '<div class="agent-bar-wrap"><div class="agent-bar" style="width:' + pct + '%;background:' + color + ';"></div></div>';
-      html += '<span class="agent-val">' + fmtK(ag.tokens) + ' tok / ' + fmtCost(ag.cost) + '</span>';
+      html += '<span class="agent-val">' + fmtK(ag.latestTokens) + ' tok / ' + fmtCost(ag.cost) + '</span>';
       html += '</div>';
     });
 
@@ -714,11 +712,10 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
       ? Math.round(classified.filter(function(x) { return !x.isMain; }).length / classified.length * 100)
       : 0;
     if (subPct > 0) {
-      var subTokPct = 0;
-      var subTok = classified.filter(function(x) { return !x.isMain; }).reduce(function(s, x) { return s + x.entry.contextInfo.totalTokens; }, 0);
-      if (totalTok > 0) subTokPct = Math.round(subTok / totalTok * 100);
+      var subTok = agentList.filter(function(ag) { return !ag.isMain; }).reduce(function(s, ag) { return s + ag.latestTokens; }, 0);
+      var subTokPct = totalTok > 0 ? Math.round(subTok / totalTok * 100) : 0;
       html += '<div style="margin-top:8px;font-size:11px;color:#444;">'
-        + subPct + '% of calls are subagents, but only ' + subTokPct + '% of tokens.</div>';
+        + subPct + '% of calls are subagents, using ' + subTokPct + '% of latest context.</div>';
     }
 
     html += '</div></div>';
