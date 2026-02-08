@@ -203,6 +203,35 @@ export function getContextLimit(model: string): number {
   return 128000; // default fallback
 }
 
+// Model pricing: [inputPerMTok, outputPerMTok] in USD
+// Keys ordered most-specific-first to avoid substring false matches (e.g. gpt-4o-mini before gpt-4o)
+export const MODEL_PRICING: Record<string, [number, number]> = {
+  'claude-opus-4':   [15, 75],
+  'claude-sonnet-4': [3, 15],
+  'claude-haiku-4':  [0.80, 4],
+  'claude-3-5-sonnet': [3, 15],
+  'claude-3-5-haiku':  [0.80, 4],
+  'claude-3-opus':   [15, 75],
+  'gpt-4o-mini':     [0.15, 0.60],
+  'gpt-4o':          [2.50, 10],
+  'gpt-4-turbo':     [10, 30],
+  'gpt-4':           [30, 60],
+  'o4-mini':         [1.10, 4.40],
+  'o3-mini':         [1.10, 4.40],
+  'o3':              [10, 40],
+  'o1-mini':         [3, 12],
+  'o1':              [15, 60],
+};
+
+export function estimateCost(model: string, inputTokens: number, outputTokens: number): number | null {
+  for (const [key, [inp, out]] of Object.entries(MODEL_PRICING)) {
+    if (model.includes(key)) {
+      return Math.round((inputTokens * inp + outputTokens * out) / 1_000_000 * 1_000_000) / 1_000_000;
+    }
+  }
+  return null;
+}
+
 // Extract source tag from URL path
 export function extractSource(pathname: string): ExtractSourceResult {
   const match = pathname.match(/^\/([^/]+)(\/.*)?$/);

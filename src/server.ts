@@ -12,6 +12,7 @@ import {
   parseContextInfo, getContextLimit, extractSource, resolveTargetUrl,
   extractReadableText, extractWorkingDirectory, extractUserPrompt, extractSessionId,
   computeAgentKey, computeFingerprint, extractConversationLabel, detectSource,
+  estimateCost,
 } from './core.js';
 
 import type {
@@ -22,34 +23,6 @@ import { analyzeComposition, parseResponseUsage, buildLharRecord, buildSessionLi
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-// Model pricing: [inputPerMTok, outputPerMTok] in USD
-const MODEL_PRICING: Record<string, [number, number]> = {
-  'claude-opus-4':   [15, 75],
-  'claude-sonnet-4': [3, 15],
-  'claude-haiku-4':  [0.80, 4],
-  'claude-3-5-sonnet': [3, 15],
-  'claude-3-5-haiku':  [0.80, 4],
-  'claude-3-opus':   [15, 75],
-  'gpt-4o-mini':     [0.15, 0.60],
-  'gpt-4o':          [2.50, 10],
-  'gpt-4-turbo':     [10, 30],
-  'gpt-4':           [30, 60],
-  'o4-mini':         [1.10, 4.40],
-  'o3-mini':         [1.10, 4.40],
-  'o3':              [10, 40],
-  'o1-mini':         [3, 12],
-  'o1':              [15, 60],
-};
-
-function estimateCost(model: string, inputTokens: number, outputTokens: number): number | null {
-  for (const [key, [inp, out]] of Object.entries(MODEL_PRICING)) {
-    if (model.includes(key)) {
-      return Math.round((inputTokens * inp + outputTokens * out) / 1_000_000 * 1_000_000) / 1_000_000;
-    }
-  }
-  return null;
-}
 
 // Upstream targets — configurable via env vars
 const UPSTREAM_OPENAI_URL = process.env.UPSTREAM_OPENAI_URL || 'https://api.openai.com/v1';

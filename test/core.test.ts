@@ -8,6 +8,7 @@ import {
   parseContextInfo, getContextLimit, extractSource, resolveTargetUrl,
   extractReadableText, extractWorkingDirectory, extractUserPrompt, extractSessionId,
   computeAgentKey, computeFingerprint, extractConversationLabel, detectSource,
+  estimateCost,
   CONTEXT_LIMITS, SOURCE_SIGNATURES, API_PATH_SEGMENTS,
 } from '../src/core.js';
 
@@ -663,5 +664,51 @@ describe('resolveTargetUrl', () => {
   it('handles missing query string gracefully', () => {
     const result = resolveTargetUrl({ pathname: '/v1/messages', search: null }, {}, upstreams);
     assert.equal(result.targetUrl, 'https://api.anthropic.com/v1/messages');
+  });
+});
+
+// --- estimateCost ---
+
+describe('estimateCost', () => {
+  it('calculates cost for claude-sonnet-4', () => {
+    // 1M input @ $3 + 1M output @ $15 = $18
+    const cost = estimateCost('claude-sonnet-4-20250514', 1_000_000, 1_000_000);
+    assert.equal(cost, 18);
+  });
+
+  it('calculates cost for claude-opus-4', () => {
+    // 100K input @ $15/M + 10K output @ $75/M = $1.5 + $0.75 = $2.25
+    const cost = estimateCost('claude-opus-4-20250514', 100_000, 10_000);
+    assert.equal(cost, 2.25);
+  });
+
+  it('calculates cost for gpt-4o-mini', () => {
+    // 500K input @ $0.15/M + 100K output @ $0.60/M = $0.075 + $0.06 = $0.135
+    const cost = estimateCost('gpt-4o-mini-2024-07-18', 500_000, 100_000);
+    assert.equal(cost, 0.135);
+  });
+
+  it('returns null for unknown models', () => {
+    const cost = estimateCost('llama-3.3-70b', 100_000, 10_000);
+    assert.equal(cost, null);
+  });
+
+  it('returns 0 for zero tokens', () => {
+    const cost = estimateCost('claude-sonnet-4', 0, 0);
+    assert.equal(cost, 0);
+  });
+
+  it('matches gpt-4o-mini before gpt-4o (specificity ordering)', () => {
+    const miniCost = estimateCost('gpt-4o-mini', 1_000_000, 0);
+    const fullCost = estimateCost('gpt-4o', 1_000_000, 0);
+    assert.equal(miniCost, 0.15); // $0.15/M
+    assert.equal(fullCost, 2.5);  // $2.50/M
+  });
+
+  it('matches o3-mini before o3 (specificity ordering)', () => {
+    const miniCost = estimateCost('o3-mini-2025-01-31', 1_000_000, 0);
+    const fullCost = estimateCost('o3-2025-04-16', 1_000_000, 0);
+    assert.equal(miniCost, 1.1);  // $1.10/M
+    assert.equal(fullCost, 10);    // $10/M
   });
 });
