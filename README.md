@@ -1,10 +1,10 @@
 # Context Lens
 
+![Early Development](https://img.shields.io/badge/status-early%20development-orange)
+
 See what's actually in your LLM's context window. A zero-dependency HTTP proxy that intercepts API calls and visualizes token usage in real-time.
 
 ![Context Lens UI](context-lens.png)
-
-> **Early Development** — Expect rough edges. Contributions welcome.
 
 ## Quick Start
 
