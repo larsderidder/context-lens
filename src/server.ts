@@ -59,6 +59,8 @@ const UPSTREAM_CHATGPT_URL = process.env.UPSTREAM_CHATGPT_URL || 'https://chatgp
 // In-memory storage for captured requests (last 100)
 const capturedRequests: CapturedEntry[] = [];
 const MAX_STORED = 100;
+let dataRevision = 0; // Monotonic counter, incremented on every store
+let nextEntryId = 1; // Integer counter for entry IDs (fix float collision)
 
 // Conversation threading — group requests by fingerprint
 const conversations = new Map<string, Conversation>(); // fingerprint -> { id, label, source, firstSeen }
@@ -138,7 +140,7 @@ function storeRequest(
   const costUsd = estimateCost(contextInfo.model, inputTok, outputTok);
 
   const entry: CapturedEntry = {
-    id: Date.now() + Math.random(),
+    id: nextEntryId++,
     timestamp: new Date().toISOString(),
     contextInfo,
     response: responseData,
@@ -177,6 +179,7 @@ function storeRequest(
     }
   }
 
+  dataRevision++;
   logToDisk(entry);
   return entry;
 }
@@ -475,6 +478,26 @@ function handleWebUI(req: http.IncomingMessage, res: http.ServerResponse): void 
   }
 
   if (parsedUrl.pathname === '/api/requests') {
+    // Lightweight projection — strip rawBody, response, and heavy headers from entries
+    function projectEntry(e: CapturedEntry) {
+      return {
+        id: e.id,
+        timestamp: e.timestamp,
+        contextInfo: e.contextInfo,
+        contextLimit: e.contextLimit,
+        source: e.source,
+        conversationId: e.conversationId,
+        agentKey: e.agentKey,
+        agentLabel: e.agentLabel,
+        httpStatus: e.httpStatus,
+        timings: e.timings,
+        requestBytes: e.requestBytes,
+        responseBytes: e.responseBytes,
+        targetUrl: e.targetUrl,
+        composition: e.composition,
+        costUsd: e.costUsd,
+      };
+    }
     // API endpoint: group requests by conversation
     const grouped = new Map<string, CapturedEntry[]>(); // conversationId -> entries[]
     const ungrouped: CapturedEntry[] = [];
@@ -502,17 +525,17 @@ function handleWebUI(req: http.IncomingMessage, res: http.ServerResponse): void 
           key: ak,
           label: agentEntries[agentEntries.length - 1].agentLabel || 'Unnamed',
           model: agentEntries[0].contextInfo.model,
-          entries: agentEntries, // newest-first (inherited from capturedRequests order)
+          entries: agentEntries.map(projectEntry), // newest-first (inherited from capturedRequests order)
         });
       }
       // Sort agents: most recent activity first
-      agents.sort((a, b) => new Date(b.entries[0].timestamp).getTime() - new Date(a.entries[0].timestamp).getTime());
-      convos.push({ ...meta, agents, entries: entries.slice() });
+      agents.sort((a: any, b: any) => new Date(b.entries[0].timestamp).getTime() - new Date(a.entries[0].timestamp).getTime());
+      convos.push({ ...meta, agents, entries: entries.map(projectEntry) });
     }
     // Sort conversations newest-first (by most recent entry)
     convos.sort((a, b) => new Date(b.entries[0].timestamp).getTime() - new Date(a.entries[0].timestamp).getTime());
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ conversations: convos, ungrouped }));
+    res.end(JSON.stringify({ revision: dataRevision, conversations: convos, ungrouped: ungrouped.map(projectEntry) }));
   } else if (parsedUrl.pathname === '/api/export/lhar') {
     // Export as JSONL (.lhar)
     const convoFilter = parsedUrl.query.conversation as string | undefined;

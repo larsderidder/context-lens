@@ -204,6 +204,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
 
   // --- State ---
   let currentData = null;
+  let currentRevision = -1;
   let selectedSessionId = null;
   let selectedTurnIndex = -1; // -1 = latest
   let expandedSessions = new Set();
@@ -212,6 +213,10 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
   let turnDetailMode = 'calls'; // 'calls' or 'diff'
   let expandedCategories = new Set();
   let sourceFilter = '';
+
+  // Preserve scroll positions across re-renders
+  function saveScroll(id) { var el = document.getElementById(id); return el ? el.scrollTop : 0; }
+  function restoreScroll(id, pos) { var el = document.getElementById(id); if (el) el.scrollTop = pos; }
 
   // --- Helpers ---
   function esc(s) { return s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : ''; }
@@ -389,6 +394,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
 
   // --- Render: Sidebar ---
   function renderSidebar() {
+    var scrollPos = saveScroll('sidebar');
     var convos = getConversations();
     var sb = document.getElementById('sidebar');
 
@@ -440,14 +446,15 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
       classified.forEach(function(item, idx) {
         if (!item.isMain) return;
         turnNum++;
-        // Sub-agent dots between last main and this one
-        var subsBefore = [];
-        for (var j = lastMainIdx + 1; j < idx; j++) {
-          if (!classified[j].isMain) subsBefore.push(classified[j]);
-        }
-
         var e = item.entry;
-        var turnActive = isActive && (selectedTurnIndex === -1 ? turnNum === mainEntries.length : selectedTurnIndex === idx);
+        // Turn is active if selectedTurnIndex matches this main entry or any sub-entry in this turn group
+        var nextMainIdx = classified.length;
+        for (var ni = idx + 1; ni < classified.length; ni++) {
+          if (classified[ni].isMain) { nextMainIdx = ni; break; }
+        }
+        var turnActive = isActive && (selectedTurnIndex === -1
+          ? turnNum === mainEntries.length
+          : (selectedTurnIndex >= idx && selectedTurnIndex < nextMainIdx));
         var label = esc(c.label || '').slice(0, 30);
         // Try to use agentLabel
         var desc = esc(e.agentLabel || '').slice(0, 30) || 'Turn ' + turnNum;
@@ -517,10 +524,13 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
         renderMain();
       });
     });
+
+    restoreScroll('sidebar', scrollPos);
   }
 
   // --- Render: Main Panel ---
   function renderMain() {
+    var scrollPos = saveScroll('main-panel');
     var main = document.getElementById('main-panel');
     var session = getSelectedSession();
 
@@ -577,6 +587,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
 
     main.innerHTML = html;
     attachMainHandlers();
+    restoreScroll('main-panel', scrollPos);
   }
 
   // --- Treemap ---
@@ -924,7 +935,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
       // Find a meaningful block to preview
       for (var i = 0; i < blocks.length; i++) {
         var b = blocks[i];
-        if (b.type === 'tool_use') return esc(b.name || 'tool') + '(' + (b.input ? JSON.stringify(b.input).slice(0, 60) : '') + ')';
+        if (b.type === 'tool_use') return (b.name || 'tool') + '(' + (b.input ? JSON.stringify(b.input).slice(0, 60) : '') + ')';
         if (b.type === 'tool_result') {
           var rc = typeof b.content === 'string' ? b.content : JSON.stringify(b.content || '');
           return rc.slice(0, 80);
@@ -1248,7 +1259,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
   // --- Polling ---
   function fetchAndRender() {
     fetch('/api/requests').then(function(r) { return r.json(); }).then(function(data) {
-      var changed = JSON.stringify(data) !== JSON.stringify(currentData);
+      var changed = data.revision !== currentRevision;
+      currentRevision = data.revision;
       currentData = data;
 
       if (changed) {
