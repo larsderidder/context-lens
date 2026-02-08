@@ -5,7 +5,7 @@ const path = require('path');
 const {
   estimateTokens, detectProvider, detectApiFormat,
   parseContextInfo, getContextLimit, extractSource, resolveTargetUrl,
-  extractReadableText, extractUserPrompt, extractSessionId,
+  extractReadableText, extractWorkingDirectory, extractUserPrompt, extractSessionId,
   computeAgentKey, computeFingerprint, extractConversationLabel, detectSource,
   CONTEXT_LIMITS, SOURCE_SIGNATURES, API_PATH_SEGMENTS,
 } = require('../lib/core');
@@ -354,6 +354,50 @@ describe('extractReadableText', () => {
   });
 });
 
+// --- extractWorkingDirectory ---
+
+describe('extractWorkingDirectory', () => {
+  it('extracts from Claude Code system prompt', () => {
+    const info = {
+      systemPrompts: [{ content: 'You are Claude Code.\n\nPrimary working directory: `/home/user/my-project`\nMore stuff.' }],
+      messages: [],
+    };
+    assert.equal(extractWorkingDirectory(info), '/home/user/my-project');
+  });
+
+  it('extracts from Codex <cwd> tag in messages', () => {
+    const info = {
+      systemPrompts: [],
+      messages: [
+        { role: 'user', content: '<cwd>/home/user/codex-project</cwd>\nOther content' },
+      ],
+    };
+    assert.equal(extractWorkingDirectory(info), '/home/user/codex-project');
+  });
+
+  it('extracts from "working directory is" pattern', () => {
+    const info = {
+      systemPrompts: [{ content: 'The working directory is /tmp/build' }],
+      messages: [],
+    };
+    assert.equal(extractWorkingDirectory(info), '/tmp/build');
+  });
+
+  it('returns null when no working directory found', () => {
+    const info = {
+      systemPrompts: [{ content: 'Be a helpful assistant.' }],
+      messages: [{ role: 'user', content: 'Hello' }],
+    };
+    assert.equal(extractWorkingDirectory(info), null);
+  });
+
+  it('extracts from claude-session fixture', () => {
+    const info = parseContextInfo('anthropic', claudeSession, 'anthropic-messages');
+    // The fixture doesn't have a working directory, so should be null
+    assert.equal(extractWorkingDirectory(info), null);
+  });
+});
+
 // --- extractUserPrompt ---
 
 describe('extractUserPrompt', () => {
@@ -607,5 +651,15 @@ describe('resolveTargetUrl', () => {
     const headers = { 'x-target-url': 'https://custom.api.com/v1/messages' };
     const result = resolveTargetUrl({ pathname: '/v1/messages' }, headers, upstreams);
     assert.equal(result.targetUrl, 'https://custom.api.com/v1/messages');
+  });
+
+  it('preserves query string in target URL', () => {
+    const result = resolveTargetUrl({ pathname: '/v1/messages', search: '?beta=true' }, {}, upstreams);
+    assert.equal(result.targetUrl, 'https://api.anthropic.com/v1/messages?beta=true');
+  });
+
+  it('handles missing query string gracefully', () => {
+    const result = resolveTargetUrl({ pathname: '/v1/messages', search: null }, {}, upstreams);
+    assert.equal(result.targetUrl, 'https://api.anthropic.com/v1/messages');
   });
 });

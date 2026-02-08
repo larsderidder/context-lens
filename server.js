@@ -9,7 +9,7 @@ const path = require('path');
 const {
   estimateTokens, detectProvider, detectApiFormat,
   parseContextInfo, getContextLimit, extractSource, resolveTargetUrl,
-  extractReadableText, extractUserPrompt, extractSessionId,
+  extractReadableText, extractWorkingDirectory, extractUserPrompt, extractSessionId,
   computeAgentKey, computeFingerprint, extractConversationLabel, detectSource,
 } = require('./lib/core');
 
@@ -27,14 +27,17 @@ const conversations = new Map(); // fingerprint -> { id, label, source, firstSee
 // Responses API chaining: response_id -> conversationId
 const responseIdToConvo = new Map();
 
-// Disk logging — append JSONL to data/requests.jsonl
+// Disk logging — one JSONL file per session/conversation
 const DATA_DIR = path.join(__dirname, 'data');
 try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch {}
-const LOG_FILE = path.join(DATA_DIR, 'requests.jsonl');
 
 function logToDisk(entry, rawBody) {
   const line = JSON.stringify({ ...entry, rawBody }) + '\n';
-  fs.appendFile(LOG_FILE, line, err => { if (err) console.error('Log write error:', err.message); });
+  const filename = entry.conversationId
+    ? `${entry.source}-${entry.conversationId}.jsonl`
+    : 'ungrouped.jsonl';
+  const filePath = path.join(DATA_DIR, filename);
+  fs.appendFile(filePath, line, err => { if (err) console.error('Log write error:', err.message); });
 }
 
 
@@ -51,8 +54,13 @@ function storeRequest(contextInfo, responseData, source, rawBody) {
         id: fingerprint,
         label: extractConversationLabel(contextInfo),
         source: source || 'unknown',
+        workingDirectory: extractWorkingDirectory(contextInfo),
         firstSeen: new Date().toISOString(),
       });
+    } else if (!conversations.get(fingerprint).workingDirectory) {
+      // Backfill if first request didn't have it
+      const wd = extractWorkingDirectory(contextInfo);
+      if (wd) conversations.get(fingerprint).workingDirectory = wd;
     }
     conversationId = fingerprint;
   }
@@ -111,6 +119,11 @@ function forwardRequest(req, res, parsedUrl, body) {
   delete forwardHeaders['x-target-url'];
   delete forwardHeaders['host'];
   forwardHeaders['host'] = targetParsed.host;
+  // When we buffer the body, replace chunked encoding with exact content-length
+  if (body) {
+    delete forwardHeaders['transfer-encoding'];
+    forwardHeaders['content-length'] = Buffer.isBuffer(body) ? body.length : Buffer.byteLength(body, 'utf8');
+  }
 
   const protocol = targetParsed.protocol === 'https:' ? https : http;
   const proxyReq = protocol.request({
@@ -125,8 +138,10 @@ function forwardRequest(req, res, parsedUrl, body) {
   });
 
   proxyReq.on('error', (err) => {
-    console.error('Proxy error:', err);
-    res.writeHead(502, { 'Content-Type': 'application/json' });
+    console.error('Proxy error:', err.message);
+    if (!res.headersSent) {
+      res.writeHead(502, { 'Content-Type': 'application/json' });
+    }
     res.end(JSON.stringify({ error: 'Proxy error', details: err.message }));
   });
 
@@ -151,15 +166,23 @@ function handleProxy(req, res) {
     return forwardRequest(req, res, cleanUrl, null);
   }
 
-  let body = '';
-  req.on('data', chunk => { body += chunk.toString(); });
+  // Collect body as raw Buffers to avoid corrupting multi-byte UTF-8 at chunk boundaries
+  const chunks = [];
+  let clientAborted = false;
+  req.on('data', chunk => { chunks.push(chunk); });
+  req.on('error', () => { clientAborted = true; });
 
   req.on('end', () => {
+    if (clientAborted) return;
+
+    const bodyBuffer = Buffer.concat(chunks);
+    const body = bodyBuffer.toString('utf8');
+
     let bodyData;
     try {
       bodyData = JSON.parse(body);
     } catch (e) {
-      console.log(`  ⚠ Body is not JSON (${body.length} bytes), capturing raw`);
+      console.log(`  ⚠ Body is not JSON (${bodyBuffer.length} bytes), capturing raw`);
       // Still capture the raw request even if body isn't JSON
       const { provider } = resolveTargetUrl(cleanUrl, req.headers, UPSTREAMS);
       const rawInfo = {
@@ -174,7 +197,7 @@ function handleProxy(req, res) {
         messages: [{ role: 'raw', content: body.substring(0, 2000), tokens: estimateTokens(body) }],
       };
       storeRequest(rawInfo, { raw: true }, source);
-      return forwardRequest(req, res, cleanUrl, body);
+      return forwardRequest(req, res, cleanUrl, bodyBuffer);
     }
 
     console.log(`  ✓ Parsed JSON body (${Object.keys(bodyData).join(', ')})`);
@@ -188,7 +211,10 @@ function handleProxy(req, res) {
     const forwardHeaders = { ...req.headers };
     delete forwardHeaders['x-target-url'];
     delete forwardHeaders['host'];
+    delete forwardHeaders['transfer-encoding'];
     forwardHeaders['host'] = targetParsed.host;
+    // Ensure content-length matches the exact bytes we forward
+    forwardHeaders['content-length'] = bodyBuffer.length;
 
     // Make request to actual API
     const protocol = targetParsed.protocol === 'https:' ? https : http;
@@ -211,19 +237,19 @@ function handleProxy(req, res) {
         let capturedChunks = '';
         proxyRes.on('data', (chunk) => {
           capturedChunks += chunk.toString();
-          res.write(chunk);
+          if (!res.destroyed) res.write(chunk);
         });
 
         proxyRes.on('end', () => {
           storeRequest(contextInfo, { streaming: true, chunks: capturedChunks }, source, bodyData);
-          res.end();
+          if (!res.destroyed) res.end();
         });
       } else {
         // For non-streaming, capture full response
         let responseBody = '';
         proxyRes.on('data', (chunk) => {
           responseBody += chunk.toString();
-          res.write(chunk);
+          if (!res.destroyed) res.write(chunk);
         });
 
         proxyRes.on('end', () => {
@@ -233,18 +259,30 @@ function handleProxy(req, res) {
           } catch (e) {
             storeRequest(contextInfo, { raw: responseBody }, source, bodyData);
           }
-          res.end();
+          if (!res.destroyed) res.end();
         });
+      }
+
+      proxyRes.on('error', (err) => {
+        console.error('Upstream response error:', err.message);
+        if (!res.destroyed) res.end();
+      });
+    });
+
+    // Abort upstream request if client disconnects
+    res.on('close', () => { if (!proxyReq.destroyed) proxyReq.destroy(); });
+
+    proxyReq.on('error', (err) => {
+      console.error('Proxy error:', err.message);
+      if (!res.headersSent) {
+        res.writeHead(502, { 'Content-Type': 'application/json' });
+      }
+      if (!res.destroyed) {
+        res.end(JSON.stringify({ error: 'Proxy error', details: err.message }));
       }
     });
 
-    proxyReq.on('error', (err) => {
-      console.error('Proxy error:', err);
-      res.writeHead(502, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'Proxy error', details: err.message }));
-    });
-
-    proxyReq.write(body);
+    proxyReq.write(bodyBuffer);
     proxyReq.end();
   });
 }
@@ -519,6 +557,11 @@ function getHTMLUI() {
     .agent-body { display: none; }
     .agent-body.expanded { display: block; }
 
+    .working-dir {
+      font-size: 11px; color: #777; font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+      margin-top: 2px;
+    }
+
     .empty-state { text-align: center; padding: 60px 20px; color: #666; }
   </style>
 </head>
@@ -762,6 +805,7 @@ function getHTMLUI() {
       html += '<div>';
       html += '<span class="conversation-label">' + esc(convo.label) + '</span>';
       html += ' <span class="timestamp">' + esc(formatTimestamp(latest.timestamp)) + '</span>';
+      if (convo.workingDirectory) html += '<div class="working-dir">' + esc(convo.workingDirectory) + '</div>';
       html += '</div></div>';
 
       // Summary (always visible): latest request's context bar
