@@ -4,196 +4,534 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Context Lens</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='14' fill='none' stroke='%2360a5fa' stroke-width='2'/><circle cx='16' cy='16' r='6' fill='%2360a5fa' opacity='.6'/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
+:root {
+  --font-mono: 'IBM Plex Mono', 'SF Mono', 'Fira Code', Consolas, monospace;
+  --font-sans: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --bg-deep: #06090f;
+  --bg-field: #0b1018;
+  --bg-surface: #111820;
+  --bg-raised: #161e2a;
+  --bg-hover: #1a2436;
+  --border-dim: #1a2233;
+  --border-mid: #243044;
+  --border-bright: #2d3d55;
+  --text-primary: #d4dae5;
+  --text-secondary: #7a8ba0;
+  --text-dim: #6b7f96;
+  --text-muted: #556a7f;
+  --accent-blue: #5b9cf5;
+  --accent-green: #3dd68c;
+  --accent-amber: #f0b429;
+  --accent-red: #f06060;
+  --accent-purple: #a78bfa;
+  --accent-pink: #f472b6;
+  --accent-cyan: #22d3ee;
+}
+
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: #0a0a0a; color: #e5e5e5; font-size: 13px; }
+body {
+  font-family: var(--font-sans);
+  background: var(--bg-deep);
+  color: var(--text-primary);
+  font-size: 13px;
+  overflow: hidden;
+}
+
+/* Grain texture overlay */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.025'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 9999;
+}
+
 .app { display: grid; grid-template-columns: 280px 1fr; grid-template-rows: 48px 1fr; height: 100vh; }
 
 /* Header */
-.header { grid-column: 1 / -1; background: #141414; border-bottom: 1px solid #262626; display: flex; align-items: center; padding: 0 16px; gap: 12px; }
-.header h1 { font-size: 15px; font-weight: 600; }
-.header-right { margin-left: auto; display: flex; gap: 16px; align-items: center; font-size: 12px; }
-.header select, .header button { background: #1e1e1e; border: 1px solid #333; color: #e5e5e5; padding: 4px 12px; border-radius: 4px; font-size: 12px; cursor: pointer; }
-.header button:hover { border-color: #3b82f6; color: #93c5fd; }
+.header {
+  grid-column: 1 / -1;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-mid);
+  display: flex; align-items: center; padding: 0 16px; gap: 14px;
+}
+.header h1 {
+  font-family: var(--font-mono);
+  font-size: 13px; font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-primary);
+}
+.header h1 .lens-dot {
+  display: inline-block;
+  width: 7px; height: 7px;
+  background: var(--accent-blue);
+  border-radius: 50%;
+  margin-right: 6px;
+  box-shadow: 0 0 6px var(--accent-blue);
+  animation: pulse-dot 3s ease-in-out infinite;
+}
+@keyframes pulse-dot {
+  0%, 100% { opacity: 0.7; box-shadow: 0 0 4px var(--accent-blue); }
+  50% { opacity: 1; box-shadow: 0 0 8px var(--accent-blue); }
+}
+.header-right { margin-left: auto; display: flex; gap: 14px; align-items: center; font-size: 12px; }
+.header select, .header button {
+  font-family: var(--font-mono);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-mid);
+  color: var(--text-secondary);
+  padding: 5px 12px;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: border-color 0.2s, color 0.2s, background 0.2s;
+}
+.header select:hover, .header button:hover {
+  border-color: var(--accent-blue);
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
 
 /* Sidebar */
-.sidebar { background: #111; border-right: 1px solid #262626; overflow-y: auto; display: flex; flex-direction: column; }
-.sidebar-section { padding: 10px 12px 4px; font-size: 10px; color: #555; text-transform: uppercase; letter-spacing: 0.08em; }
-.session-item { padding: 8px 12px; cursor: pointer; border-left: 2px solid transparent; }
-.session-item:hover { background: #1a1a1a; }
-.session-item.active { background: #111827; border-left-color: #3b82f6; }
-.session-head { display: flex; align-items: center; gap: 8px; }
-.session-meta { display: flex; gap: 12px; margin-top: 4px; padding-left: 14px; font-size: 11px; color: #555; }
-.badge { font-size: 9px; padding: 2px 6px; border-radius: 3px; font-weight: 700; text-transform: uppercase; }
-.badge-claude { background: #451a03; color: #fb923c; }
-.badge-codex { background: #052e16; color: #34d399; }
-.badge-aider { background: #1e1e1e; color: #60a5fa; }
-.badge-kimi { background: #1e1e1e; color: #a78bfa; }
-.badge-unknown { background: #1e1e1e; color: #888; }
+.sidebar {
+  background: var(--bg-field);
+  border-right: 1px solid var(--border-dim);
+  overflow-y: auto; display: flex; flex-direction: column; min-height: 0;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-mid) transparent;
+}
+.sidebar-section {
+  padding: 12px 14px 6px;
+  font-family: var(--font-mono);
+  font-size: 10px; color: var(--text-dim);
+  text-transform: uppercase; letter-spacing: 0.12em;
+  font-weight: 500;
+}
+.session-item {
+  padding: 10px 14px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+  transition: background 0.15s, border-color 0.15s;
+}
+.session-item:hover { background: var(--bg-surface); }
+.session-item.active {
+  background: rgba(91, 156, 245, 0.06);
+  border-left-color: var(--accent-blue);
+}
+.session-head { display: flex; align-items: center; gap: 8px; position: relative; }
+.session-delete {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 12px; line-height: 1;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s;
+  padding: 2px 4px;
+}
+.session-item:hover .session-delete { opacity: 1; }
+.session-delete:hover { color: var(--accent-red); }
+.session-meta {
+  display: flex; gap: 12px; margin-top: 5px; padding-left: 14px;
+  font-family: var(--font-mono); font-size: 11px; color: var(--text-dim);
+}
+.badge {
+  font-family: var(--font-mono);
+  font-size: 9px; padding: 2px 6px; border-radius: 3px;
+  font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
+}
+.badge-claude { background: rgba(251, 146, 60, 0.12); color: #fb923c; }
+.badge-codex { background: rgba(52, 211, 153, 0.12); color: #34d399; }
+.badge-aider { background: rgba(96, 165, 250, 0.12); color: #60a5fa; }
+.badge-kimi { background: rgba(167, 139, 250, 0.12); color: #a78bfa; }
+.badge-unknown { background: var(--bg-raised); color: var(--text-dim); }
 .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
-.dot-live { background: #3b82f6; box-shadow: 0 0 4px #3b82f6; }
-.dot-done { background: #444; }
-.turn-group { margin-left: 14px; border-left: 1px solid #1e1e1e; display: none; }
-.turn-group.expanded { display: block; }
-.tg-item { padding: 5px 12px; cursor: pointer; display: flex; align-items: center; gap: 6px; font-size: 12px; }
-.tg-item:hover { background: #151515; }
-.tg-item.active { background: #111827; }
-.tg-num { color: #555; width: 16px; text-align: right; font-size: 11px; }
-.tg-model { font-size: 9px; padding: 1px 4px; border-radius: 2px; }
-.tg-desc { color: #888; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tg-tokens { margin-left: auto; color: #444; font-size: 11px; white-space: nowrap; }
-.sub-dots { display: flex; gap: 4px; padding: 2px 12px 2px 40px; font-size: 10px; color: #444; align-items: center; }
-.sub-dot { width: 4px; height: 4px; border-radius: 50%; background: #a78bfa; }
-.sidebar-footer { padding: 10px 12px; border-top: 1px solid #1e1e1e; margin-top: auto; font-size: 11px; color: #444; }
-.sidebar-footer div { display: flex; justify-content: space-between; padding: 2px 0; }
+.dot-live { background: var(--accent-blue); box-shadow: 0 0 6px var(--accent-blue); animation: pulse-dot 3s ease-in-out infinite; }
+.dot-done { background: var(--text-muted); }
+.turn-group {
+  margin-left: 14px; border-left: 1px solid var(--border-dim);
+  max-height: 0; overflow: hidden;
+  transition: max-height 0.25s ease-out;
+}
+.turn-group.expanded {
+  max-height: 280px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-mid) transparent;
+  transition: max-height 0.3s ease-in;
+}
+.tg-item {
+  padding: 7px 12px; cursor: pointer;
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px;
+  transition: background 0.12s;
+  min-height: 32px;
+}
+.tg-item:hover { background: var(--bg-surface); }
+.tg-item.active { background: rgba(91, 156, 245, 0.08); }
+.tg-num {
+  font-family: var(--font-mono);
+  color: var(--text-muted); width: 16px; text-align: right; font-size: 11px;
+}
+.tg-model {
+  font-family: var(--font-mono);
+  font-size: 9px; padding: 2px 5px; border-radius: 2px;
+  background: var(--bg-raised);
+}
+.tg-desc { color: var(--text-secondary); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tg-tokens {
+  font-family: var(--font-mono);
+  margin-left: auto; color: var(--text-muted); font-size: 11px; white-space: nowrap;
+}
+.sub-dots {
+  display: flex; gap: 5px; padding: 4px 12px 4px 40px;
+  font-family: var(--font-mono);
+  font-size: 10px; color: var(--text-muted); align-items: center;
+}
+.sub-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent-purple); opacity: 0.7; }
+.sidebar-footer {
+  font-family: var(--font-mono);
+  padding: 10px 14px; border-top: 1px solid var(--border-dim);
+  margin-top: auto; font-size: 11px; color: var(--text-dim);
+}
+.sidebar-footer div { display: flex; justify-content: space-between; padding: 3px 0; }
 
 /* Main */
-.main { overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 14px; }
+.main { overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 14px;
+  min-height: 0; scrollbar-width: thin; scrollbar-color: var(--border-mid) transparent;
+}
 
-/* Panel */
-.panel { background: #141414; border: 1px solid #262626; border-radius: 8px; overflow: hidden; }
-.panel-header { padding: 10px 16px; font-size: 11px; font-weight: 600; color: #666; text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 1px solid #1e1e1e; display: flex; justify-content: space-between; align-items: center; }
+/* Panels — three tiers of visual weight */
+.panel {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-dim);
+  border-radius: 6px;
+  overflow: hidden;
+  flex-shrink: 0;
+  transition: border-color 0.2s;
+}
+.panel-hero { border-color: var(--border-mid); }
+.panel-header {
+  padding: 10px 16px;
+  font-family: var(--font-mono);
+  font-size: 10px; font-weight: 500;
+  color: var(--text-dim);
+  text-transform: uppercase; letter-spacing: 0.1em;
+  border-bottom: 1px solid var(--border-dim);
+  display: flex; justify-content: space-between; align-items: center;
+}
 .panel-body { padding: 16px; }
 
 /* Stats row */
-.stats-row { display: flex; gap: 14px; }
-.stats-row .panel { flex: 1; }
-.stat-card { text-align: center; padding: 4px; }
-.stat-val { font-size: 26px; font-weight: 700; }
-.stat-lbl { font-size: 10px; color: #555; margin-top: 2px; }
-.blue { color: #3b82f6; }
-.green { color: #10b981; }
-.amber { color: #f59e0b; }
-.white { color: #e5e5e5; }
-.red { color: #ef4444; }
+.stats-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; flex-shrink: 0; }
+.stat-card {
+  text-align: center; padding: 6px 4px;
+  border-radius: 4px;
+  position: relative;
+}
+.stat-card::before {
+  content: '';
+  position: absolute; inset: 0;
+  border-radius: 4px;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+.stat-val {
+  font-family: var(--font-mono);
+  font-size: 24px; font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.stat-lbl {
+  font-family: var(--font-mono);
+  font-size: 10px; color: var(--text-dim); margin-top: 3px; letter-spacing: 0.02em;
+}
+.blue { color: var(--accent-blue); }
+.green { color: var(--accent-green); }
+.amber { color: var(--accent-amber); }
+.white { color: var(--text-primary); }
+.red { color: var(--accent-red); }
+/* Stat severity tints */
+.stat-tint-blue { background: rgba(91, 156, 245, 0.04); }
+.stat-tint-green { background: rgba(61, 214, 140, 0.04); }
+.stat-tint-amber { background: rgba(240, 180, 41, 0.06); }
+.stat-tint-red { background: rgba(240, 96, 96, 0.08); }
 
 /* Treemap */
 .treemap { display: flex; height: 90px; border-radius: 4px; overflow: hidden; gap: 2px; }
-.treemap-block { display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 500; color: rgba(255,255,255,0.9); flex-direction: column; gap: 1px; cursor: default; transition: opacity 0.15s; }
-.treemap-block:hover { opacity: 0.85; }
+.treemap-block {
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 10px; font-weight: 500;
+  color: rgba(255,255,255,0.92);
+  flex-direction: column; gap: 1px;
+  cursor: pointer;
+  transition: filter 0.2s, flex 0.5s ease;
+  position: relative;
+}
+.treemap-block:hover { filter: brightness(1.2); }
 .treemap-block span { font-size: 8px; opacity: 0.7; }
-.tm-system_prompt { background: #1e40af; }
-.tm-tool_definitions { background: #be185d; }
-.tm-tool_results { background: #065f46; }
-.tm-system_injections { background: #4338ca; }
-.tm-thinking { background: #7c3aed; }
-.tm-assistant_text { background: #b45309; }
-.tm-user_text { background: #059669; }
-.tm-tool_calls { background: #9d174d; }
-.tm-images { background: #374151; }
-.tm-cache_markers { background: #525252; }
-.tm-other { background: #404040; }
-.treemap-legend { display: flex; gap: 12px; margin-top: 10px; flex-wrap: wrap; }
-.treemap-legend-item { display: flex; align-items: center; gap: 4px; font-size: 10px; color: #888; }
+/* Higher-saturation treemap colors */
+.tm-system_prompt { background: #2563eb; }
+.tm-tool_definitions { background: #db2777; }
+.tm-tool_results { background: #059669; }
+.tm-system_injections { background: #6366f1; }
+.tm-thinking { background: #8b5cf6; }
+.tm-assistant_text { background: #d97706; }
+.tm-user_text { background: #10b981; }
+.tm-tool_calls { background: #ec4899; }
+.tm-images { background: #4b5563; }
+.tm-cache_markers { background: #6b7280; }
+.tm-other { background: #4b5563; }
+.treemap-legend { display: flex; gap: 14px; margin-top: 10px; flex-wrap: wrap; }
+.treemap-legend-item {
+  display: flex; align-items: center; gap: 5px;
+  font-family: var(--font-mono);
+  font-size: 10px; color: var(--text-secondary);
+}
 .treemap-legend-dot { width: 10px; height: 10px; border-radius: 2px; }
 
 /* Agent breakdown */
-.agent-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 12px; }
-.agent-bar-wrap { flex: 1; height: 6px; background: #1a1a1a; border-radius: 3px; overflow: hidden; }
-.agent-bar { height: 100%; border-radius: 3px; }
-.agent-lbl { width: 110px; color: #888; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.agent-val { width: 110px; text-align: right; color: #555; font-size: 11px; white-space: nowrap; }
+.agent-row {
+  display: flex; align-items: center; gap: 8px; padding: 5px 0;
+  font-family: var(--font-mono); font-size: 12px;
+}
+.agent-bar-wrap { flex: 1; height: 6px; background: var(--bg-deep); border-radius: 3px; overflow: hidden; }
+.agent-bar { height: 100%; border-radius: 3px; transition: width 0.4s ease; }
+.agent-lbl { width: 110px; color: var(--text-secondary); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-val { width: 120px; text-align: right; color: var(--text-dim); font-size: 11px; white-space: nowrap; }
 
 /* Timeline */
-.timeline-chart { display: flex; align-items: flex-end; gap: 1px; height: 80px; }
-.tl-bar { flex: 1; min-width: 4px; max-width: 24px; border-radius: 2px 2px 0 0; cursor: pointer; transition: opacity 0.15s; }
-.tl-bar:hover { opacity: 0.8; }
-.tl-bar.active { box-shadow: 0 0 0 1px #3b82f6; }
-.tl-legend { display: flex; gap: 16px; margin-top: 8px; }
-.tl-legend-item { display: flex; align-items: center; gap: 4px; font-size: 10px; color: #666; }
+.timeline-wrap {
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-mid) transparent;
+}
+.timeline-chart { display: flex; align-items: flex-end; gap: 2px; height: 110px; min-width: min-content; }
+.tl-bar {
+  flex: 0 0 auto; width: 12px;
+  border-radius: 2px 2px 0 0;
+  cursor: pointer;
+  transition: filter 0.15s, height 0.3s ease;
+}
+/* Wider bars when few entries */
+.timeline-chart.tl-sparse .tl-bar { flex: 1; width: auto; min-width: 8px; max-width: 28px; }
+.tl-bar:hover { filter: brightness(1.2); }
+.tl-bar.active { box-shadow: 0 0 0 1.5px var(--accent-blue), 0 0 8px rgba(91, 156, 245, 0.3); }
+.tl-legend { display: flex; gap: 16px; margin-top: 10px; }
+.tl-legend-item {
+  display: flex; align-items: center; gap: 5px;
+  font-family: var(--font-mono);
+  font-size: 10px; color: var(--text-dim);
+}
 .tl-legend-dot { width: 8px; height: 8px; border-radius: 2px; }
 
 /* Toggle */
 .toggle-group { display: flex; }
-.toggle-btn { font-size: 10px; padding: 3px 10px; background: #1a1a1a; border: 1px solid #262626; color: #666; cursor: pointer; }
+.toggle-btn {
+  font-family: var(--font-mono);
+  font-size: 10px; padding: 4px 10px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-dim);
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  letter-spacing: 0.02em;
+}
 .toggle-btn:first-child { border-radius: 4px 0 0 4px; }
 .toggle-btn:last-child { border-radius: 0 4px 4px 0; }
-.toggle-btn.active { background: #1e3a5f; border-color: #3b82f6; color: #93c5fd; }
+.toggle-btn:hover { color: var(--text-secondary); background: var(--bg-hover); }
+.toggle-btn.active {
+  background: rgba(91, 156, 245, 0.12);
+  border-color: rgba(91, 156, 245, 0.4);
+  color: var(--accent-blue);
+}
 
 /* Empty state */
-.empty-main { display: flex; align-items: center; justify-content: center; height: 100%; color: #555; flex-direction: column; gap: 8px; }
+.empty-main {
+  display: flex; align-items: center; justify-content: center;
+  height: 100%; color: var(--text-dim);
+  flex-direction: column; gap: 10px;
+}
+.empty-main .empty-icon {
+  width: 48px; height: 48px;
+  border: 2px solid var(--border-mid);
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 4px;
+  animation: pulse-ring 4s ease-in-out infinite;
+}
+@keyframes pulse-ring {
+  0%, 100% { border-color: var(--border-mid); }
+  50% { border-color: var(--border-bright); }
+}
 
 /* Working dir */
-.working-dir { font-size: 10px; color: #444; font-family: 'SF Mono', 'Fira Code', Consolas, monospace; margin-top: 2px; padding-left: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.working-dir {
+  font-family: var(--font-mono);
+  font-size: 10px; color: var(--text-muted);
+  margin-top: 3px; padding-left: 14px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 
 /* Model color helpers */
 .model-opus { color: #fb923c; }
 .model-sonnet { color: #60a5fa; }
 .model-haiku { color: #a78bfa; }
 .model-gpt { color: #10b981; }
-.model-default { color: #888; }
+.model-default { color: var(--text-dim); }
 
 /* Turn detail */
-.turn-detail-header { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; font-size: 12px; color: #888; }
-.call-row { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 4px; font-size: 12px; margin-bottom: 2px; }
-.call-row:hover { background: #1a1a1a; }
-.call-row.main-call { background: #111827; border-radius: 4px; }
-.call-model { font-size: 9px; padding: 1px 5px; border-radius: 2px; width: 46px; text-align: center; }
-.call-desc { color: #888; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.call-desc.main { color: #e5e5e5; }
-.call-tok { color: #555; font-size: 11px; width: 70px; text-align: right; }
-.call-cost { color: #10b981; font-size: 11px; width: 50px; text-align: right; }
+.turn-detail-header {
+  font-family: var(--font-mono);
+  display: flex; gap: 8px; align-items: center;
+  margin-bottom: 12px; font-size: 11px; color: var(--text-dim);
+}
+.call-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px; border-radius: 4px;
+  font-size: 12px; margin-bottom: 2px;
+  transition: background 0.12s;
+}
+.call-row:hover { background: var(--bg-hover); }
+.call-row.main-call { background: rgba(91, 156, 245, 0.06); }
+.call-model {
+  font-family: var(--font-mono);
+  font-size: 9px; padding: 2px 5px; border-radius: 2px;
+  width: 48px; text-align: center; background: var(--bg-raised);
+}
+.call-desc { color: var(--text-secondary); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.call-desc.main { color: var(--text-primary); }
+.call-tok { font-family: var(--font-mono); color: var(--text-dim); font-size: 11px; width: 70px; text-align: right; }
+.call-cost { font-family: var(--font-mono); color: var(--accent-green); font-size: 11px; width: 50px; text-align: right; }
 
 /* Message categories */
-.msg-section { margin-top: 12px; border-top: 1px solid #1e1e1e; padding-top: 12px; }
-.msg-section-title { font-size: 11px; color: #555; margin-bottom: 8px; display: flex; justify-content: space-between; }
-.msg-category { margin-bottom: 8px; }
-.msg-cat-header { display: flex; align-items: center; gap: 6px; padding: 4px 0; cursor: pointer; font-size: 12px; }
-.msg-cat-header:hover { color: #fff; }
+.msg-section { margin-top: 14px; border-top: 1px solid var(--border-dim); padding-top: 14px; }
+.msg-section-title {
+  font-family: var(--font-mono);
+  font-size: 10px; color: var(--text-dim); margin-bottom: 10px;
+  display: flex; justify-content: space-between;
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+.msg-category { margin-bottom: 6px; }
+.msg-cat-header {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 0; cursor: pointer; font-size: 12px;
+  transition: color 0.12s;
+}
+.msg-cat-header:hover { color: var(--text-primary); }
 .msg-cat-dot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
 .msg-cat-name { font-weight: 500; }
-.msg-cat-stats { margin-left: auto; color: #444; font-size: 11px; }
-.msg-cat-bar-wrap { width: 60px; height: 4px; background: #1a1a1a; border-radius: 2px; overflow: hidden; margin-left: 8px; }
-.msg-cat-bar { height: 100%; border-radius: 2px; }
-.msg-items { padding-left: 20px; border-left: 1px solid #1e1e1e; margin-left: 3px; display: none; }
-.msg-items.expanded { display: block; }
-.msg-line { display: flex; align-items: center; gap: 6px; padding: 3px 0; font-size: 11px; color: #888; border-bottom: 1px solid #0f0f0f; }
-.msg-line:hover { color: #ccc; }
-.msg-line-icon { color: #444; width: 14px; font-size: 10px; }
+.msg-cat-stats { font-family: var(--font-mono); margin-left: auto; color: var(--text-muted); font-size: 11px; }
+.msg-cat-bar-wrap { width: 60px; height: 4px; background: var(--bg-deep); border-radius: 2px; overflow: hidden; margin-left: 8px; }
+.msg-cat-bar { height: 100%; border-radius: 2px; transition: width 0.3s ease; }
+.msg-items {
+  padding-left: 20px; border-left: 1px solid var(--border-dim);
+  margin-left: 3px;
+  max-height: 0; overflow: hidden;
+  transition: max-height 0.25s ease-out;
+}
+.msg-items.expanded { max-height: 5000px; transition: max-height 0.4s ease-in; }
+.msg-line {
+  display: flex; align-items: center; gap: 6px; padding: 4px 0;
+  font-size: 11px; color: var(--text-secondary);
+  border-bottom: 1px solid rgba(26, 34, 51, 0.5);
+  transition: color 0.12s;
+}
+.msg-line:hover { color: var(--text-primary); }
+.msg-line-icon {
+  font-family: var(--font-mono);
+  color: var(--text-muted); width: 14px; font-size: 10px;
+}
 .msg-line-text { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.msg-line-tok { color: #444; font-size: 10px; white-space: nowrap; }
-.msg-line-tok.large { color: #f59e0b; }
+.msg-line-tok { font-family: var(--font-mono); color: var(--text-muted); font-size: 10px; white-space: nowrap; }
+.msg-line-tok.large { color: var(--accent-amber); }
 
 /* Context diff */
-.diff-section { margin-top: 12px; border-top: 1px solid #1e1e1e; padding-top: 12px; }
-.diff-header { font-size: 11px; color: #555; margin-bottom: 6px; display: flex; justify-content: space-between; }
-.diff-line { font-family: 'SF Mono', 'Fira Code', Consolas, monospace; font-size: 11px; padding: 2px 8px; border-radius: 2px; margin-bottom: 1px; }
-.diff-add { background: #071f0e; color: #4ade80; }
-.diff-remove { background: #1f0707; color: #f87171; }
-.diff-same { color: #333; }
+.diff-section { margin-top: 14px; border-top: 1px solid var(--border-dim); padding-top: 14px; }
+.diff-header {
+  font-family: var(--font-mono);
+  font-size: 11px; color: var(--text-dim); margin-bottom: 8px;
+  display: flex; justify-content: space-between;
+}
+.diff-line {
+  font-family: var(--font-mono);
+  font-size: 11px; padding: 3px 8px; border-radius: 2px; margin-bottom: 1px;
+}
+.diff-add { background: rgba(16, 185, 129, 0.08); color: #4ade80; }
+.diff-remove { background: rgba(240, 96, 96, 0.08); color: #f87171; }
+.diff-same { color: var(--text-muted); }
 
 /* Recommendations */
-.rec-item { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; font-size: 12px; border-bottom: 1px solid #111; }
+.rec-item {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 10px 0; font-size: 12px;
+  border-bottom: 1px solid var(--border-dim);
+  transition: background 0.12s;
+}
 .rec-item:last-child { border-bottom: none; }
-.rec-severity { width: 8px; height: 8px; border-radius: 50%; margin-top: 4px; flex-shrink: 0; }
-.rec-severity.high { background: #ef4444; }
-.rec-severity.med { background: #f59e0b; }
-.rec-severity.low { background: #10b981; }
+.rec-severity {
+  width: 8px; height: 8px; border-radius: 50%;
+  margin-top: 4px; flex-shrink: 0;
+  box-shadow: 0 0 4px currentColor;
+}
+.rec-severity.high { background: var(--accent-red); color: var(--accent-red); }
+.rec-severity.med { background: var(--accent-amber); color: var(--accent-amber); }
+.rec-severity.low { background: var(--accent-green); color: var(--accent-green); }
 .rec-body { flex: 1; }
 .rec-title { font-weight: 500; }
-.rec-detail { font-size: 11px; color: #555; margin-top: 2px; }
-.rec-impact { font-size: 10px; padding: 2px 6px; border-radius: 3px; white-space: nowrap; }
-.rec-impact.high { background: #451a03; color: #fb923c; }
-.rec-impact.med { background: #1c1917; color: #a8a29e; }
-.rec-impact.low { background: #052e16; color: #34d399; }
+.rec-detail { font-size: 11px; color: var(--text-dim); margin-top: 3px; line-height: 1.4; }
+.rec-impact {
+  font-family: var(--font-mono);
+  font-size: 10px; padding: 2px 8px; border-radius: 3px; white-space: nowrap;
+  letter-spacing: 0.02em;
+}
+.rec-impact.high { background: rgba(240, 96, 96, 0.1); color: var(--accent-red); }
+.rec-impact.med { background: rgba(240, 180, 41, 0.1); color: var(--accent-amber); }
+.rec-impact.low { background: rgba(61, 214, 140, 0.1); color: var(--accent-green); }
+
+/* Polling indicator */
+.poll-indicator {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--accent-green);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.poll-indicator.active { opacity: 1; }
+
+/* Treemap click flash */
+@keyframes flash-highlight { 0% { background: rgba(91,156,245,0.2); } 100% { background: transparent; } }
+.msg-category.flash-highlight { animation: flash-highlight 0.8s ease-out; }
+
+/* Input tools line below call rows */
+.call-tools { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim);
+  padding: 0 8px 4px 62px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>
 </head>
 <body>
 <div class="app">
   <div class="header">
-    <h1>Context Lens</h1>
+    <h1><span class="lens-dot"></span>Context Lens</h1>
     <div class="header-right">
-      <span id="hdr-cost" style="color:#10b981;font-weight:600;"></span>
-      <span id="hdr-reqs" style="color:#444;"></span>
+      <span class="poll-indicator" id="poll-indicator"></span>
+      <span id="hdr-cost" style="font-family:var(--font-mono);color:var(--accent-green);font-weight:600;font-size:12px;"></span>
+      <span id="hdr-reqs" style="font-family:var(--font-mono);color:var(--text-dim);font-size:11px;"></span>
       <select id="hdr-source-filter"><option value="">All sources</option></select>
       <button id="export-btn">Export LHAR</button>
+      <button id="reset-btn">Reset</button>
     </div>
   </div>
   <div class="sidebar" id="sidebar"></div>
   <div class="main" id="main-panel">
     <div class="empty-main" id="empty-state">
-      <div style="font-size:16px;color:#666;">No requests captured yet</div>
-      <div style="font-size:12px;color:#444;">Point your LLM API calls to port 4040 to start capturing.</div>
+      <div class="empty-icon"><span class="lens-dot" style="margin:0;"></span></div>
+      <div style="font-family:var(--font-mono);font-size:13px;color:var(--text-dim);">No requests captured</div>
+      <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">Point API calls to port 4040</div>
     </div>
   </div>
 </div>
@@ -243,12 +581,12 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
   }
 
   function modelBarGradient(m) {
-    if (!m) return 'linear-gradient(to top, #555, #888)';
-    if (m.includes('opus')) return 'linear-gradient(to top, #92400e, #fb923c)';
+    if (!m) return 'linear-gradient(to top, #333, #666)';
+    if (m.includes('opus')) return 'linear-gradient(to top, #78350f, #fb923c)';
     if (m.includes('sonnet')) return 'linear-gradient(to top, #1e3a5f, #60a5fa)';
     if (m.includes('haiku')) return 'linear-gradient(to top, #4c1d95, #a78bfa)';
     if (m.includes('gpt') || m.includes('o1') || m.includes('o3') || m.includes('o4')) return 'linear-gradient(to top, #064e3b, #10b981)';
-    return 'linear-gradient(to top, #333, #888)';
+    return 'linear-gradient(to top, #333, #666)';
   }
 
   function sourceBadgeClass(src) {
@@ -261,7 +599,6 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
 
   function shortModel(m) {
     if (!m) return '?';
-    // Extract the short name: "claude-opus-4-6-..." -> "opus"
     if (m.includes('opus')) return 'opus';
     if (m.includes('sonnet')) return 'sonnet';
     if (m.includes('haiku')) return 'haiku';
@@ -275,19 +612,19 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
     return m.length > 10 ? m.slice(0, 8) : m;
   }
 
-  // Category display names and colors
+  // Category display names and colors — more saturated for the treemap
   var CATEGORY_META = {
-    system_prompt:     { label: 'System prompt',     color: '#1e40af' },
-    tool_definitions:  { label: 'Tool definitions',  color: '#be185d' },
-    tool_results:      { label: 'Tool results',      color: '#065f46' },
-    tool_calls:        { label: 'Tool calls',        color: '#9d174d' },
-    system_injections: { label: 'System injections',  color: '#4338ca' },
-    thinking:          { label: 'Thinking',           color: '#7c3aed' },
-    assistant_text:    { label: 'Assistant',          color: '#b45309' },
-    user_text:         { label: 'User',               color: '#059669' },
-    images:            { label: 'Images',             color: '#374151' },
-    cache_markers:     { label: 'Cache markers',      color: '#525252' },
-    other:             { label: 'Other',              color: '#404040' },
+    system_prompt:     { label: 'System prompt',     color: '#2563eb' },
+    tool_definitions:  { label: 'Tool definitions',  color: '#db2777' },
+    tool_results:      { label: 'Tool results',      color: '#059669' },
+    tool_calls:        { label: 'Tool calls',        color: '#ec4899' },
+    system_injections: { label: 'System injections',  color: '#6366f1' },
+    thinking:          { label: 'Thinking',           color: '#8b5cf6' },
+    assistant_text:    { label: 'Assistant',          color: '#d97706' },
+    user_text:         { label: 'User',               color: '#10b981' },
+    images:            { label: 'Images',             color: '#4b5563' },
+    cache_markers:     { label: 'Cache markers',      color: '#6b7280' },
+    other:             { label: 'Other',              color: '#4b5563' },
   };
 
   // Simple mode groups: system, tools, messages
@@ -297,9 +634,9 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
     messages: ['tool_results', 'thinking', 'assistant_text', 'user_text', 'images', 'cache_markers', 'other'],
   };
   var SIMPLE_META = {
-    system:   { label: 'System',   color: '#1e40af' },
-    tools:    { label: 'Tools',    color: '#be185d' },
-    messages: { label: 'Messages', color: '#059669' },
+    system:   { label: 'System',   color: '#2563eb' },
+    tools:    { label: 'Tools',    color: '#db2777' },
+    messages: { label: 'Messages', color: '#10b981' },
   };
 
   // --- Data helpers ---
@@ -318,7 +655,6 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
 
   function getSessionEntries(session) {
     if (!session) return [];
-    // entries are newest-first from server; reverse for chronological
     return session.entries.slice().reverse();
   }
 
@@ -345,11 +681,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
     return Object.keys(set).sort();
   }
 
-  // Identify main agent entries (largest context per turn group) vs subagents
   function classifyEntries(entries) {
-    // entries in chronological order
-    // The "main" agent typically has the largest context window / is the one with most system tokens
-    // Simple heuristic: the agent with the most total tokens in the session is main
     var agentTotals = {};
     entries.forEach(function(e) {
       var ak = e.agentKey || '_main';
@@ -379,9 +711,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
     ungrouped.forEach(function(e) { totalCost += e.costUsd || 0; });
 
     document.getElementById('hdr-cost').textContent = fmtCost(totalCost);
-    document.getElementById('hdr-reqs').textContent = totalReqs + ' requests';
+    document.getElementById('hdr-reqs').textContent = totalReqs + ' req';
 
-    // Source filter dropdown
     var sel = document.getElementById('hdr-source-filter');
     var sources = allSources();
     var oldVal = sel.value;
@@ -400,13 +731,11 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
 
     if (convos.length === 0) {
       sb.innerHTML = '<div class="sidebar-section">Sessions</div>'
-        + '<div style="padding:20px 12px;color:#444;font-size:12px;">No sessions yet</div>';
+        + '<div style="padding:20px 14px;color:var(--text-muted);font-family:var(--font-mono);font-size:11px;">Waiting for data...</div>';
       return;
     }
 
     var html = '<div class="sidebar-section">Sessions</div>';
-
-    // Aggregate stats
     var mainCalls = 0, subCalls = 0, totalCost = 0;
 
     convos.forEach(function(c) {
@@ -423,30 +752,26 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
       var model = latestEntry ? latestEntry.contextInfo.model : 'unknown';
       var isExpanded = isActive && expandedSessions.has(c.id);
 
-      // Session item
       html += '<div class="session-item' + (isActive ? ' active' : '') + '" data-session="' + esc(c.id) + '">';
       html += '<div class="session-head">';
       html += '<span class="dot ' + (isActive ? 'dot-live' : 'dot-done') + '"></span>';
       html += '<span class="badge ' + sourceBadgeClass(c.source) + '">' + esc(c.source || '?') + '</span>';
-      html += '<span style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(model) + '</span>';
+      html += '<span style="font-family:var(--font-mono);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-secondary);">' + esc(shortModel(model)) + '</span>';
+      html += '<span class="session-delete" data-delete="' + esc(c.id) + '">&times;</span>';
       html += '</div>';
-      html += '<div class="session-meta"><span>' + entries.length + ' turns</span><span>' + fmtK(sessionTotalTokens(c)) + ' tok</span><span style="color:#10b981;">' + fmtCost(cost) + '</span></div>';
+      html += '<div class="session-meta"><span>' + entries.length + ' turns</span><span>' + fmtK(sessionTotalTokens(c)) + ' tok</span><span style="color:var(--accent-green);">' + fmtCost(cost) + '</span></div>';
       if (c.workingDirectory) html += '<div class="working-dir">' + esc(c.workingDirectory) + '</div>';
       html += '</div>';
 
-      // Turn group (expandable)
       html += '<div class="turn-group' + (isExpanded ? ' expanded' : '') + '" data-turns="' + esc(c.id) + '">';
 
-      // Show main-agent turns with sub-agent dots
       var mainEntries = classified.filter(function(x) { return x.isMain; });
       var turnNum = 0;
 
-      // Group entries into turns: each main entry is a turn, subagent entries between them are listed as dots
       classified.forEach(function(item, idx) {
         if (!item.isMain) return;
         turnNum++;
         var e = item.entry;
-        // Turn is active if selectedTurnIndex matches this main entry or any sub-entry in this turn group
         var nextMainIdx = classified.length;
         for (var ni = idx + 1; ni < classified.length; ni++) {
           if (classified[ni].isMain) { nextMainIdx = ni; break; }
@@ -454,18 +779,15 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
         var turnActive = isActive && (selectedTurnIndex === -1
           ? turnNum === mainEntries.length
           : (selectedTurnIndex >= idx && selectedTurnIndex < nextMainIdx));
-        var label = esc(c.label || '').slice(0, 30);
-        // Try to use agentLabel
         var desc = esc(e.agentLabel || '').slice(0, 30) || 'Turn ' + turnNum;
 
         html += '<div class="tg-item' + (turnActive ? ' active' : '') + '" data-session="' + esc(c.id) + '" data-turn="' + idx + '">';
         html += '<span class="tg-num">' + turnNum + '</span>';
-        html += '<span class="tg-model ' + modelClass(e.contextInfo.model) + '" style="background:#1e1e1e;padding:1px 4px;border-radius:2px;font-size:9px;">' + esc(shortModel(e.contextInfo.model)) + '</span>';
+        html += '<span class="tg-model ' + modelClass(e.contextInfo.model) + '">' + esc(shortModel(e.contextInfo.model)) + '</span>';
         html += '<span class="tg-desc">' + desc + '</span>';
         html += '<span class="tg-tokens">' + fmtK(e.contextInfo.totalTokens) + '</span>';
         html += '</div>';
 
-        // Sub-agent dots after this turn
         var subsAfter = [];
         for (var k = idx + 1; k < classified.length; k++) {
           if (classified[k].isMain) break;
@@ -478,27 +800,23 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
           html += ' ' + esc(subModel) + ' x' + subsAfter.length;
           html += '</div>';
         }
-
       });
 
-      html += '</div>'; // turn-group
+      html += '</div>';
     });
 
-    // Footer
     html += '<div class="sidebar-footer">';
     html += '<div><span>Main calls</span><span style="color:#fb923c;">' + mainCalls + '</span></div>';
-    html += '<div><span>Subagent calls</span><span style="color:#a78bfa;">' + subCalls + '</span></div>';
-    html += '<div><span>Total cost</span><span style="color:#10b981;">' + fmtCost(totalCost) + '</span></div>';
+    html += '<div><span>Sub calls</span><span style="color:var(--accent-purple);">' + subCalls + '</span></div>';
+    html += '<div><span>Total cost</span><span style="color:var(--accent-green);">' + fmtCost(totalCost) + '</span></div>';
     html += '</div>';
 
     sb.innerHTML = html;
 
-    // Attach click handlers
     sb.querySelectorAll('.session-item').forEach(function(el) {
       el.addEventListener('click', function() {
         var sid = el.getAttribute('data-session');
         if (selectedSessionId === sid) {
-          // Toggle turn list expansion
           if (expandedSessions.has(sid)) expandedSessions.delete(sid);
           else expandedSessions.add(sid);
         } else {
@@ -523,7 +841,38 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
       });
     });
 
+    sb.querySelectorAll('.session-delete').forEach(function(el) {
+      el.addEventListener('click', function(ev) {
+        ev.stopPropagation();
+        var sid = el.getAttribute('data-delete');
+        fetch('/api/conversations/' + encodeURIComponent(sid), { method: 'DELETE' }).then(function() {
+          if (selectedSessionId === sid) {
+            selectedSessionId = null;
+            selectedTurnIndex = -1;
+          }
+          expandedSessions.delete(sid);
+          fetchAndRender();
+        });
+      });
+    });
+
     restoreScroll('sidebar', scrollPos);
+
+    // Auto-scroll expanded turn group so active turn is visible
+    var activeTg = sb.querySelector('.tg-item.active');
+    if (activeTg) {
+      var group = activeTg.closest('.turn-group');
+      if (group && group.classList.contains('expanded')) {
+        // Defer to after max-height transition starts
+        setTimeout(function() {
+          var itemTop = activeTg.offsetTop - group.offsetTop;
+          var groupH = group.clientHeight;
+          if (itemTop > groupH - 40 || itemTop < group.scrollTop) {
+            group.scrollTop = Math.max(0, itemTop - groupH / 2 + 16);
+          }
+        }, 50);
+      }
+    }
   }
 
   // --- Render: Main Panel ---
@@ -533,13 +882,14 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
     var session = getSelectedSession();
 
     if (!session) {
-      // Check if we have any data at all
       var convos = getConversations();
       if (convos.length === 0) {
-        main.innerHTML = '<div class="empty-main"><div style="font-size:16px;color:#666;">No requests captured yet</div>'
-          + '<div style="font-size:12px;color:#444;">Point your LLM API calls to port 4040 to start capturing.</div></div>';
+        main.innerHTML = '<div class="empty-main">'
+          + '<div class="empty-icon"><span class="lens-dot" style="margin:0;"></span></div>'
+          + '<div style="font-family:var(--font-mono);font-size:13px;color:var(--text-dim);">No requests captured</div>'
+          + '<div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">Point API calls to port 4040</div></div>';
       } else {
-        main.innerHTML = '<div class="empty-main"><div style="font-size:14px;color:#555;">Select a session from the sidebar</div></div>';
+        main.innerHTML = '<div class="empty-main"><div style="font-family:var(--font-mono);font-size:12px;color:var(--text-dim);">Select a session</div></div>';
       }
       return;
     }
@@ -551,9 +901,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
 
     var ci = entry.contextInfo;
     var utilPct = entry.contextLimit > 0 ? Math.round((ci.totalTokens / entry.contextLimit) * 100) : 0;
-    var sessionCost = sessionTotalCost(session);
+    var turnCost = entry.costUsd;
     var msgCount = ci.messages ? ci.messages.length : 0;
-    // Count tool calls in the composition
     var toolCallEntry = (entry.composition || []).find(function(c) { return c.category === 'tool_calls'; });
     var toolCallCount = toolCallEntry ? toolCallEntry.count : 0;
 
@@ -561,11 +910,12 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
 
     // --- Stats row ---
     var utilColor = utilPct > 80 ? 'red' : utilPct > 60 ? 'amber' : 'blue';
+    var utilTint = utilPct > 80 ? 'stat-tint-red' : utilPct > 60 ? 'stat-tint-amber' : 'stat-tint-blue';
     html += '<div class="stats-row">';
-    html += '<div class="panel"><div class="panel-body"><div class="stat-card"><div class="stat-val ' + utilColor + '">' + utilPct + '%</div><div class="stat-lbl">Context used (' + fmtK(ci.totalTokens) + ' / ' + fmtK(entry.contextLimit) + ')</div></div></div></div>';
-    html += '<div class="panel"><div class="panel-body"><div class="stat-card"><div class="stat-val green">' + fmtCost(sessionCost) + '</div><div class="stat-lbl">Session cost</div></div></div></div>';
-    html += '<div class="panel"><div class="panel-body"><div class="stat-card"><div class="stat-val white">' + msgCount + '</div><div class="stat-lbl">Messages in context</div></div></div></div>';
-    html += '<div class="panel"><div class="panel-body"><div class="stat-card"><div class="stat-val amber">' + toolCallCount + '</div><div class="stat-lbl">Tool calls this turn</div></div></div></div>';
+    html += '<div class="panel"><div class="panel-body"><div class="stat-card ' + utilTint + '"><div class="stat-val ' + utilColor + '">' + utilPct + '%</div><div class="stat-lbl">Context (' + fmtK(ci.totalTokens) + '/' + fmtK(entry.contextLimit) + ')</div></div></div></div>';
+    html += '<div class="panel"><div class="panel-body"><div class="stat-card stat-tint-green"><div class="stat-val green">' + fmtCost(turnCost) + '</div><div class="stat-lbl">Turn cost</div></div></div></div>';
+    html += '<div class="panel"><div class="panel-body"><div class="stat-card"><div class="stat-val white">' + msgCount + '</div><div class="stat-lbl">Messages</div></div></div></div>';
+    html += '<div class="panel"><div class="panel-body"><div class="stat-card"><div class="stat-val amber">' + toolCallCount + '</div><div class="stat-lbl">Tool calls</div></div></div></div>';
     html += '</div>';
 
     // --- Treemap ---
@@ -595,27 +945,20 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
 
     var totalTok = composition.reduce(function(s, c) { return s + c.tokens; }, 0);
     var turnLabel = '';
-    // Find turn number
     var session = getSelectedSession();
     if (session) {
       var entries = getSessionEntries(session);
       var classified = classifyEntries(entries);
-      var mainEntries = classified.filter(function(x) { return x.isMain; });
-      var turnIdx = -1;
-      for (var i = 0; i < entries.length; i++) {
-        if (entries[i].id === entry.id) { turnIdx = i; break; }
-      }
-      // Find which main turn this is
       var mainNum = 0;
       for (var j = 0; j < classified.length; j++) {
         if (classified[j].isMain) mainNum++;
         if (classified[j].entry.id === entry.id) break;
       }
-      turnLabel = ' -- Turn ' + mainNum;
+      turnLabel = ' / Turn ' + mainNum;
     }
 
-    var html = '<div class="panel">';
-    html += '<div class="panel-header">Context Composition' + esc(turnLabel) + ' (' + fmtK(totalTok) + ' tok)';
+    var html = '<div class="panel panel-hero">';
+    html += '<div class="panel-header">Composition' + esc(turnLabel) + ' <span style="color:var(--text-secondary);font-weight:400;">' + fmtK(totalTok) + ' tok</span>';
     html += '<div class="toggle-group">';
     html += '<div class="toggle-btn' + (treemapMode === 'detailed' ? ' active' : '') + '" data-treemap="detailed">Detailed</div>';
     html += '<div class="toggle-btn' + (treemapMode === 'simple' ? ' active' : '') + '" data-treemap="simple">Simple</div>';
@@ -625,23 +968,19 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
     if (treemapMode === 'detailed') {
       html += '<div class="treemap">';
       composition.forEach(function(c) {
-        var meta = CATEGORY_META[c.category] || { label: c.category, color: '#404040' };
+        var meta = CATEGORY_META[c.category] || { label: c.category, color: '#4b5563' };
         var pct = totalTok > 0 ? Math.round(c.tokens / totalTok * 100) : 0;
-        // Only show label if segment is wide enough (> 3%)
         var labelHtml = pct >= 3 ? esc(meta.label) + '<span>' + fmtK(c.tokens) + ' (' + pct + '%)</span>' : '';
-        html += '<div class="treemap-block tm-' + esc(c.category) + '" style="flex:' + c.tokens + ';" title="' + esc(meta.label) + ': ' + c.tokens.toLocaleString() + ' tokens (' + pct + '%)">' + labelHtml + '</div>';
+        html += '<div class="treemap-block tm-' + esc(c.category) + '" data-category="' + esc(c.category) + '" style="flex:' + c.tokens + ';" title="' + esc(meta.label) + ': ' + c.tokens.toLocaleString() + ' tokens (' + pct + '%)">' + labelHtml + '</div>';
       });
       html += '</div>';
-
-      // Legend
       html += '<div class="treemap-legend">';
       composition.forEach(function(c) {
-        var meta = CATEGORY_META[c.category] || { label: c.category, color: '#404040' };
+        var meta = CATEGORY_META[c.category] || { label: c.category, color: '#4b5563' };
         html += '<div class="treemap-legend-item"><div class="treemap-legend-dot" style="background:' + meta.color + ';"></div>' + esc(meta.label) + '</div>';
       });
       html += '</div>';
     } else {
-      // Simple mode: group into system/tools/messages
       var groups = {};
       for (var gk in SIMPLE_GROUPS) {
         groups[gk] = 0;
@@ -650,7 +989,6 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
           if (found) groups[gk] += found.tokens;
         });
       }
-
       html += '<div class="treemap">';
       for (var gk2 in groups) {
         if (groups[gk2] === 0) continue;
@@ -660,7 +998,6 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
           + esc(meta2.label) + '<span>' + fmtK(groups[gk2]) + ' (' + pct2 + '%)</span></div>';
       }
       html += '</div>';
-
       html += '<div class="treemap-legend">';
       for (var gk3 in SIMPLE_META) {
         if (!groups[gk3]) continue;
@@ -675,14 +1012,12 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
 
   // --- Agent Breakdown ---
   function renderAgentBreakdown(session, classified) {
-    // Group by agentKey — track latest (most recent) context size per agent, not cumulative sum
     var agents = {};
     classified.forEach(function(item) {
       var ak = item.entry.agentKey || '_main';
       if (!agents[ak]) {
         agents[ak] = { key: ak, label: item.entry.agentLabel || 'Main', model: item.entry.contextInfo.model, latestTokens: 0, cost: 0, count: 0, isMain: item.isMain };
       }
-      // Latest context size (entries are chronological, so last write wins)
       agents[ak].latestTokens = item.entry.contextInfo.totalTokens;
       agents[ak].cost += item.entry.costUsd || 0;
       agents[ak].count += 1;
@@ -693,7 +1028,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
     var totalTok = agentList.reduce(function(s, ag) { return s + ag.latestTokens; }, 0);
 
     var html = '<div class="panel">';
-    html += '<div class="panel-header">Agent Breakdown</div>';
+    html += '<div class="panel-header">Agents</div>';
     html += '<div class="panel-body">';
 
     agentList.forEach(function(ag) {
@@ -701,21 +1036,20 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
       var role = ag.isMain ? 'main' : 'sub';
       var color = modelBarColor(ag.model);
       html += '<div class="agent-row">';
-      html += '<span class="agent-lbl">' + esc(shortModel(ag.model)) + ' (' + role + ')</span>';
+      html += '<span class="agent-lbl">' + esc(shortModel(ag.model)) + ' <span style="color:var(--text-muted);">' + role + '</span></span>';
       html += '<div class="agent-bar-wrap"><div class="agent-bar" style="width:' + pct + '%;background:' + color + ';"></div></div>';
-      html += '<span class="agent-val">' + fmtK(ag.latestTokens) + ' tok / ' + fmtCost(ag.cost) + '</span>';
+      html += '<span class="agent-val">' + fmtK(ag.latestTokens) + ' / ' + fmtCost(ag.cost) + '</span>';
       html += '</div>';
     });
 
-    // Summary line
     var subPct = classified.length > 0
       ? Math.round(classified.filter(function(x) { return !x.isMain; }).length / classified.length * 100)
       : 0;
     if (subPct > 0) {
       var subTok = agentList.filter(function(ag) { return !ag.isMain; }).reduce(function(s, ag) { return s + ag.latestTokens; }, 0);
       var subTokPct = totalTok > 0 ? Math.round(subTok / totalTok * 100) : 0;
-      html += '<div style="margin-top:8px;font-size:11px;color:#444;">'
-        + subPct + '% of calls are subagents, using ' + subTokPct + '% of latest context.</div>';
+      html += '<div style="margin-top:8px;font-family:var(--font-mono);font-size:10px;color:var(--text-muted);">'
+        + subPct + '% calls are subagents (' + subTokPct + '% of context)</div>';
     }
 
     html += '</div></div>';
@@ -739,29 +1073,29 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
 
     var selectedEntry = getSelectedEntry(getSelectedSession());
 
-    var html = '<div class="panel">';
+    var html = '<div class="panel panel-hero">';
     html += '<div class="panel-header">Timeline';
     html += '<div class="toggle-group">';
-    html += '<div class="toggle-btn' + (timelineMode === 'all' ? ' active' : '') + '" data-timeline="all">All calls</div>';
-    html += '<div class="toggle-btn' + (timelineMode === 'main' ? ' active' : '') + '" data-timeline="main">Main only</div>';
+    html += '<div class="toggle-btn' + (timelineMode === 'all' ? ' active' : '') + '" data-timeline="all">All</div>';
+    html += '<div class="toggle-btn' + (timelineMode === 'main' ? ' active' : '') + '" data-timeline="main">Main</div>';
     html += '<div class="toggle-btn' + (timelineMode === 'cost' ? ' active' : '') + '" data-timeline="cost">Cost</div>';
     html += '</div></div>';
     html += '<div class="panel-body">';
-    html += '<div class="timeline-chart">';
+    var isSparse = filtered.length <= 40;
+    html += '<div class="timeline-wrap">';
+    html += '<div class="timeline-chart' + (isSparse ? ' tl-sparse' : '') + '">';
 
-    filtered.forEach(function(item, i) {
+    filtered.forEach(function(item) {
       var val = timelineMode === 'cost' ? (item.entry.costUsd || 0) * 100000 : item.entry.contextInfo.totalTokens;
-      var pct = maxTok > 0 ? Math.max(2, Math.round(val / maxTok * 100)) : 2;
+      var pct = maxTok > 0 ? Math.max(3, Math.round(val / maxTok * 100)) : 3;
       var isActive = selectedEntry && item.entry.id === selectedEntry.id;
       var model = item.entry.contextInfo.model;
-      // Find original index in entries array for turn selection
       var origIdx = entries.indexOf(item.entry);
       html += '<div class="tl-bar' + (isActive ? ' active' : '') + '" style="height:' + pct + '%;background:' + modelBarGradient(model) + ';" data-tl-turn="' + origIdx + '" title="' + esc(shortModel(model)) + ': ' + fmtK(item.entry.contextInfo.totalTokens) + ' tok"></div>';
     });
 
-    html += '</div>';
+    html += '</div></div>';
 
-    // Legend: collect unique models
     var seenModels = {};
     filtered.forEach(function(item) {
       var m = item.entry.contextInfo.model;
@@ -772,7 +1106,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
     html += '<div class="tl-legend">';
     for (var sm in seenModels) {
       var info = seenModels[sm];
-      var role = info.isMain ? 'Main' : 'Subagent';
+      var role = info.isMain ? 'Main' : 'Sub';
       html += '<div class="tl-legend-item"><span class="tl-legend-dot" style="background:' + modelBarColor(info.model) + ';"></span>' + role + ' (' + esc(sm) + ')</div>';
     }
     html += '</div>';
@@ -784,27 +1118,23 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
   // --- Turn Detail ---
   function renderTurnDetail(entry, entries, classified) {
     var idx = entries.indexOf(entry);
-    // Find the turn group: the main entry at or before idx, plus sub-entries around it
     var turnGroup = [];
     var mainIdx = idx;
-    // Walk back to find the main entry that starts this turn group
     for (var i = idx; i >= 0; i--) {
       if (classified[i].isMain) { mainIdx = i; break; }
     }
-    // Collect: the main entry + all sub-entries until next main
     for (var j = mainIdx; j < classified.length; j++) {
       if (j > mainIdx && classified[j].isMain) break;
       turnGroup.push(classified[j]);
     }
 
-    // Compute turn number
     var turnNum = 0;
     for (var k = 0; k <= mainIdx; k++) {
       if (classified[k].isMain) turnNum++;
     }
 
     var html = '<div class="panel">';
-    html += '<div class="panel-header">Turn ' + turnNum + ' -- Detail';
+    html += '<div class="panel-header">Turn ' + turnNum;
     html += '<div class="toggle-group">';
     html += '<div class="toggle-btn' + (turnDetailMode === 'calls' ? ' active' : '') + '" data-detail="calls">Calls</div>';
     html += '<div class="toggle-btn' + (turnDetailMode === 'diff' ? ' active' : '') + '" data-detail="diff">Diff</div>';
@@ -812,25 +1142,26 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
     html += '<div class="panel-body">';
 
     if (turnDetailMode === 'calls') {
-      // API calls list
-      html += '<div class="turn-detail-header">' + turnGroup.length + ' API call' + (turnGroup.length !== 1 ? 's' : '') + ' in turn group</div>';
+      html += '<div class="turn-detail-header">' + turnGroup.length + ' API call' + (turnGroup.length !== 1 ? 's' : '') + '</div>';
       turnGroup.forEach(function(item) {
         var e = item.entry;
         var isMain = item.isMain;
         var sm = shortModel(e.contextInfo.model);
-        var desc = esc((e.agentLabel || '').slice(0, 60)) || (isMain ? 'Main call' : 'Subagent call');
+        var summary = extractCallSummary(e);
+        var desc = summary ? esc(summary) : (isMain ? 'Main call' : 'Subagent call');
         html += '<div class="call-row' + (isMain ? ' main-call' : '') + '">';
-        html += '<span class="call-model ' + modelClass(e.contextInfo.model) + '" style="background:#1e1e1e;">' + esc(sm) + '</span>';
+        html += '<span class="call-model ' + modelClass(e.contextInfo.model) + '">' + esc(sm) + '</span>';
         html += '<span class="call-desc' + (isMain ? ' main' : '') + '">' + desc + '</span>';
         html += '<span class="call-tok">' + fmtK(e.contextInfo.totalTokens) + ' tok</span>';
         html += '<span class="call-cost">' + fmtCost(e.costUsd) + '</span>';
         html += '</div>';
+        var inputTools = extractInputTools(e);
+        if (inputTools && inputTools.length > 0) {
+          html += '<div class="call-tools">\u2190 ' + esc(inputTools.join(', ')) + '</div>';
+        }
       });
-
-      // Message categories breakdown for the selected entry
       html += renderMessageCategories(entry);
     } else {
-      // Diff view
       html += renderContextDiff(entry, entries, classified, turnNum);
     }
 
@@ -846,10 +1177,19 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
 
     var msgTokens = msgs.reduce(function(s, m) { return s + (m.tokens || 0); }, 0);
 
-    var html = '<div class="msg-section">';
-    html += '<div class="msg-section-title"><span>Main agent context -- ' + msgs.length + ' messages</span><span>' + fmtK(msgTokens) + ' msg tokens</span></div>';
+    // Build tool_use_id -> tool name map for correlating results to their tools
+    var toolNameMap = {};
+    msgs.forEach(function(m) {
+      if (m.contentBlocks) {
+        m.contentBlocks.forEach(function(b) {
+          if (b.type === 'tool_use' && b.id && b.name) toolNameMap[b.id] = b.name;
+        });
+      }
+    });
 
-    // Group messages by category
+    var html = '<div class="msg-section">';
+    html += '<div class="msg-section-title"><span>' + msgs.length + ' messages</span><span>' + fmtK(msgTokens) + ' tok</span></div>';
+
     var categories = {};
     var catOrder = ['tool_results', 'system_injections', 'tool_calls', 'thinking', 'assistant_text', 'user_text'];
 
@@ -860,7 +1200,6 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
       categories[cat].tokens += msg.tokens || 0;
     });
 
-    // Add categories not in catOrder
     for (var cat in categories) {
       if (catOrder.indexOf(cat) === -1) catOrder.push(cat);
     }
@@ -868,7 +1207,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
     catOrder.forEach(function(cat) {
       var data = categories[cat];
       if (!data) return;
-      var meta = CATEGORY_META[cat] || { label: cat, color: '#404040' };
+      var meta = CATEGORY_META[cat] || { label: cat, color: '#4b5563' };
       var pct = msgTokens > 0 ? Math.round(data.tokens / msgTokens * 100) : 0;
       var catId = 'msgcat-' + cat;
       var isExpanded = expandedCategories.has(catId);
@@ -876,23 +1215,22 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
 
       html += '<div class="msg-category">';
       html += '<div class="msg-cat-header" data-cat="' + catId + '">';
-      html += '<span style="color:#666;">' + arrow + '</span>';
+      html += '<span style="color:var(--text-muted);">' + arrow + '</span>';
       html += '<span class="msg-cat-dot" style="background:' + meta.color + ';"></span>';
       html += '<span class="msg-cat-name" style="color:' + catTextColor(cat) + ';">' + esc(meta.label) + '</span>';
-      html += '<span class="msg-cat-stats">' + fmtK(data.tokens) + ' tok (' + pct + '%)</span>';
+      html += '<span class="msg-cat-stats">' + data.items.length + ' / ' + fmtK(data.tokens) + ' (' + pct + '%)</span>';
       html += '<div class="msg-cat-bar-wrap"><div class="msg-cat-bar" style="width:' + pct + '%;background:' + meta.color + ';"></div></div>';
       html += '</div>';
 
-      // Items
       html += '<div class="msg-items' + (isExpanded ? ' expanded' : '') + '" id="' + catId + '">';
       data.items.forEach(function(item) {
         var msg = item.msg;
-        var preview = extractPreview(msg);
+        var preview = extractPreview(msg, toolNameMap);
         var isLarge = (msg.tokens || 0) > 1000;
         html += '<div class="msg-line">';
         html += '<span class="msg-line-icon">' + catIcon(cat) + '</span>';
         html += '<span class="msg-line-text">' + esc(preview) + '</span>';
-        html += '<span class="msg-line-tok' + (isLarge ? ' large' : '') + '">' + fmtK(msg.tokens || 0) + ' tok</span>';
+        html += '<span class="msg-line-tok' + (isLarge ? ' large' : '') + '">' + fmtK(msg.tokens || 0) + '</span>';
         html += '</div>';
       });
       html += '</div>';
@@ -908,7 +1246,6 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
     var content = msg.content || '';
     var blocks = msg.contentBlocks;
 
-    // Check content blocks first
     if (blocks && Array.isArray(blocks)) {
       var hasToolUse = blocks.some(function(b) { return b.type === 'tool_use'; });
       var hasToolResult = blocks.some(function(b) { return b.type === 'tool_result'; });
@@ -924,25 +1261,25 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
     return 'other';
   }
 
-  function extractPreview(msg) {
+  function extractPreview(msg, toolNameMap) {
     var content = msg.content || '';
     var blocks = msg.contentBlocks;
 
     if (blocks && Array.isArray(blocks)) {
-      // Find a meaningful block to preview
       for (var i = 0; i < blocks.length; i++) {
         var b = blocks[i];
         if (b.type === 'tool_use') return (b.name || 'tool') + '(' + (b.input ? JSON.stringify(b.input).slice(0, 60) : '') + ')';
         if (b.type === 'tool_result') {
+          var toolName = (toolNameMap && b.tool_use_id) ? toolNameMap[b.tool_use_id] : null;
           var rc = typeof b.content === 'string' ? b.content : JSON.stringify(b.content || '');
-          return rc.slice(0, 80);
+          var prefix = toolName ? toolName + ': ' : '';
+          return prefix + rc.slice(0, 80 - prefix.length);
         }
         if (b.type === 'thinking') return (b.thinking || b.text || '').slice(0, 80);
         if (b.type === 'text' || b.type === 'input_text') return (b.text || '').slice(0, 80);
       }
     }
 
-    // Try to parse JSON content (e.g. stringified blocks)
     if (content.charAt(0) === '[') {
       try {
         var parsed = JSON.parse(content);
@@ -968,29 +1305,97 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
   }
 
   function catIcon(cat) {
-    // CSS-only indicators per the constraint (no emoji)
     var icons = {
-      tool_results: '\u25A0', // filled square
-      system_injections: '\u25C6', // diamond
-      tool_calls: '\u25B6', // right triangle
-      thinking: '\u25CB', // circle
-      assistant_text: '\u25B7', // triangle outline
-      user_text: '\u25CF', // filled circle
+      tool_results: '\u25A0',
+      system_injections: '\u25C6',
+      tool_calls: '\u25B6',
+      thinking: '\u25CB',
+      assistant_text: '\u25B7',
+      user_text: '\u25CF',
     };
     return icons[cat] || '\u25AA';
+  }
+
+  function extractCallSummary(entry) {
+    var msgs = (entry.contextInfo && entry.contextInfo.messages) || [];
+    // Scan backward for last assistant message with tool_use blocks
+    for (var i = msgs.length - 1; i >= 0; i--) {
+      var m = msgs[i];
+      if (m.role === 'assistant' && m.contentBlocks) {
+        var names = [];
+        var seen = {};
+        m.contentBlocks.forEach(function(b) {
+          if (b.type === 'tool_use' && b.name && !seen[b.name]) {
+            seen[b.name] = true;
+            names.push(b.name);
+          }
+        });
+        if (names.length > 0) {
+          if (names.length <= 4) return names.join(', ');
+          return names.slice(0, 3).join(', ') + ' +' + (names.length - 3);
+        }
+      }
+    }
+    // Fallback: last user text (not first)
+    for (var j = msgs.length - 1; j >= 0; j--) {
+      if (msgs[j].role === 'user') {
+        var content = msgs[j].content || '';
+        if (msgs[j].contentBlocks) {
+          for (var k = 0; k < msgs[j].contentBlocks.length; k++) {
+            var b = msgs[j].contentBlocks[k];
+            if ((b.type === 'text' || b.type === 'input_text') && b.text) {
+              content = b.text;
+              break;
+            }
+          }
+        }
+        if (typeof content === 'string' && content.length > 0) {
+          return content.slice(0, 50);
+        }
+      }
+    }
+    return '';
+  }
+
+  function extractInputTools(entry) {
+    var msgs = (entry.contextInfo && entry.contextInfo.messages) || [];
+    // Build name map from all tool_use blocks
+    var nameMap = {};
+    msgs.forEach(function(m) {
+      if (m.contentBlocks) {
+        m.contentBlocks.forEach(function(b) {
+          if (b.type === 'tool_use' && b.id && b.name) nameMap[b.id] = b.name;
+        });
+      }
+    });
+    // Find last user message with tool_result blocks
+    for (var i = msgs.length - 1; i >= 0; i--) {
+      var m = msgs[i];
+      if (m.role === 'user' && m.contentBlocks) {
+        var tools = [];
+        var seen = {};
+        m.contentBlocks.forEach(function(b) {
+          if (b.type === 'tool_result' && b.tool_use_id) {
+            var name = nameMap[b.tool_use_id] || b.tool_use_id;
+            if (!seen[name]) { seen[name] = true; tools.push(name); }
+          }
+        });
+        if (tools.length > 0) return tools;
+      }
+    }
+    return null;
   }
 
   // --- Context Diff ---
   function renderContextDiff(entry, entries, classified, turnNum) {
     var idx = entries.indexOf(entry);
-    // Find previous main entry
     var prevEntry = null;
     for (var i = idx - 1; i >= 0; i--) {
       if (classified[i].isMain) { prevEntry = entries[i]; break; }
     }
 
     if (!prevEntry) {
-      return '<div style="color:#444;font-size:12px;">First turn -- no previous context to diff against.</div>';
+      return '<div style="font-family:var(--font-mono);color:var(--text-muted);font-size:11px;">First turn -- no previous context to diff.</div>';
     }
 
     var prevComp = prevEntry.composition || [];
@@ -1001,11 +1406,10 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
     var deltaSign = delta >= 0 ? '+' : '';
 
     var html = '<div class="diff-header">';
-    html += '<span>Turn ' + (turnNum - 1) + ' \u2192 Turn ' + turnNum + '</span>';
-    html += '<span>' + deltaSign + fmtK(delta) + ' tokens</span>';
+    html += '<span>Turn ' + (turnNum - 1) + ' \u2192 ' + turnNum + '</span>';
+    html += '<span style="color:' + (delta >= 0 ? 'var(--accent-green)' : 'var(--accent-red)') + ';">' + deltaSign + fmtK(delta) + ' tok</span>';
     html += '</div>';
 
-    // Build a merged view of categories
     var allCats = {};
     prevComp.forEach(function(c) { allCats[c.category] = true; });
     currComp.forEach(function(c) { allCats[c.category] = true; });
@@ -1019,15 +1423,15 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
       var meta = CATEGORY_META[cat] || { label: cat };
 
       if (d === 0) {
-        html += '<div class="diff-line diff-same">  ' + esc(meta.label) + ': ' + fmtK(currTok) + ' tok (unchanged)</div>';
+        html += '<div class="diff-line diff-same">  ' + esc(meta.label) + ': ' + fmtK(currTok) + ' (unchanged)</div>';
       } else if (prevTok === 0) {
-        html += '<div class="diff-line diff-add">+ ' + esc(meta.label) + ': ' + fmtK(currTok) + ' tok (new)</div>';
+        html += '<div class="diff-line diff-add">+ ' + esc(meta.label) + ': ' + fmtK(currTok) + ' (new)</div>';
       } else if (currTok === 0) {
-        html += '<div class="diff-line diff-remove">- ' + esc(meta.label) + ': ' + fmtK(prevTok) + ' tok (removed)</div>';
+        html += '<div class="diff-line diff-remove">- ' + esc(meta.label) + ': ' + fmtK(prevTok) + ' (removed)</div>';
       } else if (d > 0) {
-        html += '<div class="diff-line diff-add">+ ' + esc(meta.label) + ': ' + fmtK(prevTok) + ' \u2192 ' + fmtK(currTok) + ' tok (+' + fmtK(d) + ')</div>';
+        html += '<div class="diff-line diff-add">+ ' + esc(meta.label) + ': ' + fmtK(prevTok) + ' \u2192 ' + fmtK(currTok) + ' (+' + fmtK(d) + ')</div>';
       } else {
-        html += '<div class="diff-line diff-remove">- ' + esc(meta.label) + ': ' + fmtK(prevTok) + ' \u2192 ' + fmtK(currTok) + ' tok (' + fmtK(d) + ')</div>';
+        html += '<div class="diff-line diff-remove">- ' + esc(meta.label) + ': ' + fmtK(prevTok) + ' \u2192 ' + fmtK(currTok) + ' (' + fmtK(d) + ')</div>';
       }
     }
 
@@ -1041,30 +1445,49 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
     var comp = entry.composition || [];
     var totalTok = comp.reduce(function(s, c) { return s + c.tokens; }, 0);
 
-    // 1. Large single tool result
+    // Build tool name map for findings
+    var findingsToolNameMap = {};
+    (ci.messages || []).forEach(function(m) {
+      if (m.contentBlocks) {
+        m.contentBlocks.forEach(function(b) {
+          if (b.type === 'tool_use' && b.id && b.name) findingsToolNameMap[b.id] = b.name;
+        });
+      }
+    });
+
     var toolResults = comp.find(function(c) { return c.category === 'tool_results'; });
     if (toolResults && totalTok > 0 && toolResults.pct > 25) {
-      // Check individual messages for oversized tool results
       var largestResult = 0;
+      var largestToolName = '';
       (ci.messages || []).forEach(function(m) {
-        if (m.tokens > largestResult && classifyMessageRole(m) === 'tool_results') {
+        if (classifyMessageRole(m) === 'tool_results' && m.tokens > largestResult) {
           largestResult = m.tokens;
+          // Find the tool name from contentBlocks
+          if (m.contentBlocks) {
+            for (var bi = 0; bi < m.contentBlocks.length; bi++) {
+              var b = m.contentBlocks[bi];
+              if (b.type === 'tool_result' && b.tool_use_id && findingsToolNameMap[b.tool_use_id]) {
+                largestToolName = findingsToolNameMap[b.tool_use_id];
+                break;
+              }
+            }
+          }
         }
       });
       if (largestResult > 2000) {
+        var lrPct = Math.round(largestResult / totalTok * 100);
+        var lrTitle = 'Large tool result' + (largestToolName ? ': ' + largestToolName : '') + ' (' + fmtK(largestResult) + ' tokens, ' + lrPct + '% of context)';
         recs.push({
           severity: 'high',
-          title: 'Large tool result: ' + fmtK(largestResult) + ' tokens (' + Math.round(largestResult / totalTok * 100) + '% of context)',
-          detail: 'Single tool result consuming disproportionate context. Consider truncating large outputs or using summary flags.',
+          title: lrTitle,
+          detail: 'This single result reduces space for conversation history and is re-sent every turn. Consider truncating output or using summary flags.',
           impact: fmtK(largestResult) + ' tok',
         });
       }
     }
 
-    // 2. Tool definitions overhead
     var toolDefs = comp.find(function(c) { return c.category === 'tool_definitions'; });
     if (toolDefs && toolDefs.pct > 30) {
-      // Count unique tool calls in the session
       var usedTools = {};
       entries.forEach(function(e) {
         (e.contextInfo.messages || []).forEach(function(m) {
@@ -1077,54 +1500,79 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
       });
       var usedCount = Object.keys(usedTools).length;
       var totalTools = ci.tools ? ci.tools.length : 0;
+      // Get all defined tool names
+      var allDefinedNames = [];
+      if (ci.tools) {
+        ci.tools.forEach(function(t) {
+          var name = t.name || (t.function && t.function.name);
+          if (name) allDefinedNames.push(name);
+        });
+      }
+      var unusedNames = allDefinedNames.filter(function(n) { return !usedTools[n]; });
       if (totalTools > usedCount + 3) {
+        var unusedPreview = unusedNames.slice(0, 5).join(', ');
+        if (unusedNames.length > 5) unusedPreview += ' +' + (unusedNames.length - 5) + ' more';
+        var wastedTok = Math.round(toolDefs.tokens * unusedNames.length / totalTools);
         recs.push({
           severity: 'high',
-          title: 'Tool definitions are ' + toolDefs.pct + '% of context but only ' + usedCount + ' unique tools used',
-          detail: fmtK(toolDefs.tokens) + ' tokens for ' + totalTools + ' tool definitions. ' + (totalTools - usedCount) + ' tools loaded but unused.',
-          impact: '~' + fmtK(Math.round(toolDefs.tokens * (totalTools - usedCount) / totalTools)) + ' tok',
+          title: usedCount + '/' + totalTools + ' tools used, ' + unusedNames.length + ' idle',
+          detail: 'Unused: ' + unusedPreview + '. Definitions cost ~' + fmtK(wastedTok) + ' tokens \u2014 re-sent every turn. Remove unused tools to free context.',
+          impact: '~' + fmtK(wastedTok) + ' tok',
         });
       }
     }
 
-    // 3. Tool results domination
     if (toolResults && toolResults.pct > 60) {
       var userText = comp.find(function(c) { return c.category === 'user_text'; });
       var userPct = userText ? userText.pct : 0;
+      // Build per-tool token breakdown
+      var perToolTokens = {};
+      (ci.messages || []).forEach(function(m) {
+        if (classifyMessageRole(m) === 'tool_results' && m.contentBlocks) {
+          m.contentBlocks.forEach(function(b) {
+            if (b.type === 'tool_result' && b.tool_use_id) {
+              var tname = findingsToolNameMap[b.tool_use_id] || 'unknown';
+              perToolTokens[tname] = (perToolTokens[tname] || 0) + (m.tokens || 0);
+            }
+          });
+        }
+      });
+      var topTools = Object.keys(perToolTokens).map(function(n) {
+        return { name: n, tokens: perToolTokens[n] };
+      }).sort(function(a, b) { return b.tokens - a.tokens; }).slice(0, 3);
+      var topToolsStr = topTools.map(function(t) { return t.name + ' (' + fmtK(t.tokens) + ')'; }).join(', ');
       recs.push({
         severity: 'med',
-        title: 'Tool results are ' + toolResults.pct + '% of the messages section',
-        detail: 'Your conversation is ' + userPct + '% user text, ' + toolResults.pct + '% tool output. Consider summarizing older tool results.',
+        title: 'Tool results dominate: ' + toolResults.pct + '% of context',
+        detail: 'Top tools: ' + topToolsStr + '. User text is only ' + userPct + '%. Large results crowd out conversation history.',
         impact: 'Structural',
       });
     }
 
-    // 4. Context utilization check
     var utilPct = entry.contextLimit > 0 ? Math.round(ci.totalTokens / entry.contextLimit * 100) : 0;
     if (utilPct > 80) {
       recs.push({
         severity: 'high',
-        title: 'Context utilization critical at ' + utilPct + '%',
-        detail: fmtK(ci.totalTokens) + ' of ' + fmtK(entry.contextLimit) + ' tokens used. Risk of context overflow soon.',
+        title: 'Context utilization critical: ' + utilPct + '%',
+        detail: fmtK(ci.totalTokens) + ' of ' + fmtK(entry.contextLimit) + ' tokens. Overflow risk imminent \u2014 model will drop or summarize older messages.',
         impact: 'Critical',
       });
     } else if (utilPct > 60) {
       recs.push({
         severity: 'med',
-        title: 'Context utilization high at ' + utilPct + '%',
+        title: 'Context utilization high: ' + utilPct + '%',
         detail: fmtK(ci.totalTokens) + ' of ' + fmtK(entry.contextLimit) + ' tokens used.',
         impact: 'Monitor',
       });
     } else {
       recs.push({
         severity: 'low',
-        title: 'Context utilization healthy at ' + utilPct + '%',
-        detail: fmtK(ci.totalTokens) + ' of ' + fmtK(entry.contextLimit) + ' tokens used. Well within safe range.',
+        title: 'Context utilization healthy: ' + utilPct + '%',
+        detail: fmtK(ci.totalTokens) + ' of ' + fmtK(entry.contextLimit) + ' tokens. Safe range.',
         impact: 'OK',
       });
     }
 
-    // 5. Compaction detected
     var idx = entries.indexOf(entry);
     if (idx > 0) {
       var prevIdx = -1;
@@ -1136,21 +1584,20 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
         if (ci.totalTokens < prevTok * 0.7) {
           recs.push({
             severity: 'med',
-            title: 'Context compaction detected',
-            detail: 'Tokens dropped from ' + fmtK(prevTok) + ' to ' + fmtK(ci.totalTokens) + '. The tool may have summarized or truncated earlier context.',
+            title: 'Compaction detected',
+            detail: 'Tokens dropped ' + fmtK(prevTok) + ' \u2192 ' + fmtK(ci.totalTokens) + '. Context was summarized or truncated \u2014 older details may be lost.',
             impact: '-' + fmtK(prevTok - ci.totalTokens) + ' tok',
           });
         }
       }
     }
 
-    // 6. System injections overhead
     var sysInj = comp.find(function(c) { return c.category === 'system_injections'; });
     if (sysInj && sysInj.pct > 5) {
       recs.push({
         severity: 'med',
-        title: 'System injections are ' + sysInj.pct + '% of context',
-        detail: fmtK(sysInj.tokens) + ' tokens of system-reminder blocks injected into messages.',
+        title: 'System injections: ' + sysInj.pct + '% of context',
+        detail: fmtK(sysInj.tokens) + ' tokens of system-reminder blocks injected into messages. These are re-sent every turn, reducing space for actual conversation.',
         impact: fmtK(sysInj.tokens) + ' tok',
       });
     }
@@ -1158,7 +1605,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
     if (recs.length === 0) return '';
 
     var html = '<div class="panel">';
-    html += '<div class="panel-header">Recommendations <span style="font-size:10px;color:#555;">' + recs.length + ' finding' + (recs.length !== 1 ? 's' : '') + '</span></div>';
+    html += '<div class="panel-header">Findings <span style="font-size:10px;color:var(--text-dim);font-weight:400;">' + recs.length + '</span></div>';
     html += '<div class="panel-body">';
 
     recs.forEach(function(r) {
@@ -1178,7 +1625,6 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
 
   // --- Event handlers for main panel ---
   function attachMainHandlers() {
-    // Treemap toggle
     document.querySelectorAll('[data-treemap]').forEach(function(el) {
       el.addEventListener('click', function() {
         treemapMode = el.getAttribute('data-treemap');
@@ -1186,7 +1632,6 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
       });
     });
 
-    // Timeline toggle
     document.querySelectorAll('[data-timeline]').forEach(function(el) {
       el.addEventListener('click', function() {
         timelineMode = el.getAttribute('data-timeline');
@@ -1194,7 +1639,6 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
       });
     });
 
-    // Turn detail toggle
     document.querySelectorAll('[data-detail]').forEach(function(el) {
       el.addEventListener('click', function() {
         turnDetailMode = el.getAttribute('data-detail');
@@ -1202,7 +1646,6 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
       });
     });
 
-    // Message category expand/collapse
     document.querySelectorAll('[data-cat]').forEach(function(el) {
       el.addEventListener('click', function() {
         var catId = el.getAttribute('data-cat');
@@ -1212,7 +1655,37 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
       });
     });
 
-    // Timeline bar click -> select turn
+    // Treemap block click → navigate to matching category
+    document.querySelectorAll('.treemap-block[data-category]').forEach(function(el) {
+      el.addEventListener('click', function() {
+        var cat = el.getAttribute('data-category');
+        if (!cat) return;
+        var catId = 'msgcat-' + cat;
+        // Switch to calls view if needed
+        if (turnDetailMode !== 'calls') {
+          turnDetailMode = 'calls';
+          expandedCategories.add(catId);
+          renderMain();
+          return;
+        }
+        // Expand the category
+        expandedCategories.add(catId);
+        renderMain();
+        // Scroll to and flash-highlight the category
+        setTimeout(function() {
+          var target = document.getElementById(catId);
+          if (!target) return;
+          var catEl = target.closest('.msg-category');
+          if (catEl) {
+            catEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            catEl.classList.remove('flash-highlight');
+            void catEl.offsetWidth; // reflow to re-trigger animation
+            catEl.classList.add('flash-highlight');
+          }
+        }, 50);
+      });
+    });
+
     document.querySelectorAll('[data-tl-turn]').forEach(function(el) {
       el.addEventListener('click', function() {
         var idx = parseInt(el.getAttribute('data-tl-turn'), 10);
@@ -1223,12 +1696,24 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
         }
       });
     });
+
+    // Auto-scroll timeline to active bar
+    var activeBar = document.querySelector('.tl-bar.active');
+    if (activeBar) {
+      var wrap = activeBar.closest('.timeline-wrap');
+      if (wrap && wrap.scrollWidth > wrap.clientWidth) {
+        var barLeft = activeBar.offsetLeft;
+        var wrapW = wrap.clientWidth;
+        if (barLeft < wrap.scrollLeft || barLeft > wrap.scrollLeft + wrapW - 20) {
+          wrap.scrollLeft = Math.max(0, barLeft - wrapW / 2);
+        }
+      }
+    }
   }
 
   // --- Source filter ---
   document.getElementById('hdr-source-filter').addEventListener('change', function() {
     sourceFilter = this.value;
-    // If current session is filtered out, deselect
     if (selectedSessionId) {
       var session = getSelectedSession();
       if (!session) {
@@ -1253,15 +1738,30 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
     });
   });
 
+  // --- Reset ---
+  document.getElementById('reset-btn').addEventListener('click', function() {
+    if (!confirm('Delete all captured data?')) return;
+    fetch('/api/reset', { method: 'POST' }).then(function() {
+      selectedSessionId = null;
+      selectedTurnIndex = -1;
+      expandedSessions.clear();
+      currentRevision = -1;
+      fetchAndRender();
+    });
+  });
+
   // --- Polling ---
   function fetchAndRender() {
+    // Flash poll indicator
+    var indicator = document.getElementById('poll-indicator');
+    if (indicator) { indicator.classList.add('active'); setTimeout(function() { indicator.classList.remove('active'); }, 300); }
+
     fetch('/api/requests').then(function(r) { return r.json(); }).then(function(data) {
       var changed = data.revision !== currentRevision;
       currentRevision = data.revision;
       currentData = data;
 
       if (changed) {
-        // Auto-select first session if none selected
         if (!selectedSessionId) {
           var convos = getConversations();
           if (convos.length > 0) {
