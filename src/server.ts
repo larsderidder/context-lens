@@ -175,6 +175,11 @@ function storeRequest(
       const stillReferenced = capturedRequests.some(r => r.conversationId === evicted.conversationId);
       if (!stillReferenced) {
         conversations.delete(evicted.conversationId);
+        diskSessionsWritten.delete(evicted.conversationId);
+        // Clean up responseIdToConvo entries for this conversation
+        for (const [rid, cid] of responseIdToConvo) {
+          if (cid === evicted.conversationId) responseIdToConvo.delete(rid);
+        }
       }
     }
   }
@@ -223,16 +228,25 @@ function forwardRequest(
     method: req.method,
     headers: forwardHeaders,
   }, (proxyRes) => {
-    res.writeHead(proxyRes.statusCode!, proxyRes.headers);
+    if (!res.headersSent) res.writeHead(proxyRes.statusCode!, proxyRes.headers);
     proxyRes.pipe(res);
+    proxyRes.on('error', (err) => {
+      console.error('Upstream response error (forward):', err.message);
+      if (!res.destroyed) res.end();
+    });
   });
+
+  // Abort upstream request if client disconnects
+  res.on('close', () => { if (!proxyReq.destroyed) proxyReq.destroy(); });
 
   proxyReq.on('error', (err) => {
     console.error('Proxy error:', err.message);
     if (!res.headersSent) {
       res.writeHead(502, { 'Content-Type': 'application/json' });
     }
-    res.end(JSON.stringify({ error: 'Proxy error', details: err.message }));
+    if (!res.destroyed) {
+      res.end(JSON.stringify({ error: 'Proxy error', details: err.message }));
+    }
   });
 
   if (body) proxyReq.write(body);
@@ -345,74 +359,47 @@ function handleProxy(req: http.IncomingMessage, res: http.ServerResponse): void 
       const capturedReqHeaders = selectHeaders(req.headers);
       const capturedResHeaders = selectHeaders(proxyRes.headers as Record<string, any>);
 
-      if (isStreaming) {
-        // For streaming, pass through and capture chunks
-        let capturedChunks = '';
-        proxyRes.on('data', (chunk: Buffer) => {
-          if (!firstByteTime) firstByteTime = performance.now();
-          respBytes += chunk.length;
-          capturedChunks += chunk.toString();
-          if (!res.destroyed) res.write(chunk);
-        });
+      // Collect response as Buffer[] to avoid corrupting multi-byte UTF-8 at chunk boundaries
+      const respChunks: Buffer[] = [];
 
-        proxyRes.on('end', () => {
-          const endTime = performance.now();
-          if (!firstByteTime) firstByteTime = endTime;
-          const meta: RequestMeta = {
-            httpStatus,
-            timings: {
-              send_ms: Math.round(firstByteTime - startTime),
-              wait_ms: Math.round(firstByteTime - startTime),
-              receive_ms: Math.round(endTime - firstByteTime),
-              total_ms: Math.round(endTime - startTime),
-              tokens_per_second: null,
-            },
-            requestBytes: reqBytes,
-            responseBytes: respBytes,
-            targetUrl,
-            requestHeaders: capturedReqHeaders,
-            responseHeaders: capturedResHeaders,
-          };
-          storeRequest(contextInfo, { streaming: true, chunks: capturedChunks }, source, bodyData, meta);
-          if (!res.destroyed) res.end();
-        });
-      } else {
-        // For non-streaming, capture full response
-        let responseBody = '';
-        proxyRes.on('data', (chunk: Buffer) => {
-          if (!firstByteTime) firstByteTime = performance.now();
-          respBytes += chunk.length;
-          responseBody += chunk.toString();
-          if (!res.destroyed) res.write(chunk);
-        });
+      proxyRes.on('data', (chunk: Buffer) => {
+        if (!firstByteTime) firstByteTime = performance.now();
+        respBytes += chunk.length;
+        respChunks.push(chunk);
+        if (!res.destroyed) res.write(chunk);
+      });
 
-        proxyRes.on('end', () => {
-          const endTime = performance.now();
-          if (!firstByteTime) firstByteTime = endTime;
-          const meta: RequestMeta = {
-            httpStatus,
-            timings: {
-              send_ms: Math.round(firstByteTime - startTime),
-              wait_ms: Math.round(firstByteTime - startTime),
-              receive_ms: Math.round(endTime - firstByteTime),
-              total_ms: Math.round(endTime - startTime),
-              tokens_per_second: null,
-            },
-            requestBytes: reqBytes,
-            responseBytes: respBytes,
-            targetUrl,
-            requestHeaders: capturedReqHeaders,
-            responseHeaders: capturedResHeaders,
-          };
+      proxyRes.on('end', () => {
+        const endTime = performance.now();
+        if (!firstByteTime) firstByteTime = endTime;
+        const meta: RequestMeta = {
+          httpStatus,
+          timings: {
+            send_ms: Math.round(firstByteTime - startTime),
+            wait_ms: Math.round(firstByteTime - startTime),
+            receive_ms: Math.round(endTime - firstByteTime),
+            total_ms: Math.round(endTime - startTime),
+            tokens_per_second: null,
+          },
+          requestBytes: reqBytes,
+          responseBytes: respBytes,
+          targetUrl,
+          requestHeaders: capturedReqHeaders,
+          responseHeaders: capturedResHeaders,
+        };
+        const respBody = Buffer.concat(respChunks).toString('utf8');
+        if (isStreaming) {
+          storeRequest(contextInfo, { streaming: true, chunks: respBody }, source, bodyData, meta);
+        } else {
           try {
-            const responseData = JSON.parse(responseBody);
+            const responseData = JSON.parse(respBody);
             storeRequest(contextInfo, responseData, source, bodyData, meta);
           } catch (e) {
-            storeRequest(contextInfo, { raw: responseBody }, source, bodyData, meta);
+            storeRequest(contextInfo, { raw: respBody }, source, bodyData, meta);
           }
-          if (!res.destroyed) res.end();
-        });
-      }
+        }
+        if (!res.destroyed) res.end();
+      });
 
       proxyRes.on('error', (err) => {
         console.error('Upstream response error:', err.message);
@@ -445,11 +432,11 @@ function handleIngest(req: http.IncomingMessage, res: http.ServerResponse): void
     res.end();
     return;
   }
-  let body = '';
-  req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+  const bodyChunks: Buffer[] = [];
+  req.on('data', (chunk: Buffer) => { bodyChunks.push(chunk); });
   req.on('end', () => {
     try {
-      const data = JSON.parse(body);
+      const data = JSON.parse(Buffer.concat(bodyChunks).toString('utf8'));
       const provider = data.provider || 'unknown';
       const apiFormat = data.apiFormat || 'unknown';
       const source = data.source || 'unknown';
