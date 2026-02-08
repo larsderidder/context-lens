@@ -15,11 +15,41 @@ import {
 } from './core.js';
 
 import type {
-  ContextInfo, Conversation, CapturedEntry, ResponseData, Upstreams,
+  ContextInfo, Conversation, CapturedEntry, ResponseData, Upstreams, RequestMeta,
 } from './types.js';
+
+import { analyzeComposition, parseResponseUsage, buildLharRecord, buildSessionLine, toLharJsonl, toLharJson } from './lhar.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Model pricing: [inputPerMTok, outputPerMTok] in USD
+const MODEL_PRICING: Record<string, [number, number]> = {
+  'claude-opus-4':   [15, 75],
+  'claude-sonnet-4': [3, 15],
+  'claude-haiku-4':  [0.80, 4],
+  'claude-3-5-sonnet': [3, 15],
+  'claude-3-5-haiku':  [0.80, 4],
+  'claude-3-opus':   [15, 75],
+  'gpt-4o-mini':     [0.15, 0.60],
+  'gpt-4o':          [2.50, 10],
+  'gpt-4-turbo':     [10, 30],
+  'gpt-4':           [30, 60],
+  'o4-mini':         [1.10, 4.40],
+  'o3-mini':         [1.10, 4.40],
+  'o3':              [10, 40],
+  'o1-mini':         [3, 12],
+  'o1':              [15, 60],
+};
+
+function estimateCost(model: string, inputTokens: number, outputTokens: number): number | null {
+  for (const [key, [inp, out]] of Object.entries(MODEL_PRICING)) {
+    if (model.includes(key)) {
+      return Math.round((inputTokens * inp + outputTokens * out) / 1_000_000 * 1_000_000) / 1_000_000;
+    }
+  }
+  return null;
+}
 
 // Upstream targets — configurable via env vars
 const UPSTREAM_OPENAI_URL = process.env.UPSTREAM_OPENAI_URL || 'https://api.openai.com/v1';
@@ -35,17 +65,35 @@ const conversations = new Map<string, Conversation>(); // fingerprint -> { id, l
 // Responses API chaining: response_id -> conversationId
 const responseIdToConvo = new Map<string, string>();
 
-// Disk logging — one JSONL file per session/conversation
+// Disk logging — one LHAR file per session/conversation
 const DATA_DIR = path.join(__dirname, '..', 'data');
 try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch {}
 
-function logToDisk(entry: CapturedEntry, rawBody: Record<string, any>): void {
-  const line = JSON.stringify({ ...entry, rawBody }) + '\n';
+// Track which conversations already have a session preamble on disk
+const diskSessionsWritten = new Set<string>();
+
+function logToDisk(entry: CapturedEntry): void {
   const filename = entry.conversationId
-    ? `${entry.source}-${entry.conversationId}.jsonl`
-    : 'ungrouped.jsonl';
+    ? `${entry.source}-${entry.conversationId}.lhar`
+    : 'ungrouped.lhar';
   const filePath = path.join(DATA_DIR, filename);
-  fs.appendFile(filePath, line, err => { if (err) console.error('Log write error:', err.message); });
+
+  let output = '';
+
+  // Write session preamble on first entry for this conversation
+  if (entry.conversationId && !diskSessionsWritten.has(entry.conversationId)) {
+    diskSessionsWritten.add(entry.conversationId);
+    const convo = conversations.get(entry.conversationId);
+    if (convo) {
+      const sessionLine = buildSessionLine(entry.conversationId, convo, entry.contextInfo.model);
+      output += JSON.stringify(sessionLine) + '\n';
+    }
+  }
+
+  const record = buildLharRecord(entry, capturedRequests);
+  output += JSON.stringify(record) + '\n';
+
+  fs.appendFile(filePath, output, err => { if (err) console.error('Log write error:', err.message); });
 }
 
 // Store captured request
@@ -54,6 +102,7 @@ function storeRequest(
   responseData: ResponseData,
   source: string | null,
   rawBody?: Record<string, any>,
+  meta?: RequestMeta,
 ): CapturedEntry {
   const resolvedSource = detectSource(contextInfo, source);
   const fingerprint = computeFingerprint(contextInfo, rawBody ?? null, responseIdToConvo);
@@ -81,6 +130,13 @@ function storeRequest(
   const agentKey = computeAgentKey(contextInfo);
   const agentLabel = extractConversationLabel(contextInfo);
 
+  // Compute composition and cost
+  const composition = analyzeComposition(contextInfo, rawBody);
+  const usage = parseResponseUsage(responseData);
+  const inputTok = usage.inputTokens || contextInfo.totalTokens;
+  const outputTok = usage.outputTokens;
+  const costUsd = estimateCost(contextInfo.model, inputTok, outputTok);
+
   const entry: CapturedEntry = {
     id: Date.now() + Math.random(),
     timestamp: new Date().toISOString(),
@@ -91,6 +147,16 @@ function storeRequest(
     conversationId,
     agentKey,
     agentLabel,
+    httpStatus: meta?.httpStatus ?? null,
+    timings: meta?.timings ?? null,
+    requestBytes: meta?.requestBytes ?? 0,
+    responseBytes: meta?.responseBytes ?? 0,
+    targetUrl: meta?.targetUrl ?? null,
+    requestHeaders: meta?.requestHeaders ?? {},
+    responseHeaders: meta?.responseHeaders ?? {},
+    rawBody,
+    composition,
+    costUsd,
   };
 
   // Track response IDs for Responses API chaining
@@ -111,7 +177,7 @@ function storeRequest(
     }
   }
 
-  logToDisk(entry, rawBody ?? {});
+  logToDisk(entry);
   return entry;
 }
 
@@ -168,6 +234,18 @@ function forwardRequest(
 
   if (body) proxyReq.write(body);
   proxyReq.end();
+}
+
+// Headers to exclude from capture (auth/sensitive)
+const REDACTED_HEADERS = new Set(['authorization', 'x-api-key', 'cookie', 'set-cookie', 'x-target-url']);
+
+function selectHeaders(headers: Record<string, any>): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const [key, val] of Object.entries(headers)) {
+    if (REDACTED_HEADERS.has(key.toLowerCase())) continue;
+    if (typeof val === 'string') result[key] = val;
+  }
+  return result;
 }
 
 // Proxy handler
@@ -241,6 +319,10 @@ function handleProxy(req: http.IncomingMessage, res: http.ServerResponse): void 
 
     // Make request to actual API
     const protocol = targetParsed.protocol === 'https:' ? https : http;
+    const startTime = performance.now();
+    let firstByteTime = 0;
+    const reqBytes = bodyBuffer.length;
+
     const proxyReq = protocol.request({
       hostname: targetParsed.hostname,
       port: targetParsed.port,
@@ -251,36 +333,79 @@ function handleProxy(req: http.IncomingMessage, res: http.ServerResponse): void 
       console.log(`  ← ${proxyRes.statusCode} ${proxyRes.statusMessage}`);
       // Forward response headers
       res.writeHead(proxyRes.statusCode!, proxyRes.headers);
+      const httpStatus = proxyRes.statusCode || 0;
 
       // Handle streaming vs non-streaming
       const isStreaming = proxyRes.headers['content-type']?.includes('text/event-stream');
+      let respBytes = 0;
+
+      const capturedReqHeaders = selectHeaders(req.headers);
+      const capturedResHeaders = selectHeaders(proxyRes.headers as Record<string, any>);
 
       if (isStreaming) {
         // For streaming, pass through and capture chunks
         let capturedChunks = '';
         proxyRes.on('data', (chunk: Buffer) => {
+          if (!firstByteTime) firstByteTime = performance.now();
+          respBytes += chunk.length;
           capturedChunks += chunk.toString();
           if (!res.destroyed) res.write(chunk);
         });
 
         proxyRes.on('end', () => {
-          storeRequest(contextInfo, { streaming: true, chunks: capturedChunks }, source, bodyData);
+          const endTime = performance.now();
+          if (!firstByteTime) firstByteTime = endTime;
+          const meta: RequestMeta = {
+            httpStatus,
+            timings: {
+              send_ms: Math.round(firstByteTime - startTime),
+              wait_ms: Math.round(firstByteTime - startTime),
+              receive_ms: Math.round(endTime - firstByteTime),
+              total_ms: Math.round(endTime - startTime),
+              tokens_per_second: null,
+            },
+            requestBytes: reqBytes,
+            responseBytes: respBytes,
+            targetUrl,
+            requestHeaders: capturedReqHeaders,
+            responseHeaders: capturedResHeaders,
+          };
+          storeRequest(contextInfo, { streaming: true, chunks: capturedChunks }, source, bodyData, meta);
           if (!res.destroyed) res.end();
         });
       } else {
         // For non-streaming, capture full response
         let responseBody = '';
         proxyRes.on('data', (chunk: Buffer) => {
+          if (!firstByteTime) firstByteTime = performance.now();
+          respBytes += chunk.length;
           responseBody += chunk.toString();
           if (!res.destroyed) res.write(chunk);
         });
 
         proxyRes.on('end', () => {
+          const endTime = performance.now();
+          if (!firstByteTime) firstByteTime = endTime;
+          const meta: RequestMeta = {
+            httpStatus,
+            timings: {
+              send_ms: Math.round(firstByteTime - startTime),
+              wait_ms: Math.round(firstByteTime - startTime),
+              receive_ms: Math.round(endTime - firstByteTime),
+              total_ms: Math.round(endTime - startTime),
+              tokens_per_second: null,
+            },
+            requestBytes: reqBytes,
+            responseBytes: respBytes,
+            targetUrl,
+            requestHeaders: capturedReqHeaders,
+            responseHeaders: capturedResHeaders,
+          };
           try {
             const responseData = JSON.parse(responseBody);
-            storeRequest(contextInfo, responseData, source, bodyData);
+            storeRequest(contextInfo, responseData, source, bodyData, meta);
           } catch (e) {
-            storeRequest(contextInfo, { raw: responseBody }, source, bodyData);
+            storeRequest(contextInfo, { raw: responseBody }, source, bodyData, meta);
           }
           if (!res.destroyed) res.end();
         });
@@ -388,6 +513,30 @@ function handleWebUI(req: http.IncomingMessage, res: http.ServerResponse): void 
     convos.sort((a, b) => new Date(b.entries[0].timestamp).getTime() - new Date(a.entries[0].timestamp).getTime());
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ conversations: convos, ungrouped }));
+  } else if (parsedUrl.pathname === '/api/export/lhar') {
+    // Export as JSONL (.lhar)
+    const convoFilter = parsedUrl.query.conversation as string | undefined;
+    const entries = convoFilter
+      ? capturedRequests.filter(e => e.conversationId === convoFilter)
+      : capturedRequests;
+    const jsonl = toLharJsonl(entries, conversations);
+    res.writeHead(200, {
+      'Content-Type': 'application/x-ndjson',
+      'Content-Disposition': 'attachment; filename="context-lens-export.lhar"',
+    });
+    res.end(jsonl);
+  } else if (parsedUrl.pathname === '/api/export/lhar.json') {
+    // Export as wrapped JSON (.lhar.json)
+    const convoFilter = parsedUrl.query.conversation as string | undefined;
+    const entries = convoFilter
+      ? capturedRequests.filter(e => e.conversationId === convoFilter)
+      : capturedRequests;
+    const wrapped = toLharJson(entries, conversations);
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Content-Disposition': 'attachment; filename="context-lens-export.lhar.json"',
+    });
+    res.end(JSON.stringify(wrapped, null, 2));
   } else if (parsedUrl.pathname === '/') {
     // Serve HTML UI
     res.writeHead(200, { 'Content-Type': 'text/html' });

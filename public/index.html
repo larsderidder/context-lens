@@ -1,523 +1,803 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Context Lens</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background: #0f0f0f;
-      color: #e0e0e0;
-      padding: 20px;
-    }
-    h1 { font-size: 24px; margin-bottom: 20px; color: #fff; }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Context Lens</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: #0a0a0a; color: #e5e5e5; font-size: 13px; }
+.app { display: grid; grid-template-columns: 280px 1fr; grid-template-rows: 48px 1fr; height: 100vh; }
 
-    /* Cards */
-    .request-card {
-      background: #1a1a1a;
-      border: 1px solid #333;
-      border-radius: 8px;
-      padding: 16px;
-      margin-bottom: 16px;
-      transition: border-color 0.2s;
-    }
-    .request-card:hover { border-color: #555; }
-    .request-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 12px;
-    }
-    .provider-badge {
-      display: inline-block; padding: 4px 8px; border-radius: 4px;
-      font-size: 12px; font-weight: 600; text-transform: uppercase;
-    }
-    .provider-anthropic { background: #d4a574; color: #000; }
-    .provider-openai { background: #10a37f; color: #fff; }
-    .provider-chatgpt { background: #10a37f; color: #fff; }
-    .provider-unknown { background: #666; color: #fff; }
-    .source-badge {
-      display: inline-block; padding: 4px 8px; border-radius: 4px;
-      font-size: 11px; font-weight: 600;
-      background: #2a2a2a; color: #4a90e2; border: 1px solid #4a90e2; margin-left: 8px;
-    }
-    .model-name { font-size: 14px; color: #999; }
-    .timestamp { font-size: 12px; color: #666; }
+/* Header */
+.header { grid-column: 1 / -1; background: #141414; border-bottom: 1px solid #262626; display: flex; align-items: center; padding: 0 16px; gap: 12px; }
+.header h1 { font-size: 15px; font-weight: 600; }
+.header-right { margin-left: auto; display: flex; gap: 16px; align-items: center; font-size: 12px; }
+.header select, .header button { background: #1e1e1e; border: 1px solid #333; color: #e5e5e5; padding: 4px 12px; border-radius: 4px; font-size: 12px; cursor: pointer; }
+.header button:hover { border-color: #3b82f6; color: #93c5fd; }
 
-    /* Context bar */
-    .context-bar {
-      height: 24px; display: flex; border-radius: 4px;
-      overflow: hidden; margin-bottom: 8px; background: #252525;
-    }
-    .bar-segment { height: 100%; transition: width 0.3s; }
-    .bar-system { background: #4a90e2; }
-    .bar-tools { background: #e24a90; }
-    .bar-messages { background: #90e24a; }
-    .context-stats { display: flex; gap: 16px; font-size: 13px; margin-bottom: 8px; flex-wrap: wrap; }
-    .stat { display: flex; align-items: center; gap: 6px; }
-    .stat-dot { width: 8px; height: 8px; border-radius: 50%; }
-    .usage-indicator { font-size: 14px; font-weight: 600; color: #4a90e2; }
-    .usage-high { color: #e2a54a; }
-    .usage-critical { color: #e24a4a; }
+/* Sidebar */
+.sidebar { background: #111; border-right: 1px solid #262626; overflow-y: auto; display: flex; flex-direction: column; }
+.sidebar-section { padding: 10px 12px 4px; font-size: 10px; color: #555; text-transform: uppercase; letter-spacing: 0.08em; }
+.session-item { padding: 8px 12px; cursor: pointer; border-left: 2px solid transparent; }
+.session-item:hover { background: #1a1a1a; }
+.session-item.active { background: #111827; border-left-color: #3b82f6; }
+.session-head { display: flex; align-items: center; gap: 8px; }
+.session-meta { display: flex; gap: 12px; margin-top: 4px; padding-left: 14px; font-size: 11px; color: #555; }
+.badge { font-size: 9px; padding: 2px 6px; border-radius: 3px; font-weight: 700; text-transform: uppercase; }
+.badge-claude { background: #451a03; color: #fb923c; }
+.badge-codex { background: #052e16; color: #34d399; }
+.badge-aider { background: #1e1e1e; color: #60a5fa; }
+.badge-kimi { background: #1e1e1e; color: #a78bfa; }
+.badge-unknown { background: #1e1e1e; color: #888; }
+.dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.dot-live { background: #3b82f6; box-shadow: 0 0 4px #3b82f6; }
+.dot-done { background: #444; }
+.turn-group { margin-left: 14px; border-left: 1px solid #1e1e1e; display: none; }
+.turn-group.expanded { display: block; }
+.tg-item { padding: 5px 12px; cursor: pointer; display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.tg-item:hover { background: #151515; }
+.tg-item.active { background: #111827; }
+.tg-num { color: #555; width: 16px; text-align: right; font-size: 11px; }
+.tg-model { font-size: 9px; padding: 1px 4px; border-radius: 2px; }
+.tg-desc { color: #888; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tg-tokens { margin-left: auto; color: #444; font-size: 11px; white-space: nowrap; }
+.sub-dots { display: flex; gap: 4px; padding: 2px 12px 2px 40px; font-size: 10px; color: #444; align-items: center; }
+.sub-dot { width: 4px; height: 4px; border-radius: 50%; background: #a78bfa; }
+.sidebar-footer { padding: 10px 12px; border-top: 1px solid #1e1e1e; margin-top: auto; font-size: 11px; color: #444; }
+.sidebar-footer div { display: flex; justify-content: space-between; padding: 2px 0; }
 
-    /* Collapsible sections */
-    .details {
-      display: none; margin-top: 16px; padding-top: 16px; border-top: 1px solid #333;
-    }
-    .details.expanded { display: block; }
-    .section-title {
-      font-weight: 600; margin-top: 12px; margin-bottom: 8px; color: #fff; cursor: pointer;
-      user-select: none;
-    }
-    .section-title:hover { color: #4a90e2; }
-    .message-list { margin-top: 8px; }
-    .message-item {
-      background: #252525; padding: 8px 12px; border-radius: 4px;
-      margin-bottom: 8px; font-size: 13px;
-    }
-    .message-role { font-weight: 600; color: #4a90e2; margin-bottom: 4px; }
-    .message-content {
-      color: #ccc; white-space: pre-wrap; word-break: break-word;
-      max-height: 200px; overflow-y: auto;
-    }
-    .message-tokens { color: #666; font-size: 11px; margin-top: 4px; }
+/* Main */
+.main { overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 14px; }
 
-    /* System prompt collapsible */
-    .system-prompt-content {
-      font-family: "SF Mono", "Fira Code", "Consolas", monospace;
-      font-size: 12px; color: #ccc; white-space: pre-wrap; word-break: break-word;
-      max-height: 150px; overflow: hidden; position: relative;
-      transition: max-height 0.3s;
-    }
-    .system-prompt-content.expanded { max-height: none; }
-    .system-prompt-content:not(.expanded)::after {
-      content: ''; position: absolute; bottom: 0; left: 0; right: 0;
-      height: 40px; background: linear-gradient(transparent, #252525);
-    }
-    .toggle-btn {
-      background: none; border: 1px solid #444; color: #4a90e2;
-      padding: 2px 10px; border-radius: 4px; cursor: pointer;
-      font-size: 11px; margin-top: 4px; display: inline-block;
-    }
-    .toggle-btn:hover { border-color: #4a90e2; }
+/* Panel */
+.panel { background: #141414; border: 1px solid #262626; border-radius: 8px; overflow: hidden; }
+.panel-header { padding: 10px 16px; font-size: 11px; font-weight: 600; color: #666; text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 1px solid #1e1e1e; display: flex; justify-content: space-between; align-items: center; }
+.panel-body { padding: 16px; }
 
-    /* Content block labels */
-    .block-label {
-      display: inline-block; padding: 1px 6px; border-radius: 3px;
-      font-size: 10px; font-weight: 600; text-transform: uppercase; margin-right: 6px;
-    }
-    .block-label-text { background: #1a3a1a; color: #90e24a; }
-    .block-label-tool_use { background: #3a1a2a; color: #e24a90; }
-    .block-label-tool_result { background: #1a2a3a; color: #4a90e2; }
+/* Stats row */
+.stats-row { display: flex; gap: 14px; }
+.stats-row .panel { flex: 1; }
+.stat-card { text-align: center; padding: 4px; }
+.stat-val { font-size: 26px; font-weight: 700; }
+.stat-lbl { font-size: 10px; color: #555; margin-top: 2px; }
+.blue { color: #3b82f6; }
+.green { color: #10b981; }
+.amber { color: #f59e0b; }
+.white { color: #e5e5e5; }
+.red { color: #ef4444; }
 
-    /* Tool items */
-    .tool-item {
-      background: #252525; border-radius: 4px; margin-bottom: 6px; overflow: hidden;
-    }
-    .tool-item-header {
-      padding: 6px 12px; cursor: pointer; font-size: 13px; font-weight: 500;
-      color: #e24a90; user-select: none;
-    }
-    .tool-item-header:hover { background: #2a2a2a; }
-    .tool-item-body {
-      display: none; padding: 8px 12px; border-top: 1px solid #333;
-      font-family: "SF Mono", "Fira Code", "Consolas", monospace;
-      font-size: 11px; color: #aaa; white-space: pre-wrap; word-break: break-word;
-      max-height: 300px; overflow-y: auto;
-    }
-    .tool-item-body.expanded { display: block; }
+/* Treemap */
+.treemap { display: flex; height: 90px; border-radius: 4px; overflow: hidden; gap: 2px; }
+.treemap-block { display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 500; color: rgba(255,255,255,0.9); flex-direction: column; gap: 1px; cursor: default; transition: opacity 0.15s; }
+.treemap-block:hover { opacity: 0.85; }
+.treemap-block span { font-size: 8px; opacity: 0.7; }
+.tm-system_prompt { background: #1e40af; }
+.tm-tool_definitions { background: #be185d; }
+.tm-tool_results { background: #065f46; }
+.tm-system_injections { background: #4338ca; }
+.tm-thinking { background: #7c3aed; }
+.tm-assistant_text { background: #b45309; }
+.tm-user_text { background: #059669; }
+.tm-tool_calls { background: #9d174d; }
+.tm-images { background: #374151; }
+.tm-cache_markers { background: #525252; }
+.tm-other { background: #404040; }
+.treemap-legend { display: flex; gap: 12px; margin-top: 10px; flex-wrap: wrap; }
+.treemap-legend-item { display: flex; align-items: center; gap: 4px; font-size: 10px; color: #888; }
+.treemap-legend-dot { width: 10px; height: 10px; border-radius: 2px; }
 
-    /* Conversation groups */
-    .conversation-group {
-      border: 1px solid #333; border-radius: 8px; margin-bottom: 16px;
-      overflow: hidden;
-    }
-    .conversation-header {
-      background: #1e1e1e; padding: 12px 16px; cursor: pointer;
-      display: flex; justify-content: space-between; align-items: center;
-      user-select: none;
-    }
-    .conversation-header:hover { background: #252525; }
-    .conversation-label {
-      font-size: 13px; color: #ccc; max-width: 500px;
-      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    }
-    .turn-count {
-      display: inline-block; padding: 2px 8px; border-radius: 10px;
-      font-size: 11px; font-weight: 600; background: #333; color: #aaa; margin-left: 8px;
-    }
-    .conversation-body { display: none; }
-    .conversation-body.expanded { display: block; }
-    .turn-label {
-      font-size: 11px; font-weight: 600; color: #666;
-      padding: 4px 16px; background: #151515; border-top: 1px solid #2a2a2a;
-    }
-    .turn-card {
-      padding: 16px; border-top: 1px solid #2a2a2a;
-    }
-    .turn-card .request-header { margin-bottom: 8px; }
+/* Agent breakdown */
+.agent-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 12px; }
+.agent-bar-wrap { flex: 1; height: 6px; background: #1a1a1a; border-radius: 3px; overflow: hidden; }
+.agent-bar { height: 100%; border-radius: 3px; }
+.agent-lbl { width: 110px; color: #888; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-val { width: 110px; text-align: right; color: #555; font-size: 11px; white-space: nowrap; }
 
-    .clickable { cursor: pointer; }
+/* Timeline */
+.timeline-chart { display: flex; align-items: flex-end; gap: 1px; height: 80px; }
+.tl-bar { flex: 1; min-width: 4px; max-width: 24px; border-radius: 2px 2px 0 0; cursor: pointer; transition: opacity 0.15s; }
+.tl-bar:hover { opacity: 0.8; }
+.tl-bar.active { box-shadow: 0 0 0 1px #3b82f6; }
+.tl-legend { display: flex; gap: 16px; margin-top: 8px; }
+.tl-legend-item { display: flex; align-items: center; gap: 4px; font-size: 10px; color: #666; }
+.tl-legend-dot { width: 8px; height: 8px; border-radius: 2px; }
 
-    /* Agent sub-groups within a session */
-    .agent-group {
-      border-top: 1px solid #2a2a2a;
-    }
-    .agent-header {
-      padding: 8px 16px; cursor: pointer; user-select: none;
-      display: flex; justify-content: space-between; align-items: center;
-      background: #161616;
-    }
-    .agent-header:hover { background: #1e1e1e; }
-    .agent-label {
-      font-size: 12px; color: #aaa; max-width: 400px;
-      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    }
-    .agent-model {
-      font-size: 11px; color: #666; font-family: "SF Mono", "Fira Code", "Consolas", monospace;
-    }
-    .agent-body { display: none; }
-    .agent-body.expanded { display: block; }
+/* Toggle */
+.toggle-group { display: flex; }
+.toggle-btn { font-size: 10px; padding: 3px 10px; background: #1a1a1a; border: 1px solid #262626; color: #666; cursor: pointer; }
+.toggle-btn:first-child { border-radius: 4px 0 0 4px; }
+.toggle-btn:last-child { border-radius: 0 4px 4px 0; }
+.toggle-btn.active { background: #1e3a5f; border-color: #3b82f6; color: #93c5fd; }
 
-    .working-dir {
-      font-size: 11px; color: #777; font-family: "SF Mono", "Fira Code", "Consolas", monospace;
-      margin-top: 2px;
-    }
+/* Empty state */
+.empty-main { display: flex; align-items: center; justify-content: center; height: 100%; color: #555; flex-direction: column; gap: 8px; }
 
-    .empty-state { text-align: center; padding: 60px 20px; color: #666; }
-  </style>
+/* Working dir */
+.working-dir { font-size: 10px; color: #444; font-family: 'SF Mono', 'Fira Code', Consolas, monospace; margin-top: 2px; padding-left: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Model color helpers */
+.model-opus { color: #fb923c; }
+.model-sonnet { color: #60a5fa; }
+.model-haiku { color: #a78bfa; }
+.model-gpt { color: #10b981; }
+.model-default { color: #888; }
+</style>
 </head>
 <body>
-  <h1>Context Lens</h1>
-  <div id="requests-container"></div>
-  <div id="empty-state" class="empty-state" style="display: none;">
-    <p>No requests captured yet.</p>
-    <p style="margin-top: 8px; font-size: 14px;">Point your LLM API calls to port 4040 to start capturing.</p>
+<div class="app">
+  <div class="header">
+    <h1>Context Lens</h1>
+    <div class="header-right">
+      <span id="hdr-cost" style="color:#10b981;font-weight:600;"></span>
+      <span id="hdr-reqs" style="color:#444;"></span>
+      <select id="hdr-source-filter"><option value="">All sources</option></select>
+      <button id="export-btn">Export LHAR</button>
+    </div>
   </div>
+  <div class="sidebar" id="sidebar"></div>
+  <div class="main" id="main-panel">
+    <div class="empty-main" id="empty-state">
+      <div style="font-size:16px;color:#666;">No requests captured yet</div>
+      <div style="font-size:12px;color:#444;">Point your LLM API calls to port 4040 to start capturing.</div>
+    </div>
+  </div>
+</div>
 
-  <script>
-    let currentData = null;
-    const expandedState = new Set(); // track expanded IDs across re-renders
+<script>
+(function() {
+  'use strict';
 
-    function esc(str) {
-      if (!str) return '';
-      return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  // --- State ---
+  let currentData = null;
+  let selectedSessionId = null;
+  let selectedTurnIndex = -1; // -1 = latest
+  let expandedSessions = new Set();
+  let treemapMode = 'detailed';
+  let timelineMode = 'all';
+  let sourceFilter = '';
+
+  // --- Helpers ---
+  function esc(s) { return s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : ''; }
+  function fmtK(n) { return n >= 1000 ? (n / 1000).toFixed(1) + 'K' : String(n); }
+  function fmtCost(c) { return c != null ? '$' + c.toFixed(c < 0.01 ? 4 : 2) : '--'; }
+  function fmtTime(iso) { return new Date(iso).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}); }
+
+  function modelClass(m) {
+    if (!m) return 'model-default';
+    if (m.includes('opus')) return 'model-opus';
+    if (m.includes('sonnet')) return 'model-sonnet';
+    if (m.includes('haiku')) return 'model-haiku';
+    if (m.includes('gpt') || m.includes('o1') || m.includes('o3') || m.includes('o4')) return 'model-gpt';
+    return 'model-default';
+  }
+
+  function modelBarColor(m) {
+    if (!m) return '#888';
+    if (m.includes('opus')) return '#fb923c';
+    if (m.includes('sonnet')) return '#60a5fa';
+    if (m.includes('haiku')) return '#a78bfa';
+    if (m.includes('gpt') || m.includes('o1') || m.includes('o3') || m.includes('o4')) return '#10b981';
+    return '#888';
+  }
+
+  function modelBarGradient(m) {
+    if (!m) return 'linear-gradient(to top, #555, #888)';
+    if (m.includes('opus')) return 'linear-gradient(to top, #92400e, #fb923c)';
+    if (m.includes('sonnet')) return 'linear-gradient(to top, #1e3a5f, #60a5fa)';
+    if (m.includes('haiku')) return 'linear-gradient(to top, #4c1d95, #a78bfa)';
+    if (m.includes('gpt') || m.includes('o1') || m.includes('o3') || m.includes('o4')) return 'linear-gradient(to top, #064e3b, #10b981)';
+    return 'linear-gradient(to top, #333, #888)';
+  }
+
+  function sourceBadgeClass(src) {
+    if (src === 'claude') return 'badge-claude';
+    if (src === 'codex') return 'badge-codex';
+    if (src === 'aider') return 'badge-aider';
+    if (src === 'kimi') return 'badge-kimi';
+    return 'badge-unknown';
+  }
+
+  function shortModel(m) {
+    if (!m) return '?';
+    // Extract the short name: "claude-opus-4-6-..." -> "opus"
+    if (m.includes('opus')) return 'opus';
+    if (m.includes('sonnet')) return 'sonnet';
+    if (m.includes('haiku')) return 'haiku';
+    if (m.includes('gpt-4o-mini')) return '4o-mini';
+    if (m.includes('gpt-4o')) return '4o';
+    if (m.includes('gpt-4')) return 'gpt4';
+    if (m.includes('o4-mini')) return 'o4m';
+    if (m.includes('o3-mini')) return 'o3m';
+    if (m.includes('o3')) return 'o3';
+    if (m.includes('o1')) return 'o1';
+    return m.length > 10 ? m.slice(0, 8) : m;
+  }
+
+  // Category display names and colors
+  var CATEGORY_META = {
+    system_prompt:     { label: 'System prompt',     color: '#1e40af' },
+    tool_definitions:  { label: 'Tool definitions',  color: '#be185d' },
+    tool_results:      { label: 'Tool results',      color: '#065f46' },
+    tool_calls:        { label: 'Tool calls',        color: '#9d174d' },
+    system_injections: { label: 'System injections',  color: '#4338ca' },
+    thinking:          { label: 'Thinking',           color: '#7c3aed' },
+    assistant_text:    { label: 'Assistant',          color: '#b45309' },
+    user_text:         { label: 'User',               color: '#059669' },
+    images:            { label: 'Images',             color: '#374151' },
+    cache_markers:     { label: 'Cache markers',      color: '#525252' },
+    other:             { label: 'Other',              color: '#404040' },
+  };
+
+  // Simple mode groups: system, tools, messages
+  var SIMPLE_GROUPS = {
+    system:   ['system_prompt', 'system_injections'],
+    tools:    ['tool_definitions', 'tool_calls'],
+    messages: ['tool_results', 'thinking', 'assistant_text', 'user_text', 'images', 'cache_markers', 'other'],
+  };
+  var SIMPLE_META = {
+    system:   { label: 'System',   color: '#1e40af' },
+    tools:    { label: 'Tools',    color: '#be185d' },
+    messages: { label: 'Messages', color: '#059669' },
+  };
+
+  // --- Data helpers ---
+  function getConversations() {
+    if (!currentData) return [];
+    var convos = currentData.conversations || [];
+    if (sourceFilter) convos = convos.filter(function(c) { return c.source === sourceFilter; });
+    return convos;
+  }
+
+  function getSelectedSession() {
+    if (!selectedSessionId) return null;
+    var convos = getConversations();
+    return convos.find(function(c) { return c.id === selectedSessionId; }) || null;
+  }
+
+  function getSessionEntries(session) {
+    if (!session) return [];
+    // entries are newest-first from server; reverse for chronological
+    return session.entries.slice().reverse();
+  }
+
+  function getSelectedEntry(session) {
+    if (!session) return null;
+    var entries = getSessionEntries(session);
+    if (entries.length === 0) return null;
+    var idx = selectedTurnIndex >= 0 ? selectedTurnIndex : entries.length - 1;
+    return entries[Math.min(idx, entries.length - 1)];
+  }
+
+  function sessionTotalCost(session) {
+    return (session.entries || []).reduce(function(s, e) { return s + (e.costUsd || 0); }, 0);
+  }
+
+  function sessionTotalTokens(session) {
+    return (session.entries || []).reduce(function(s, e) { return s + (e.contextInfo.totalTokens || 0); }, 0);
+  }
+
+  function allSources() {
+    if (!currentData) return [];
+    var set = {};
+    (currentData.conversations || []).forEach(function(c) { if (c.source) set[c.source] = true; });
+    return Object.keys(set).sort();
+  }
+
+  // Identify main agent entries (largest context per turn group) vs subagents
+  function classifyEntries(entries) {
+    // entries in chronological order
+    // The "main" agent typically has the largest context window / is the one with most system tokens
+    // Simple heuristic: the agent with the most total tokens in the session is main
+    var agentTotals = {};
+    entries.forEach(function(e) {
+      var ak = e.agentKey || '_main';
+      agentTotals[ak] = (agentTotals[ak] || 0) + e.contextInfo.totalTokens;
+    });
+    var mainAgent = null;
+    var maxTok = 0;
+    for (var ak in agentTotals) {
+      if (agentTotals[ak] > maxTok) { maxTok = agentTotals[ak]; mainAgent = ak; }
+    }
+    return entries.map(function(e) {
+      var ak = e.agentKey || '_main';
+      return { entry: e, isMain: ak === mainAgent };
+    });
+  }
+
+  // --- Render: Header ---
+  function renderHeader() {
+    var totalCost = 0;
+    var totalReqs = 0;
+    (currentData ? currentData.conversations || [] : []).forEach(function(c) {
+      totalCost += sessionTotalCost(c);
+      totalReqs += (c.entries || []).length;
+    });
+    var ungrouped = currentData ? currentData.ungrouped || [] : [];
+    totalReqs += ungrouped.length;
+    ungrouped.forEach(function(e) { totalCost += e.costUsd || 0; });
+
+    document.getElementById('hdr-cost').textContent = fmtCost(totalCost);
+    document.getElementById('hdr-reqs').textContent = totalReqs + ' requests';
+
+    // Source filter dropdown
+    var sel = document.getElementById('hdr-source-filter');
+    var sources = allSources();
+    var oldVal = sel.value;
+    sel.innerHTML = '<option value="">All sources</option>';
+    sources.forEach(function(s) {
+      sel.innerHTML += '<option value="' + esc(s) + '"' + (s === sourceFilter ? ' selected' : '') + '>' + esc(s) + '</option>';
+    });
+    if (oldVal && !sources.includes(oldVal)) sel.value = '';
+  }
+
+  // --- Render: Sidebar ---
+  function renderSidebar() {
+    var convos = getConversations();
+    var sb = document.getElementById('sidebar');
+
+    if (convos.length === 0) {
+      sb.innerHTML = '<div class="sidebar-section">Sessions</div>'
+        + '<div style="padding:20px 12px;color:#444;font-size:12px;">No sessions yet</div>';
+      return;
     }
 
-    function cap(text, limit) {
-      limit = limit || 10000;
-      if (!text) return '';
-      if (text.length <= limit) return text;
-      return text.slice(0, limit) + '\n... [truncated at ' + limit.toLocaleString() + ' chars]';
-    }
+    var html = '<div class="sidebar-section">Sessions</div>';
 
-    function formatTimestamp(iso) {
-      const d = new Date(iso);
-      return d.toLocaleTimeString() + ' ' + d.toLocaleDateString();
-    }
+    // Aggregate stats
+    var mainCalls = 0, subCalls = 0, totalCost = 0;
 
-    function toggle(id) {
-      const el = document.getElementById(id);
-      if (!el) return;
-      if (expandedState.has(id)) {
-        expandedState.delete(id);
-        el.classList.remove('expanded');
-      } else {
-        expandedState.add(id);
-        el.classList.add('expanded');
-      }
-    }
+    convos.forEach(function(c) {
+      var isActive = c.id === selectedSessionId;
+      var entries = getSessionEntries(c);
+      var classified = classifyEntries(entries);
+      var mainCount = classified.filter(function(x) { return x.isMain; }).length;
+      var subCount = classified.filter(function(x) { return !x.isMain; }).length;
+      mainCalls += mainCount;
+      subCalls += subCount;
+      var cost = sessionTotalCost(c);
+      totalCost += cost;
+      var latestEntry = entries[entries.length - 1];
+      var model = latestEntry ? latestEntry.contextInfo.model : 'unknown';
+      var isExpanded = isActive && expandedSessions.has(c.id);
 
-    function renderContextBar(info, limit) {
-      const total = info.totalTokens || 0;
-      const usagePercent = limit ? Math.round((total / limit) * 100) : 0;
-      let usageClass = 'usage-indicator';
-      if (usagePercent > 80) usageClass += ' usage-critical';
-      else if (usagePercent > 60) usageClass += ' usage-high';
+      // Session item
+      html += '<div class="session-item' + (isActive ? ' active' : '') + '" data-session="' + esc(c.id) + '">';
+      html += '<div class="session-head">';
+      html += '<span class="dot ' + (isActive ? 'dot-live' : 'dot-done') + '"></span>';
+      html += '<span class="badge ' + sourceBadgeClass(c.source) + '">' + esc(c.source || '?') + '</span>';
+      html += '<span style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(model) + '</span>';
+      html += '</div>';
+      html += '<div class="session-meta"><span>' + entries.length + ' turns</span><span>' + fmtK(sessionTotalTokens(c)) + ' tok</span><span style="color:#10b981;">' + fmtCost(cost) + '</span></div>';
+      if (c.workingDirectory) html += '<div class="working-dir">' + esc(c.workingDirectory) + '</div>';
+      html += '</div>';
 
-      const systemPct = total ? (info.systemTokens / total) * 100 : 0;
-      const toolsPct = total ? (info.toolsTokens / total) * 100 : 0;
-      const msgsPct = total ? (info.messagesTokens / total) * 100 : 0;
+      // Turn group (expandable)
+      html += '<div class="turn-group' + (isExpanded ? ' expanded' : '') + '" data-turns="' + esc(c.id) + '">';
 
-      return '<div class="context-bar">'
-        + '<div class="bar-segment bar-system" style="width:' + systemPct + '%"></div>'
-        + '<div class="bar-segment bar-tools" style="width:' + toolsPct + '%"></div>'
-        + '<div class="bar-segment bar-messages" style="width:' + msgsPct + '%"></div>'
-        + '</div>'
-        + '<div class="context-stats">'
-        + '<div class="stat"><span class="stat-dot bar-system"></span><span>System: ' + info.systemTokens.toLocaleString() + ' tokens</span></div>'
-        + '<div class="stat"><span class="stat-dot bar-tools"></span><span>Tools: ' + info.toolsTokens.toLocaleString() + ' tokens</span></div>'
-        + '<div class="stat"><span class="stat-dot bar-messages"></span><span>Messages: ' + info.messagesTokens.toLocaleString() + ' tokens</span></div>'
-        + '</div>'
-        + '<div style="margin-top:8px;">'
-        + '<span class="' + usageClass + '">' + usagePercent + '% of context used</span>'
-        + '<span style="color:#666;margin-left:8px;">(' + total.toLocaleString() + ' / ' + limit.toLocaleString() + ' tokens)</span>'
-        + '</div>';
-    }
+      // Show main-agent turns with sub-agent dots
+      var mainEntries = classified.filter(function(x) { return x.isMain; });
+      var turnNum = 0;
 
-    function renderContentBlock(block, reqId, idx) {
-      if (!block || typeof block !== 'object') return '<div class="message-item">' + esc(String(block)) + '</div>';
-      const type = block.type || 'unknown';
-
-      if (type === 'text') {
-        return '<div class="message-item">'
-          + '<span class="block-label block-label-text">text</span>'
-          + '<div class="message-content">' + esc(cap(block.text || '')) + '</div>'
-          + '</div>';
-      }
-      if (type === 'tool_use') {
-        const inputJson = block.input ? JSON.stringify(block.input, null, 2) : '{}';
-        const bodyId = 'cb-' + reqId + '-' + idx;
-        return '<div class="message-item">'
-          + '<span class="block-label block-label-tool_use">tool_use</span>'
-          + '<strong style="color:#e24a90">' + esc(block.name || 'unnamed') + '</strong>'
-          + '<div id="' + bodyId + '" class="tool-item-body' + (expandedState.has(bodyId) ? ' expanded' : '') + '">'
-          + esc(cap(inputJson)) + '</div>'
-          + '<button class="toggle-btn" onclick="event.stopPropagation();toggle(\'' + bodyId + '\')">toggle input</button>'
-          + '</div>';
-      }
-      if (type === 'tool_result') {
-        let resultText = '';
-        if (typeof block.content === 'string') resultText = block.content;
-        else if (Array.isArray(block.content)) {
-          resultText = block.content.map(function(c) {
-            if (c.type === 'image') return '[image content]';
-            return c.text || JSON.stringify(c);
-          }).join('\n');
-        } else if (block.content) resultText = JSON.stringify(block.content);
-        return '<div class="message-item">'
-          + '<span class="block-label block-label-tool_result">tool_result</span>'
-          + '<div class="message-content">' + esc(cap(resultText)) + '</div>'
-          + '</div>';
-      }
-      if (type === 'image') {
-        return '<div class="message-item"><span class="block-label" style="background:#333;color:#aaa">image</span> [image content]</div>';
-      }
-      // Fallback
-      return '<div class="message-item"><div class="message-content">' + esc(cap(JSON.stringify(block, null, 2))) + '</div></div>';
-    }
-
-    function renderMessage(msg, reqId, msgIdx) {
-      const blocks = msg.contentBlocks;
-      let contentHtml = '';
-      if (blocks && Array.isArray(blocks) && blocks.length > 0) {
-        contentHtml = blocks.map(function(b, i) { return renderContentBlock(b, reqId, msgIdx + '-' + i); }).join('');
-      } else {
-        // Check if stringified content might contain image base64
-        let display = msg.content || '';
-        if (display.length > 500 && /data:image|base64,/.test(display.slice(0, 200))) {
-          display = '[contains image data - ' + display.length + ' chars]';
+      // Group entries into turns: each main entry is a turn, subagent entries between them are listed as dots
+      var lastMainIdx = -1;
+      classified.forEach(function(item, idx) {
+        if (!item.isMain) return;
+        turnNum++;
+        // Sub-agent dots between last main and this one
+        var subsBefore = [];
+        for (var j = lastMainIdx + 1; j < idx; j++) {
+          if (!classified[j].isMain) subsBefore.push(classified[j]);
         }
-        contentHtml = '<div class="message-content">' + esc(cap(display)) + '</div>';
-      }
-      return '<div class="message-item">'
-        + '<div class="message-role">' + esc(msg.role) + '</div>'
-        + contentHtml
-        + '<div class="message-tokens">' + (msg.tokens || 0).toLocaleString() + ' tokens</div>'
-        + '</div>';
-    }
 
-    function renderDetails(req, detailsId) {
-      const info = req.contextInfo;
-      const isExp = expandedState.has(detailsId);
-      let html = '<div id="' + detailsId + '" class="details' + (isExp ? ' expanded' : '') + '">';
+        var e = item.entry;
+        var turnActive = isActive && (selectedTurnIndex === -1 ? turnNum === mainEntries.length : selectedTurnIndex === idx);
+        var label = esc(c.label || '').slice(0, 30);
+        // Try to use agentLabel
+        var desc = esc(e.agentLabel || '').slice(0, 30) || 'Turn ' + turnNum;
 
-      // System prompts
-      if (info.systemPrompts && info.systemPrompts.length > 0) {
-        html += '<div class="section-title">System Prompts</div>';
-        info.systemPrompts.forEach(function(sp, i) {
-          const spId = detailsId + '-sp-' + i;
-          const spExp = expandedState.has(spId);
-          html += '<div class="message-item">'
-            + '<div id="' + spId + '" class="system-prompt-content' + (spExp ? ' expanded' : '') + '">'
-            + esc(cap(sp.content)) + '</div>'
-            + '<button class="toggle-btn" onclick="event.stopPropagation();toggle(\'' + spId + '\')">'
-            + (spExp ? 'Show less' : 'Show more') + '</button></div>';
-        });
-      }
-
-      // Tools
-      if (info.tools && info.tools.length > 0) {
-        html += '<div class="section-title">Tools (' + info.tools.length + ')</div>';
-        info.tools.forEach(function(t, i) {
-          const name = t.name || (t.function && t.function.name) || 'unnamed';
-          const desc = t.description || (t.function && t.function.description) || '';
-          const schema = t.input_schema || (t.function && t.function.parameters) || null;
-          const toolId = detailsId + '-tool-' + i;
-          const tExp = expandedState.has(toolId);
-          html += '<div class="tool-item">'
-            + '<div class="tool-item-header" onclick="event.stopPropagation();toggle(\'' + toolId + '\')">'
-            + esc(name) + '</div>'
-            + '<div id="' + toolId + '" class="tool-item-body' + (tExp ? ' expanded' : '') + '">'
-            + (desc ? esc(desc) + '\n\n' : '')
-            + (schema ? esc(JSON.stringify(schema, null, 2)) : '')
-            + '</div></div>';
-        });
-      }
-
-      // Messages
-      if (info.messages && info.messages.length > 0) {
-        html += '<div class="section-title">Messages (' + info.messages.length + ')</div>';
-        html += '<div class="message-list">';
-        info.messages.forEach(function(msg, i) {
-          html += renderMessage(msg, req.id, i);
-        });
+        html += '<div class="tg-item' + (turnActive ? ' active' : '') + '" data-session="' + esc(c.id) + '" data-turn="' + idx + '">';
+        html += '<span class="tg-num">' + turnNum + '</span>';
+        html += '<span class="tg-model ' + modelClass(e.contextInfo.model) + '" style="background:#1e1e1e;padding:1px 4px;border-radius:2px;font-size:9px;">' + esc(shortModel(e.contextInfo.model)) + '</span>';
+        html += '<span class="tg-desc">' + desc + '</span>';
+        html += '<span class="tg-tokens">' + fmtK(e.contextInfo.totalTokens) + '</span>';
         html += '</div>';
-      }
 
-      html += '</div>';
-      return html;
-    }
-
-    function renderSingleCard(req) {
-      const info = req.contextInfo;
-      const detailsId = 'details-' + req.id;
-      return '<div class="request-card">'
-        + '<div class="request-header clickable" onclick="toggle(\'' + detailsId + '\')"><div>'
-        + '<span class="provider-badge provider-' + esc(info.provider) + '">' + esc(info.provider) + '</span>'
-        + (req.source && req.source !== 'unknown' ? '<span class="source-badge">' + esc(req.source) + '</span>' : '')
-        + ' <span class="model-name">' + esc(info.model) + '</span>'
-        + '</div><span class="timestamp">' + esc(formatTimestamp(req.timestamp)) + '</span></div>'
-        + '<div class="clickable" onclick="toggle(\'' + detailsId + '\')">'
-        + renderContextBar(info, req.contextLimit)
-        + '</div>'
-        + renderDetails(req, detailsId)
-        + '</div>';
-    }
-
-    function renderAgentTurns(agent, convoId) {
-      const entries = agent.entries;
-      let html = '';
-      entries.forEach(function(entry, i) {
-        const detailsId = 'details-' + entry.id;
-        html += '<div class="turn-label">Turn ' + (entries.length - i) + ' / ' + entries.length
-          + ' &mdash; ' + esc(formatTimestamp(entry.timestamp)) + '</div>';
-        html += '<div class="turn-card">';
-        html += '<div class="clickable" onclick="event.stopPropagation();toggle(\'' + detailsId + '\')">';
-        html += renderContextBar(entry.contextInfo, entry.contextLimit);
-        html += '</div>';
-        html += renderDetails(entry, detailsId);
-        html += '</div>';
-      });
-      return html;
-    }
-
-    function renderConversationGroup(convo) {
-      const entries = convo.entries; // newest-first
-      const agents = convo.agents || [];
-      const latest = entries[0];
-      const info = latest.contextInfo;
-      const bodyId = 'convo-body-' + convo.id;
-      const isExp = expandedState.has(bodyId);
-      const hasAgents = agents.length > 1;
-
-      let html = '<div class="conversation-group">';
-      // Header
-      html += '<div class="conversation-header" onclick="toggle(\'' + bodyId + '\')">';
-      html += '<div>';
-      html += '<span class="provider-badge provider-' + esc(info.provider) + '">' + esc(info.provider) + '</span>';
-      if (convo.source && convo.source !== 'unknown') html += '<span class="source-badge">' + esc(convo.source) + '</span>';
-      if (hasAgents) {
-        html += '<span class="turn-count">' + agents.length + ' agents, ' + entries.length + ' calls</span>';
-      } else {
-        html += ' <span class="model-name">' + esc(info.model) + '</span>';
-        html += '<span class="turn-count">' + entries.length + ' turns</span>';
-      }
-      html += '</div>';
-      html += '<div>';
-      html += '<span class="conversation-label">' + esc(convo.label) + '</span>';
-      html += ' <span class="timestamp">' + esc(formatTimestamp(latest.timestamp)) + '</span>';
-      if (convo.workingDirectory) html += '<div class="working-dir">' + esc(convo.workingDirectory) + '</div>';
-      html += '</div></div>';
-
-      // Summary (always visible): latest request's context bar
-      html += '<div style="padding:12px 16px;background:#1a1a1a;">'
-        + renderContextBar(info, latest.contextLimit) + '</div>';
-
-      // Expandable body
-      html += '<div id="' + bodyId + '" class="conversation-body' + (isExp ? ' expanded' : '') + '">';
-
-      if (hasAgents) {
-        // Multi-agent: render each agent as a collapsible sub-group
-        agents.forEach(function(agent) {
-          const agentBodyId = 'agent-' + convo.id + '-' + agent.key;
-          const aExp = expandedState.has(agentBodyId);
-          const turnText = agent.entries.length === 1 ? '1 turn' : agent.entries.length + ' turns';
-          html += '<div class="agent-group">';
-          html += '<div class="agent-header" onclick="event.stopPropagation();toggle(\'' + agentBodyId + '\')">';
-          html += '<div>';
-          html += '<span class="agent-model">' + esc(agent.model) + '</span> ';
-          html += '<span class="agent-label">' + esc(agent.label) + '</span>';
+        // Sub-agent dots after this turn
+        var subsAfter = [];
+        for (var k = idx + 1; k < classified.length; k++) {
+          if (classified[k].isMain) break;
+          subsAfter.push(classified[k]);
+        }
+        if (subsAfter.length > 0) {
+          html += '<div class="sub-dots">';
+          subsAfter.forEach(function() { html += '<span class="sub-dot"></span>'; });
+          var subModel = shortModel(subsAfter[0].entry.contextInfo.model);
+          html += ' ' + esc(subModel) + ' x' + subsAfter.length;
           html += '</div>';
-          html += '<span class="turn-count">' + turnText + '</span>';
-          html += '</div>';
-          html += '<div id="' + agentBodyId + '" class="agent-body' + (aExp ? ' expanded' : '') + '">';
-          html += renderAgentTurns(agent, convo.id);
-          html += '</div></div>';
-        });
-      } else {
-        // Single agent: render turns directly
-        html += renderAgentTurns(agents[0] || { entries: entries }, convo.id);
-      }
+        }
 
-      html += '</div></div>';
-      return html;
-    }
-
-    function renderConversations(data) {
-      const container = document.getElementById('requests-container');
-      const emptyState = document.getElementById('empty-state');
-      const convos = data.conversations || [];
-      const ungrouped = data.ungrouped || [];
-
-      if (convos.length === 0 && ungrouped.length === 0) {
-        container.innerHTML = '';
-        emptyState.style.display = 'block';
-        return;
-      }
-      emptyState.style.display = 'none';
-
-      // Merge into a single timeline sorted by most recent entry
-      const items = [];
-      convos.forEach(function(c) {
-        const latest = c.entries[0];
-        items.push({ type: c.entries.length === 1 ? 'single' : 'group', ts: new Date(latest.timestamp), data: c });
+        lastMainIdx = idx;
       });
-      ungrouped.forEach(function(r) {
-        items.push({ type: 'ungrouped', ts: new Date(r.timestamp), data: r });
-      });
-      items.sort(function(a, b) { return b.ts - a.ts; });
 
-      let html = '';
-      items.forEach(function(item) {
-        if (item.type === 'single') {
-          html += renderSingleCard(item.data.entries[0]);
-        } else if (item.type === 'group') {
-          html += renderConversationGroup(item.data);
+      html += '</div>'; // turn-group
+    });
+
+    // Footer
+    html += '<div class="sidebar-footer">';
+    html += '<div><span>Main calls</span><span style="color:#fb923c;">' + mainCalls + '</span></div>';
+    html += '<div><span>Subagent calls</span><span style="color:#a78bfa;">' + subCalls + '</span></div>';
+    html += '<div><span>Total cost</span><span style="color:#10b981;">' + fmtCost(totalCost) + '</span></div>';
+    html += '</div>';
+
+    sb.innerHTML = html;
+
+    // Attach click handlers
+    sb.querySelectorAll('.session-item').forEach(function(el) {
+      el.addEventListener('click', function() {
+        var sid = el.getAttribute('data-session');
+        if (selectedSessionId === sid) {
+          // Toggle turn list expansion
+          if (expandedSessions.has(sid)) expandedSessions.delete(sid);
+          else expandedSessions.add(sid);
         } else {
-          html += renderSingleCard(item.data);
+          selectedSessionId = sid;
+          selectedTurnIndex = -1;
+          expandedSessions.add(sid);
+        }
+        renderSidebar();
+        renderMain();
+      });
+    });
+
+    sb.querySelectorAll('.tg-item').forEach(function(el) {
+      el.addEventListener('click', function(ev) {
+        ev.stopPropagation();
+        var sid = el.getAttribute('data-session');
+        var turn = parseInt(el.getAttribute('data-turn'), 10);
+        selectedSessionId = sid;
+        selectedTurnIndex = turn;
+        renderSidebar();
+        renderMain();
+      });
+    });
+  }
+
+  // --- Render: Main Panel ---
+  function renderMain() {
+    var main = document.getElementById('main-panel');
+    var session = getSelectedSession();
+
+    if (!session) {
+      // Check if we have any data at all
+      var convos = getConversations();
+      if (convos.length === 0) {
+        main.innerHTML = '<div class="empty-main"><div style="font-size:16px;color:#666;">No requests captured yet</div>'
+          + '<div style="font-size:12px;color:#444;">Point your LLM API calls to port 4040 to start capturing.</div></div>';
+      } else {
+        main.innerHTML = '<div class="empty-main"><div style="font-size:14px;color:#555;">Select a session from the sidebar</div></div>';
+      }
+      return;
+    }
+
+    var entries = getSessionEntries(session);
+    var classified = classifyEntries(entries);
+    var entry = getSelectedEntry(session);
+    if (!entry) return;
+
+    var ci = entry.contextInfo;
+    var utilPct = entry.contextLimit > 0 ? Math.round((ci.totalTokens / entry.contextLimit) * 100) : 0;
+    var sessionCost = sessionTotalCost(session);
+    var msgCount = ci.messages ? ci.messages.length : 0;
+    // Count tool calls in the composition
+    var toolCallEntry = (entry.composition || []).find(function(c) { return c.category === 'tool_calls'; });
+    var toolCallCount = toolCallEntry ? toolCallEntry.count : 0;
+
+    var html = '';
+
+    // --- Stats row ---
+    var utilColor = utilPct > 80 ? 'red' : utilPct > 60 ? 'amber' : 'blue';
+    html += '<div class="stats-row">';
+    html += '<div class="panel"><div class="panel-body"><div class="stat-card"><div class="stat-val ' + utilColor + '">' + utilPct + '%</div><div class="stat-lbl">Context used (' + fmtK(ci.totalTokens) + ' / ' + fmtK(entry.contextLimit) + ')</div></div></div></div>';
+    html += '<div class="panel"><div class="panel-body"><div class="stat-card"><div class="stat-val green">' + fmtCost(sessionCost) + '</div><div class="stat-lbl">Session cost</div></div></div></div>';
+    html += '<div class="panel"><div class="panel-body"><div class="stat-card"><div class="stat-val white">' + msgCount + '</div><div class="stat-lbl">Messages in context</div></div></div></div>';
+    html += '<div class="panel"><div class="panel-body"><div class="stat-card"><div class="stat-val amber">' + toolCallCount + '</div><div class="stat-lbl">Tool calls this turn</div></div></div></div>';
+    html += '</div>';
+
+    // --- Treemap ---
+    html += renderTreemap(entry);
+
+    // --- Agent breakdown ---
+    html += renderAgentBreakdown(session, classified);
+
+    // --- Timeline ---
+    html += renderTimeline(entries, classified);
+
+    main.innerHTML = html;
+    attachMainHandlers();
+  }
+
+  // --- Treemap ---
+  function renderTreemap(entry) {
+    var composition = entry.composition || [];
+    if (composition.length === 0) return '';
+
+    var totalTok = composition.reduce(function(s, c) { return s + c.tokens; }, 0);
+    var turnLabel = '';
+    // Find turn number
+    var session = getSelectedSession();
+    if (session) {
+      var entries = getSessionEntries(session);
+      var classified = classifyEntries(entries);
+      var mainEntries = classified.filter(function(x) { return x.isMain; });
+      var turnIdx = -1;
+      for (var i = 0; i < entries.length; i++) {
+        if (entries[i].id === entry.id) { turnIdx = i; break; }
+      }
+      // Find which main turn this is
+      var mainNum = 0;
+      for (var j = 0; j < classified.length; j++) {
+        if (classified[j].isMain) mainNum++;
+        if (classified[j].entry.id === entry.id) break;
+      }
+      turnLabel = ' -- Turn ' + mainNum;
+    }
+
+    var html = '<div class="panel">';
+    html += '<div class="panel-header">Context Composition' + esc(turnLabel) + ' (' + fmtK(totalTok) + ' tok)';
+    html += '<div class="toggle-group">';
+    html += '<div class="toggle-btn' + (treemapMode === 'detailed' ? ' active' : '') + '" data-treemap="detailed">Detailed</div>';
+    html += '<div class="toggle-btn' + (treemapMode === 'simple' ? ' active' : '') + '" data-treemap="simple">Simple</div>';
+    html += '</div></div>';
+    html += '<div class="panel-body">';
+
+    if (treemapMode === 'detailed') {
+      html += '<div class="treemap">';
+      composition.forEach(function(c) {
+        var meta = CATEGORY_META[c.category] || { label: c.category, color: '#404040' };
+        var pct = totalTok > 0 ? Math.round(c.tokens / totalTok * 100) : 0;
+        // Only show label if segment is wide enough (> 3%)
+        var labelHtml = pct >= 3 ? esc(meta.label) + '<span>' + fmtK(c.tokens) + ' (' + pct + '%)</span>' : '';
+        html += '<div class="treemap-block tm-' + esc(c.category) + '" style="flex:' + c.tokens + ';" title="' + esc(meta.label) + ': ' + c.tokens.toLocaleString() + ' tokens (' + pct + '%)">' + labelHtml + '</div>';
+      });
+      html += '</div>';
+
+      // Legend
+      html += '<div class="treemap-legend">';
+      composition.forEach(function(c) {
+        var meta = CATEGORY_META[c.category] || { label: c.category, color: '#404040' };
+        html += '<div class="treemap-legend-item"><div class="treemap-legend-dot" style="background:' + meta.color + ';"></div>' + esc(meta.label) + '</div>';
+      });
+      html += '</div>';
+    } else {
+      // Simple mode: group into system/tools/messages
+      var groups = {};
+      for (var gk in SIMPLE_GROUPS) {
+        groups[gk] = 0;
+        SIMPLE_GROUPS[gk].forEach(function(cat) {
+          var found = composition.find(function(c) { return c.category === cat; });
+          if (found) groups[gk] += found.tokens;
+        });
+      }
+
+      html += '<div class="treemap">';
+      for (var gk2 in groups) {
+        if (groups[gk2] === 0) continue;
+        var meta2 = SIMPLE_META[gk2];
+        var pct2 = totalTok > 0 ? Math.round(groups[gk2] / totalTok * 100) : 0;
+        html += '<div class="treemap-block" style="flex:' + groups[gk2] + ';background:' + meta2.color + ';">'
+          + esc(meta2.label) + '<span>' + fmtK(groups[gk2]) + ' (' + pct2 + '%)</span></div>';
+      }
+      html += '</div>';
+
+      html += '<div class="treemap-legend">';
+      for (var gk3 in SIMPLE_META) {
+        if (!groups[gk3]) continue;
+        html += '<div class="treemap-legend-item"><div class="treemap-legend-dot" style="background:' + SIMPLE_META[gk3].color + ';"></div>' + esc(SIMPLE_META[gk3].label) + '</div>';
+      }
+      html += '</div>';
+    }
+
+    html += '</div></div>';
+    return html;
+  }
+
+  // --- Agent Breakdown ---
+  function renderAgentBreakdown(session, classified) {
+    // Group by agentKey
+    var agents = {};
+    var totalTok = 0;
+    classified.forEach(function(item) {
+      var ak = item.entry.agentKey || '_main';
+      if (!agents[ak]) {
+        agents[ak] = { key: ak, label: item.entry.agentLabel || 'Main', model: item.entry.contextInfo.model, tokens: 0, cost: 0, count: 0, isMain: item.isMain };
+      }
+      agents[ak].tokens += item.entry.contextInfo.totalTokens;
+      agents[ak].cost += item.entry.costUsd || 0;
+      agents[ak].count += 1;
+      totalTok += item.entry.contextInfo.totalTokens;
+    });
+
+    var agentList = Object.values(agents);
+    agentList.sort(function(a, b) { return b.tokens - a.tokens; });
+
+    var html = '<div class="panel">';
+    html += '<div class="panel-header">Agent Breakdown</div>';
+    html += '<div class="panel-body">';
+
+    agentList.forEach(function(ag) {
+      var pct = totalTok > 0 ? Math.round(ag.tokens / totalTok * 100) : 0;
+      var role = ag.isMain ? 'main' : 'sub';
+      var color = modelBarColor(ag.model);
+      html += '<div class="agent-row">';
+      html += '<span class="agent-lbl">' + esc(shortModel(ag.model)) + ' (' + role + ')</span>';
+      html += '<div class="agent-bar-wrap"><div class="agent-bar" style="width:' + pct + '%;background:' + color + ';"></div></div>';
+      html += '<span class="agent-val">' + fmtK(ag.tokens) + ' tok / ' + fmtCost(ag.cost) + '</span>';
+      html += '</div>';
+    });
+
+    // Summary line
+    var subPct = classified.length > 0
+      ? Math.round(classified.filter(function(x) { return !x.isMain; }).length / classified.length * 100)
+      : 0;
+    if (subPct > 0) {
+      var subTokPct = 0;
+      var subTok = classified.filter(function(x) { return !x.isMain; }).reduce(function(s, x) { return s + x.entry.contextInfo.totalTokens; }, 0);
+      if (totalTok > 0) subTokPct = Math.round(subTok / totalTok * 100);
+      html += '<div style="margin-top:8px;font-size:11px;color:#444;">'
+        + subPct + '% of calls are subagents, but only ' + subTokPct + '% of tokens.</div>';
+    }
+
+    html += '</div></div>';
+    return html;
+  }
+
+  // --- Timeline ---
+  function renderTimeline(entries, classified) {
+    if (entries.length === 0) return '';
+
+    var filtered = classified;
+    if (timelineMode === 'main') {
+      filtered = classified.filter(function(x) { return x.isMain; });
+    }
+
+    var maxTok = 0;
+    filtered.forEach(function(item) {
+      var val = timelineMode === 'cost' ? (item.entry.costUsd || 0) * 100000 : item.entry.contextInfo.totalTokens;
+      if (val > maxTok) maxTok = val;
+    });
+
+    var selectedEntry = getSelectedEntry(getSelectedSession());
+
+    var html = '<div class="panel">';
+    html += '<div class="panel-header">Timeline';
+    html += '<div class="toggle-group">';
+    html += '<div class="toggle-btn' + (timelineMode === 'all' ? ' active' : '') + '" data-timeline="all">All calls</div>';
+    html += '<div class="toggle-btn' + (timelineMode === 'main' ? ' active' : '') + '" data-timeline="main">Main only</div>';
+    html += '<div class="toggle-btn' + (timelineMode === 'cost' ? ' active' : '') + '" data-timeline="cost">Cost</div>';
+    html += '</div></div>';
+    html += '<div class="panel-body">';
+    html += '<div class="timeline-chart">';
+
+    filtered.forEach(function(item, i) {
+      var val = timelineMode === 'cost' ? (item.entry.costUsd || 0) * 100000 : item.entry.contextInfo.totalTokens;
+      var pct = maxTok > 0 ? Math.max(2, Math.round(val / maxTok * 100)) : 2;
+      var isActive = selectedEntry && item.entry.id === selectedEntry.id;
+      var model = item.entry.contextInfo.model;
+      // Find original index in entries array for turn selection
+      var origIdx = entries.indexOf(item.entry);
+      html += '<div class="tl-bar' + (isActive ? ' active' : '') + '" style="height:' + pct + '%;background:' + modelBarGradient(model) + ';" data-tl-turn="' + origIdx + '" title="' + esc(shortModel(model)) + ': ' + fmtK(item.entry.contextInfo.totalTokens) + ' tok"></div>';
+    });
+
+    html += '</div>';
+
+    // Legend: collect unique models
+    var seenModels = {};
+    filtered.forEach(function(item) {
+      var m = item.entry.contextInfo.model;
+      var sm = shortModel(m);
+      if (!seenModels[sm]) seenModels[sm] = { model: m, isMain: item.isMain };
+    });
+
+    html += '<div class="tl-legend">';
+    for (var sm in seenModels) {
+      var info = seenModels[sm];
+      var role = info.isMain ? 'Main' : 'Subagent';
+      html += '<div class="tl-legend-item"><span class="tl-legend-dot" style="background:' + modelBarColor(info.model) + ';"></span>' + role + ' (' + esc(sm) + ')</div>';
+    }
+    html += '</div>';
+
+    html += '</div></div>';
+    return html;
+  }
+
+  // --- Event handlers for main panel ---
+  function attachMainHandlers() {
+    // Treemap toggle
+    document.querySelectorAll('[data-treemap]').forEach(function(el) {
+      el.addEventListener('click', function() {
+        treemapMode = el.getAttribute('data-treemap');
+        renderMain();
+      });
+    });
+
+    // Timeline toggle
+    document.querySelectorAll('[data-timeline]').forEach(function(el) {
+      el.addEventListener('click', function() {
+        timelineMode = el.getAttribute('data-timeline');
+        renderMain();
+      });
+    });
+
+    // Timeline bar click -> select turn
+    document.querySelectorAll('[data-tl-turn]').forEach(function(el) {
+      el.addEventListener('click', function() {
+        var idx = parseInt(el.getAttribute('data-tl-turn'), 10);
+        if (!isNaN(idx)) {
+          selectedTurnIndex = idx;
+          renderSidebar();
+          renderMain();
         }
       });
-      container.innerHTML = html;
-    }
+    });
+  }
 
-    async function fetchRequests() {
-      try {
-        const response = await fetch('/api/requests');
-        const data = await response.json();
-        if (JSON.stringify(data) !== JSON.stringify(currentData)) {
-          currentData = data;
-          renderConversations(data);
-        }
-      } catch (err) {
-        console.error('Failed to fetch requests:', err);
+  // --- Source filter ---
+  document.getElementById('hdr-source-filter').addEventListener('change', function() {
+    sourceFilter = this.value;
+    // If current session is filtered out, deselect
+    if (selectedSessionId) {
+      var session = getSelectedSession();
+      if (!session) {
+        selectedSessionId = null;
+        selectedTurnIndex = -1;
       }
     }
+    renderSidebar();
+    renderMain();
+  });
 
-    fetchRequests();
-    setInterval(fetchRequests, 2000);
-  </script>
+  // --- Export ---
+  document.getElementById('export-btn').addEventListener('click', function() {
+    var url = '/api/export/lhar.json';
+    if (selectedSessionId) url += '?conversation=' + encodeURIComponent(selectedSessionId);
+    fetch(url).then(function(r) { return r.blob(); }).then(function(blob) {
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'context-lens-export.lhar.json';
+      a.click();
+      URL.revokeObjectURL(a.href);
+    });
+  });
+
+  // --- Polling ---
+  function fetchAndRender() {
+    fetch('/api/requests').then(function(r) { return r.json(); }).then(function(data) {
+      var changed = JSON.stringify(data) !== JSON.stringify(currentData);
+      currentData = data;
+
+      if (changed) {
+        // Auto-select first session if none selected
+        if (!selectedSessionId) {
+          var convos = getConversations();
+          if (convos.length > 0) {
+            selectedSessionId = convos[0].id;
+            selectedTurnIndex = -1;
+            expandedSessions.add(convos[0].id);
+          }
+        }
+        renderHeader();
+        renderSidebar();
+        renderMain();
+      }
+    }).catch(function(err) {
+      console.error('Fetch error:', err);
+    });
+  }
+
+  fetchAndRender();
+  setInterval(fetchAndRender, 2000);
+})();
+</script>
 </body>
 </html>
