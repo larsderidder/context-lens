@@ -71,6 +71,86 @@ function logToDisk(entry: CapturedEntry): void {
   fs.appendFile(filePath, output, err => { if (err) console.error('Log write error:', err.message); });
 }
 
+// Lightweight projection — strip rawBody, response, and heavy headers from entries
+function projectEntry(e: CapturedEntry) {
+  return {
+    id: e.id,
+    timestamp: e.timestamp,
+    contextInfo: e.contextInfo,
+    contextLimit: e.contextLimit,
+    source: e.source,
+    conversationId: e.conversationId,
+    agentKey: e.agentKey,
+    agentLabel: e.agentLabel,
+    httpStatus: e.httpStatus,
+    timings: e.timings,
+    requestBytes: e.requestBytes,
+    responseBytes: e.responseBytes,
+    targetUrl: e.targetUrl,
+    composition: e.composition,
+    costUsd: e.costUsd,
+  };
+}
+
+// State persistence — full rewrite to data/state.jsonl after every storeRequest()
+const STATE_FILE = path.join(DATA_DIR, 'state.jsonl');
+
+function saveState(): void {
+  let lines = '';
+  for (const [, convo] of conversations) {
+    lines += JSON.stringify({ type: 'conversation', data: convo }) + '\n';
+  }
+  for (const entry of capturedRequests) {
+    lines += JSON.stringify({ type: 'entry', data: projectEntry(entry) }) + '\n';
+  }
+  try {
+    fs.writeFileSync(STATE_FILE, lines);
+  } catch (err: any) {
+    console.error('State save error:', err.message);
+  }
+}
+
+function loadState(): void {
+  let content: string;
+  try {
+    content = fs.readFileSync(STATE_FILE, 'utf8');
+  } catch {
+    return; // No state file — fresh start
+  }
+  const lines = content.split('\n').filter(l => l.length > 0);
+  let loadedEntries = 0;
+  let maxId = 0;
+  for (const line of lines) {
+    try {
+      const record = JSON.parse(line);
+      if (record.type === 'conversation') {
+        const c = record.data as Conversation;
+        conversations.set(c.id, c);
+        diskSessionsWritten.add(c.id);
+      } else if (record.type === 'entry') {
+        const projected = record.data;
+        const entry: CapturedEntry = {
+          ...projected,
+          response: { raw: true },
+          requestHeaders: {},
+          responseHeaders: {},
+          rawBody: undefined,
+        };
+        capturedRequests.push(entry);
+        if (entry.id > maxId) maxId = entry.id;
+        loadedEntries++;
+      }
+    } catch (err: any) {
+      console.error('State parse error:', err.message);
+    }
+  }
+  if (loadedEntries > 0) {
+    nextEntryId = maxId + 1;
+    dataRevision = 1;
+    console.log(`Restored ${loadedEntries} entries from ${conversations.size} conversations`);
+  }
+}
+
 // Store captured request
 function storeRequest(
   contextInfo: ContextInfo,
@@ -159,6 +239,7 @@ function storeRequest(
 
   dataRevision++;
   logToDisk(entry);
+  saveState();
   return entry;
 }
 
@@ -437,27 +518,41 @@ function handleWebUI(req: http.IncomingMessage, res: http.ServerResponse): void 
     return handleIngest(req, res);
   }
 
-  if (parsedUrl.pathname === '/api/requests') {
-    // Lightweight projection — strip rawBody, response, and heavy headers from entries
-    function projectEntry(e: CapturedEntry) {
-      return {
-        id: e.id,
-        timestamp: e.timestamp,
-        contextInfo: e.contextInfo,
-        contextLimit: e.contextLimit,
-        source: e.source,
-        conversationId: e.conversationId,
-        agentKey: e.agentKey,
-        agentLabel: e.agentLabel,
-        httpStatus: e.httpStatus,
-        timings: e.timings,
-        requestBytes: e.requestBytes,
-        responseBytes: e.responseBytes,
-        targetUrl: e.targetUrl,
-        composition: e.composition,
-        costUsd: e.costUsd,
-      };
+  // DELETE /api/conversations/:id — delete one session
+  const convoDeleteMatch = parsedUrl.pathname?.match(/^\/api\/conversations\/(.+)$/);
+  if (convoDeleteMatch && req.method === 'DELETE') {
+    const convoId = decodeURIComponent(convoDeleteMatch[1]);
+    conversations.delete(convoId);
+    // Remove entries belonging to this conversation
+    for (let i = capturedRequests.length - 1; i >= 0; i--) {
+      if (capturedRequests[i].conversationId === convoId) capturedRequests.splice(i, 1);
     }
+    diskSessionsWritten.delete(convoId);
+    for (const [rid, cid] of responseIdToConvo) {
+      if (cid === convoId) responseIdToConvo.delete(rid);
+    }
+    dataRevision++;
+    saveState();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+
+  // POST /api/reset — reset all data
+  if (parsedUrl.pathname === '/api/reset' && req.method === 'POST') {
+    capturedRequests.length = 0;
+    conversations.clear();
+    diskSessionsWritten.clear();
+    responseIdToConvo.clear();
+    nextEntryId = 1;
+    dataRevision++;
+    saveState();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+
+  if (parsedUrl.pathname === '/api/requests') {
     // API endpoint: group requests by conversation
     const grouped = new Map<string, CapturedEntry[]>(); // conversationId -> entries[]
     const ungrouped: CapturedEntry[] = [];
@@ -531,6 +626,7 @@ function handleWebUI(req: http.IncomingMessage, res: http.ServerResponse): void 
 }
 
 // Start servers
+loadState();
 const proxyServer = http.createServer(handleProxy);
 const webUIServer = http.createServer(handleWebUI);
 
