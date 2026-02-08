@@ -26,11 +26,7 @@ __pycache__/
 data/
 
 # Design docs (keep locally, not in repo)
-CLI-IMPLEMENTATION.md
-MULTI-CLIENT.md
-SUMMARY.md
-CHANGELOG.md
-QUICKSTART.md
+design-docs/
 
 # Local tool state
 .claude/
