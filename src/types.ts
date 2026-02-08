@@ -133,12 +133,160 @@ export interface CapturedEntry {
   conversationId: string | null;
   agentKey: string | null;
   agentLabel: string;
+  httpStatus: number | null;
+  timings: Timings | null;
+  requestBytes: number;
+  responseBytes: number;
+  targetUrl: string | null;
+  requestHeaders: Record<string, string>;
+  responseHeaders: Record<string, string>;
+  rawBody?: Record<string, any>;
+  composition: CompositionEntry[];
+  costUsd: number | null;
 }
 
 export type ResponseData =
   | { streaming: true; chunks: string }
   | { raw: true | string }
   | Record<string, unknown>;
+
+// --- LHAR types ---
+
+export type CompositionCategory =
+  | 'system_prompt' | 'tool_definitions' | 'tool_results' | 'tool_calls'
+  | 'assistant_text' | 'user_text' | 'thinking' | 'system_injections'
+  | 'images' | 'cache_markers' | 'other';
+
+export interface CompositionEntry {
+  category: CompositionCategory;
+  tokens: number;
+  pct: number;
+  count: number;
+}
+
+export interface Timings {
+  send_ms: number;
+  wait_ms: number;
+  receive_ms: number;
+  total_ms: number;
+  tokens_per_second: number | null;
+}
+
+export interface RequestMeta {
+  httpStatus?: number;
+  timings?: Timings;
+  requestBytes?: number;
+  responseBytes?: number;
+  targetUrl?: string;
+  requestHeaders?: Record<string, string>;
+  responseHeaders?: Record<string, string>;
+}
+
+export interface LharSessionLine {
+  type: 'session';
+  trace_id: string;
+  started_at: string;
+  tool: string;
+  model: string;
+}
+
+export interface LharRecord {
+  type: 'entry';
+  id: string;
+  trace_id: string;
+  span_id: string;
+  parent_span_id: string | null;
+  timestamp: string;
+  sequence: number;
+
+  source: {
+    tool: string;
+    tool_version: string | null;
+    agent_role: string;
+    collector: string;
+    collector_version: string;
+  };
+
+  gen_ai: {
+    system: string;
+    request: {
+      model: string;
+      max_tokens: number | null;
+      temperature: number | null;
+      top_p: number | null;
+      stop_sequences: string[];
+    };
+    response: {
+      model: string | null;
+      finish_reasons: string[];
+    };
+    usage: {
+      input_tokens: number;
+      output_tokens: number;
+      total_tokens: number;
+    };
+  };
+
+  usage_ext: {
+    cache_read_tokens: number;
+    cache_write_tokens: number;
+    cost_usd: number | null;
+  };
+
+  http: {
+    method: string;
+    url: string | null;
+    status_code: number | null;
+    api_format: string;
+    stream: boolean;
+    request_headers: Record<string, string>;
+    response_headers: Record<string, string>;
+  };
+
+  timings: Timings | null;
+
+  transfer: {
+    request_bytes: number;
+    response_bytes: number;
+    compressed: boolean;
+  };
+
+  context_lens: {
+    window_size: number;
+    utilization: number;
+    system_tokens: number;
+    tools_tokens: number;
+    messages_tokens: number;
+    composition: CompositionEntry[];
+    growth: {
+      tokens_added_this_turn: number | null;
+      cumulative_tokens: number;
+      compaction_detected: boolean;
+    };
+  };
+
+  raw: {
+    request_body: null;
+    response_body: null;
+  };
+}
+
+export interface LharJsonWrapper {
+  lhar: {
+    version: string;
+    creator: {
+      name: string;
+      version: string;
+    };
+    sessions: Array<{
+      trace_id: string;
+      started_at: string;
+      tool: string;
+      model: string;
+    }>;
+    entries: LharRecord[];
+  };
+}
 
 // --- CLI types ---
 
