@@ -122,6 +122,60 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
 .model-haiku { color: #a78bfa; }
 .model-gpt { color: #10b981; }
 .model-default { color: #888; }
+
+/* Turn detail */
+.turn-detail-header { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; font-size: 12px; color: #888; }
+.call-row { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 4px; font-size: 12px; margin-bottom: 2px; }
+.call-row:hover { background: #1a1a1a; }
+.call-row.main-call { background: #111827; border-radius: 4px; }
+.call-model { font-size: 9px; padding: 1px 5px; border-radius: 2px; width: 46px; text-align: center; }
+.call-desc { color: #888; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.call-desc.main { color: #e5e5e5; }
+.call-tok { color: #555; font-size: 11px; width: 70px; text-align: right; }
+.call-cost { color: #10b981; font-size: 11px; width: 50px; text-align: right; }
+
+/* Message categories */
+.msg-section { margin-top: 12px; border-top: 1px solid #1e1e1e; padding-top: 12px; }
+.msg-section-title { font-size: 11px; color: #555; margin-bottom: 8px; display: flex; justify-content: space-between; }
+.msg-category { margin-bottom: 8px; }
+.msg-cat-header { display: flex; align-items: center; gap: 6px; padding: 4px 0; cursor: pointer; font-size: 12px; }
+.msg-cat-header:hover { color: #fff; }
+.msg-cat-dot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+.msg-cat-name { font-weight: 500; }
+.msg-cat-stats { margin-left: auto; color: #444; font-size: 11px; }
+.msg-cat-bar-wrap { width: 60px; height: 4px; background: #1a1a1a; border-radius: 2px; overflow: hidden; margin-left: 8px; }
+.msg-cat-bar { height: 100%; border-radius: 2px; }
+.msg-items { padding-left: 20px; border-left: 1px solid #1e1e1e; margin-left: 3px; display: none; }
+.msg-items.expanded { display: block; }
+.msg-line { display: flex; align-items: center; gap: 6px; padding: 3px 0; font-size: 11px; color: #888; border-bottom: 1px solid #0f0f0f; }
+.msg-line:hover { color: #ccc; }
+.msg-line-icon { color: #444; width: 14px; font-size: 10px; }
+.msg-line-text { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.msg-line-tok { color: #444; font-size: 10px; white-space: nowrap; }
+.msg-line-tok.large { color: #f59e0b; }
+
+/* Context diff */
+.diff-section { margin-top: 12px; border-top: 1px solid #1e1e1e; padding-top: 12px; }
+.diff-header { font-size: 11px; color: #555; margin-bottom: 6px; display: flex; justify-content: space-between; }
+.diff-line { font-family: 'SF Mono', 'Fira Code', Consolas, monospace; font-size: 11px; padding: 2px 8px; border-radius: 2px; margin-bottom: 1px; }
+.diff-add { background: #071f0e; color: #4ade80; }
+.diff-remove { background: #1f0707; color: #f87171; }
+.diff-same { color: #333; }
+
+/* Recommendations */
+.rec-item { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; font-size: 12px; border-bottom: 1px solid #111; }
+.rec-item:last-child { border-bottom: none; }
+.rec-severity { width: 8px; height: 8px; border-radius: 50%; margin-top: 4px; flex-shrink: 0; }
+.rec-severity.high { background: #ef4444; }
+.rec-severity.med { background: #f59e0b; }
+.rec-severity.low { background: #10b981; }
+.rec-body { flex: 1; }
+.rec-title { font-weight: 500; }
+.rec-detail { font-size: 11px; color: #555; margin-top: 2px; }
+.rec-impact { font-size: 10px; padding: 2px 6px; border-radius: 3px; white-space: nowrap; }
+.rec-impact.high { background: #451a03; color: #fb923c; }
+.rec-impact.med { background: #1c1917; color: #a8a29e; }
+.rec-impact.low { background: #052e16; color: #34d399; }
 </style>
 </head>
 <body>
@@ -155,6 +209,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
   let expandedSessions = new Set();
   let treemapMode = 'detailed';
   let timelineMode = 'all';
+  let turnDetailMode = 'calls'; // 'calls' or 'diff'
+  let expandedCategories = new Set();
   let sourceFilter = '';
 
   // --- Helpers ---
@@ -513,6 +569,12 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
     // --- Timeline ---
     html += renderTimeline(entries, classified);
 
+    // --- Turn Detail ---
+    html += renderTurnDetail(entry, entries, classified);
+
+    // --- Recommendations ---
+    html += renderRecommendations(entry, entries, classified);
+
     main.innerHTML = html;
     attachMainHandlers();
   }
@@ -711,6 +773,401 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
     return html;
   }
 
+  // --- Turn Detail ---
+  function renderTurnDetail(entry, entries, classified) {
+    var idx = entries.indexOf(entry);
+    // Find the turn group: the main entry at or before idx, plus sub-entries around it
+    var turnGroup = [];
+    var mainIdx = idx;
+    // Walk back to find the main entry that starts this turn group
+    for (var i = idx; i >= 0; i--) {
+      if (classified[i].isMain) { mainIdx = i; break; }
+    }
+    // Collect: the main entry + all sub-entries until next main
+    for (var j = mainIdx; j < classified.length; j++) {
+      if (j > mainIdx && classified[j].isMain) break;
+      turnGroup.push(classified[j]);
+    }
+
+    // Compute turn number
+    var turnNum = 0;
+    for (var k = 0; k <= mainIdx; k++) {
+      if (classified[k].isMain) turnNum++;
+    }
+
+    var html = '<div class="panel">';
+    html += '<div class="panel-header">Turn ' + turnNum + ' -- Detail';
+    html += '<div class="toggle-group">';
+    html += '<div class="toggle-btn' + (turnDetailMode === 'calls' ? ' active' : '') + '" data-detail="calls">Calls</div>';
+    html += '<div class="toggle-btn' + (turnDetailMode === 'diff' ? ' active' : '') + '" data-detail="diff">Diff</div>';
+    html += '</div></div>';
+    html += '<div class="panel-body">';
+
+    if (turnDetailMode === 'calls') {
+      // API calls list
+      html += '<div class="turn-detail-header">' + turnGroup.length + ' API call' + (turnGroup.length !== 1 ? 's' : '') + ' in turn group</div>';
+      turnGroup.forEach(function(item) {
+        var e = item.entry;
+        var isMain = item.isMain;
+        var sm = shortModel(e.contextInfo.model);
+        var desc = esc((e.agentLabel || '').slice(0, 60)) || (isMain ? 'Main call' : 'Subagent call');
+        html += '<div class="call-row' + (isMain ? ' main-call' : '') + '">';
+        html += '<span class="call-model ' + modelClass(e.contextInfo.model) + '" style="background:#1e1e1e;">' + esc(sm) + '</span>';
+        html += '<span class="call-desc' + (isMain ? ' main' : '') + '">' + desc + '</span>';
+        html += '<span class="call-tok">' + fmtK(e.contextInfo.totalTokens) + ' tok</span>';
+        html += '<span class="call-cost">' + fmtCost(e.costUsd) + '</span>';
+        html += '</div>';
+      });
+
+      // Message categories breakdown for the selected entry
+      html += renderMessageCategories(entry);
+    } else {
+      // Diff view
+      html += renderContextDiff(entry, entries, classified, turnNum);
+    }
+
+    html += '</div></div>';
+    return html;
+  }
+
+  // --- Message Categories ---
+  function renderMessageCategories(entry) {
+    var ci = entry.contextInfo;
+    var msgs = ci.messages || [];
+    if (msgs.length === 0) return '';
+
+    var msgTokens = msgs.reduce(function(s, m) { return s + (m.tokens || 0); }, 0);
+
+    var html = '<div class="msg-section">';
+    html += '<div class="msg-section-title"><span>Main agent context -- ' + msgs.length + ' messages</span><span>' + fmtK(msgTokens) + ' msg tokens</span></div>';
+
+    // Group messages by category
+    var categories = {};
+    var catOrder = ['tool_results', 'system_injections', 'tool_calls', 'thinking', 'assistant_text', 'user_text'];
+
+    msgs.forEach(function(msg, i) {
+      var cat = classifyMessageRole(msg);
+      if (!categories[cat]) categories[cat] = { items: [], tokens: 0 };
+      categories[cat].items.push({ msg: msg, idx: i });
+      categories[cat].tokens += msg.tokens || 0;
+    });
+
+    // Add categories not in catOrder
+    for (var cat in categories) {
+      if (catOrder.indexOf(cat) === -1) catOrder.push(cat);
+    }
+
+    catOrder.forEach(function(cat) {
+      var data = categories[cat];
+      if (!data) return;
+      var meta = CATEGORY_META[cat] || { label: cat, color: '#404040' };
+      var pct = msgTokens > 0 ? Math.round(data.tokens / msgTokens * 100) : 0;
+      var catId = 'msgcat-' + cat;
+      var isExpanded = expandedCategories.has(catId);
+      var arrow = isExpanded ? '\u25BE' : '\u25B8';
+
+      html += '<div class="msg-category">';
+      html += '<div class="msg-cat-header" data-cat="' + catId + '">';
+      html += '<span style="color:#666;">' + arrow + '</span>';
+      html += '<span class="msg-cat-dot" style="background:' + meta.color + ';"></span>';
+      html += '<span class="msg-cat-name" style="color:' + catTextColor(cat) + ';">' + esc(meta.label) + '</span>';
+      html += '<span class="msg-cat-stats">' + fmtK(data.tokens) + ' tok (' + pct + '%)</span>';
+      html += '<div class="msg-cat-bar-wrap"><div class="msg-cat-bar" style="width:' + pct + '%;background:' + meta.color + ';"></div></div>';
+      html += '</div>';
+
+      // Items
+      html += '<div class="msg-items' + (isExpanded ? ' expanded' : '') + '" id="' + catId + '">';
+      data.items.forEach(function(item) {
+        var msg = item.msg;
+        var preview = extractPreview(msg);
+        var isLarge = (msg.tokens || 0) > 1000;
+        html += '<div class="msg-line">';
+        html += '<span class="msg-line-icon">' + catIcon(cat) + '</span>';
+        html += '<span class="msg-line-text">' + esc(preview) + '</span>';
+        html += '<span class="msg-line-tok' + (isLarge ? ' large' : '') + '">' + fmtK(msg.tokens || 0) + ' tok</span>';
+        html += '</div>';
+      });
+      html += '</div>';
+      html += '</div>';
+    });
+
+    html += '</div>';
+    return html;
+  }
+
+  function classifyMessageRole(msg) {
+    var role = msg.role || 'user';
+    var content = msg.content || '';
+    var blocks = msg.contentBlocks;
+
+    // Check content blocks first
+    if (blocks && Array.isArray(blocks)) {
+      var hasToolUse = blocks.some(function(b) { return b.type === 'tool_use'; });
+      var hasToolResult = blocks.some(function(b) { return b.type === 'tool_result'; });
+      var hasThinking = blocks.some(function(b) { return b.type === 'thinking'; });
+      if (hasToolResult) return 'tool_results';
+      if (hasToolUse) return 'tool_calls';
+      if (hasThinking) return 'thinking';
+    }
+
+    if (typeof content === 'string' && content.includes('<system-reminder>')) return 'system_injections';
+    if (role === 'assistant') return 'assistant_text';
+    if (role === 'user') return 'user_text';
+    return 'other';
+  }
+
+  function extractPreview(msg) {
+    var content = msg.content || '';
+    var blocks = msg.contentBlocks;
+
+    if (blocks && Array.isArray(blocks)) {
+      // Find a meaningful block to preview
+      for (var i = 0; i < blocks.length; i++) {
+        var b = blocks[i];
+        if (b.type === 'tool_use') return esc(b.name || 'tool') + '(' + (b.input ? JSON.stringify(b.input).slice(0, 60) : '') + ')';
+        if (b.type === 'tool_result') {
+          var rc = typeof b.content === 'string' ? b.content : JSON.stringify(b.content || '');
+          return rc.slice(0, 80);
+        }
+        if (b.type === 'thinking') return (b.thinking || b.text || '').slice(0, 80);
+        if (b.type === 'text' || b.type === 'input_text') return (b.text || '').slice(0, 80);
+      }
+    }
+
+    // Try to parse JSON content (e.g. stringified blocks)
+    if (content.charAt(0) === '[') {
+      try {
+        var parsed = JSON.parse(content);
+        if (Array.isArray(parsed) && parsed[0]) {
+          var first = parsed[0];
+          if (first.type === 'tool_use') return (first.name || 'tool') + '(...)';
+          if (first.type === 'tool_result') return String(first.content || '').slice(0, 80);
+          if (first.text) return first.text.slice(0, 80);
+        }
+      } catch(e) {}
+    }
+
+    return content.slice(0, 80);
+  }
+
+  function catTextColor(cat) {
+    var colors = {
+      tool_results: '#10b981', system_injections: '#818cf8', tool_calls: '#f472b6',
+      thinking: '#a78bfa', assistant_text: '#f59e0b', user_text: '#10b981',
+      images: '#9ca3af', other: '#9ca3af',
+    };
+    return colors[cat] || '#888';
+  }
+
+  function catIcon(cat) {
+    // CSS-only indicators per the constraint (no emoji)
+    var icons = {
+      tool_results: '\u25A0', // filled square
+      system_injections: '\u25C6', // diamond
+      tool_calls: '\u25B6', // right triangle
+      thinking: '\u25CB', // circle
+      assistant_text: '\u25B7', // triangle outline
+      user_text: '\u25CF', // filled circle
+    };
+    return icons[cat] || '\u25AA';
+  }
+
+  // --- Context Diff ---
+  function renderContextDiff(entry, entries, classified, turnNum) {
+    var idx = entries.indexOf(entry);
+    // Find previous main entry
+    var prevEntry = null;
+    for (var i = idx - 1; i >= 0; i--) {
+      if (classified[i].isMain) { prevEntry = entries[i]; break; }
+    }
+
+    if (!prevEntry) {
+      return '<div style="color:#444;font-size:12px;">First turn -- no previous context to diff against.</div>';
+    }
+
+    var prevComp = prevEntry.composition || [];
+    var currComp = entry.composition || [];
+    var prevTotal = prevComp.reduce(function(s, c) { return s + c.tokens; }, 0);
+    var currTotal = currComp.reduce(function(s, c) { return s + c.tokens; }, 0);
+    var delta = currTotal - prevTotal;
+    var deltaSign = delta >= 0 ? '+' : '';
+
+    var html = '<div class="diff-header">';
+    html += '<span>Turn ' + (turnNum - 1) + ' \u2192 Turn ' + turnNum + '</span>';
+    html += '<span>' + deltaSign + fmtK(delta) + ' tokens</span>';
+    html += '</div>';
+
+    // Build a merged view of categories
+    var allCats = {};
+    prevComp.forEach(function(c) { allCats[c.category] = true; });
+    currComp.forEach(function(c) { allCats[c.category] = true; });
+
+    for (var cat in allCats) {
+      var prev = prevComp.find(function(c) { return c.category === cat; });
+      var curr = currComp.find(function(c) { return c.category === cat; });
+      var prevTok = prev ? prev.tokens : 0;
+      var currTok = curr ? curr.tokens : 0;
+      var d = currTok - prevTok;
+      var meta = CATEGORY_META[cat] || { label: cat };
+
+      if (d === 0) {
+        html += '<div class="diff-line diff-same">  ' + esc(meta.label) + ': ' + fmtK(currTok) + ' tok (unchanged)</div>';
+      } else if (prevTok === 0) {
+        html += '<div class="diff-line diff-add">+ ' + esc(meta.label) + ': ' + fmtK(currTok) + ' tok (new)</div>';
+      } else if (currTok === 0) {
+        html += '<div class="diff-line diff-remove">- ' + esc(meta.label) + ': ' + fmtK(prevTok) + ' tok (removed)</div>';
+      } else if (d > 0) {
+        html += '<div class="diff-line diff-add">+ ' + esc(meta.label) + ': ' + fmtK(prevTok) + ' \u2192 ' + fmtK(currTok) + ' tok (+' + fmtK(d) + ')</div>';
+      } else {
+        html += '<div class="diff-line diff-remove">- ' + esc(meta.label) + ': ' + fmtK(prevTok) + ' \u2192 ' + fmtK(currTok) + ' tok (' + fmtK(d) + ')</div>';
+      }
+    }
+
+    return html;
+  }
+
+  // --- Recommendations ---
+  function renderRecommendations(entry, entries, classified) {
+    var recs = [];
+    var ci = entry.contextInfo;
+    var comp = entry.composition || [];
+    var totalTok = comp.reduce(function(s, c) { return s + c.tokens; }, 0);
+
+    // 1. Large single tool result
+    var toolResults = comp.find(function(c) { return c.category === 'tool_results'; });
+    if (toolResults && totalTok > 0 && toolResults.pct > 25) {
+      // Check individual messages for oversized tool results
+      var largestResult = 0;
+      (ci.messages || []).forEach(function(m) {
+        if (m.tokens > largestResult && classifyMessageRole(m) === 'tool_results') {
+          largestResult = m.tokens;
+        }
+      });
+      if (largestResult > 2000) {
+        recs.push({
+          severity: 'high',
+          title: 'Large tool result: ' + fmtK(largestResult) + ' tokens (' + Math.round(largestResult / totalTok * 100) + '% of context)',
+          detail: 'Single tool result consuming disproportionate context. Consider truncating large outputs or using summary flags.',
+          impact: fmtK(largestResult) + ' tok',
+        });
+      }
+    }
+
+    // 2. Tool definitions overhead
+    var toolDefs = comp.find(function(c) { return c.category === 'tool_definitions'; });
+    if (toolDefs && toolDefs.pct > 30) {
+      // Count unique tool calls in the session
+      var usedTools = {};
+      entries.forEach(function(e) {
+        (e.contextInfo.messages || []).forEach(function(m) {
+          if (m.contentBlocks) {
+            m.contentBlocks.forEach(function(b) {
+              if (b.type === 'tool_use' && b.name) usedTools[b.name] = true;
+            });
+          }
+        });
+      });
+      var usedCount = Object.keys(usedTools).length;
+      var totalTools = ci.tools ? ci.tools.length : 0;
+      if (totalTools > usedCount + 3) {
+        recs.push({
+          severity: 'high',
+          title: 'Tool definitions are ' + toolDefs.pct + '% of context but only ' + usedCount + ' unique tools used',
+          detail: fmtK(toolDefs.tokens) + ' tokens for ' + totalTools + ' tool definitions. ' + (totalTools - usedCount) + ' tools loaded but unused.',
+          impact: '~' + fmtK(Math.round(toolDefs.tokens * (totalTools - usedCount) / totalTools)) + ' tok',
+        });
+      }
+    }
+
+    // 3. Tool results domination
+    if (toolResults && toolResults.pct > 60) {
+      var userText = comp.find(function(c) { return c.category === 'user_text'; });
+      var userPct = userText ? userText.pct : 0;
+      recs.push({
+        severity: 'med',
+        title: 'Tool results are ' + toolResults.pct + '% of the messages section',
+        detail: 'Your conversation is ' + userPct + '% user text, ' + toolResults.pct + '% tool output. Consider summarizing older tool results.',
+        impact: 'Structural',
+      });
+    }
+
+    // 4. Context utilization check
+    var utilPct = entry.contextLimit > 0 ? Math.round(ci.totalTokens / entry.contextLimit * 100) : 0;
+    if (utilPct > 80) {
+      recs.push({
+        severity: 'high',
+        title: 'Context utilization critical at ' + utilPct + '%',
+        detail: fmtK(ci.totalTokens) + ' of ' + fmtK(entry.contextLimit) + ' tokens used. Risk of context overflow soon.',
+        impact: 'Critical',
+      });
+    } else if (utilPct > 60) {
+      recs.push({
+        severity: 'med',
+        title: 'Context utilization high at ' + utilPct + '%',
+        detail: fmtK(ci.totalTokens) + ' of ' + fmtK(entry.contextLimit) + ' tokens used.',
+        impact: 'Monitor',
+      });
+    } else {
+      recs.push({
+        severity: 'low',
+        title: 'Context utilization healthy at ' + utilPct + '%',
+        detail: fmtK(ci.totalTokens) + ' of ' + fmtK(entry.contextLimit) + ' tokens used. Well within safe range.',
+        impact: 'OK',
+      });
+    }
+
+    // 5. Compaction detected
+    var idx = entries.indexOf(entry);
+    if (idx > 0) {
+      var prevIdx = -1;
+      for (var i = idx - 1; i >= 0; i--) {
+        if (classified[i].isMain) { prevIdx = i; break; }
+      }
+      if (prevIdx >= 0) {
+        var prevTok = entries[prevIdx].contextInfo.totalTokens;
+        if (ci.totalTokens < prevTok * 0.7) {
+          recs.push({
+            severity: 'med',
+            title: 'Context compaction detected',
+            detail: 'Tokens dropped from ' + fmtK(prevTok) + ' to ' + fmtK(ci.totalTokens) + '. The tool may have summarized or truncated earlier context.',
+            impact: '-' + fmtK(prevTok - ci.totalTokens) + ' tok',
+          });
+        }
+      }
+    }
+
+    // 6. System injections overhead
+    var sysInj = comp.find(function(c) { return c.category === 'system_injections'; });
+    if (sysInj && sysInj.pct > 5) {
+      recs.push({
+        severity: 'med',
+        title: 'System injections are ' + sysInj.pct + '% of context',
+        detail: fmtK(sysInj.tokens) + ' tokens of system-reminder blocks injected into messages.',
+        impact: fmtK(sysInj.tokens) + ' tok',
+      });
+    }
+
+    if (recs.length === 0) return '';
+
+    var html = '<div class="panel">';
+    html += '<div class="panel-header">Recommendations <span style="font-size:10px;color:#555;">' + recs.length + ' finding' + (recs.length !== 1 ? 's' : '') + '</span></div>';
+    html += '<div class="panel-body">';
+
+    recs.forEach(function(r) {
+      html += '<div class="rec-item">';
+      html += '<span class="rec-severity ' + r.severity + '"></span>';
+      html += '<div class="rec-body">';
+      html += '<div class="rec-title">' + esc(r.title) + '</div>';
+      html += '<div class="rec-detail">' + esc(r.detail) + '</div>';
+      html += '</div>';
+      html += '<span class="rec-impact ' + r.severity + '">' + esc(r.impact) + '</span>';
+      html += '</div>';
+    });
+
+    html += '</div></div>';
+    return html;
+  }
+
   // --- Event handlers for main panel ---
   function attachMainHandlers() {
     // Treemap toggle
@@ -725,6 +1182,24 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
     document.querySelectorAll('[data-timeline]').forEach(function(el) {
       el.addEventListener('click', function() {
         timelineMode = el.getAttribute('data-timeline');
+        renderMain();
+      });
+    });
+
+    // Turn detail toggle
+    document.querySelectorAll('[data-detail]').forEach(function(el) {
+      el.addEventListener('click', function() {
+        turnDetailMode = el.getAttribute('data-detail');
+        renderMain();
+      });
+    });
+
+    // Message category expand/collapse
+    document.querySelectorAll('[data-cat]').forEach(function(el) {
+      el.addEventListener('click', function() {
+        var catId = el.getAttribute('data-cat');
+        if (expandedCategories.has(catId)) expandedCategories.delete(catId);
+        else expandedCategories.add(catId);
         renderMain();
       });
     });
