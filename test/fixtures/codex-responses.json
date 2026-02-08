@@ -1,0 +1,41 @@
+{
+  "model": "gpt-4o",
+  "instructions": "You are a coding assistant. Follow user instructions carefully.",
+  "input": [
+    {
+      "role": "user",
+      "content": "[{\"type\":\"input_text\",\"text\":\"# AGENTS.md\\nYou are a helpful coding agent.\"}]"
+    },
+    {
+      "role": "user",
+      "content": "[{\"type\":\"input_text\",\"text\":\"<environment_context>\\nOS: Linux\\nShell: bash\\n</environment_context>\"}]"
+    },
+    {
+      "role": "user",
+      "content": "[{\"type\":\"input_text\",\"text\":\"Fix the login bug in auth.js\"}]"
+    },
+    {
+      "role": "assistant",
+      "content": "I'll look at auth.js to find the login bug."
+    },
+    {
+      "role": "user",
+      "content": "[{\"type\":\"input_text\",\"text\":\"Thanks, please continue\"}]"
+    }
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "read_file",
+        "description": "Read a file from disk",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {"type": "string"}
+          }
+        }
+      }
+    }
+  ]
+}

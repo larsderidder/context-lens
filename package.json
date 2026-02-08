@@ -7,7 +7,8 @@
     "context-lens": "./cli.js"
   },
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test 'test/**/*.test.js'"
   },
   "keywords": ["llm", "proxy", "context", "anthropic", "openai", "visualization"],
   "author": "Lars de Ridder",

@@ -3,9 +3,15 @@
 const http = require('http');
 const https = require('https');
 const url = require('url');
-const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+
+const {
+  estimateTokens, detectProvider, detectApiFormat,
+  parseContextInfo, getContextLimit, extractSource, resolveTargetUrl,
+  extractReadableText, extractUserPrompt, extractSessionId,
+  computeAgentKey, computeFingerprint, extractConversationLabel, detectSource,
+} = require('./lib/core');
 
 // Upstream targets — configurable via env vars
 const UPSTREAM_OPENAI_URL = process.env.UPSTREAM_OPENAI_URL || 'https://api.openai.com/v1';
@@ -31,334 +37,11 @@ function logToDisk(entry, rawBody) {
   fs.appendFile(LOG_FILE, line, err => { if (err) console.error('Log write error:', err.message); });
 }
 
-// Extract the actual user prompt from a Responses API input array.
-// Codex wraps user messages as [{"type":"input_text","text":"..."}] JSON strings.
-// Skip boilerplate (AGENTS.md, env context) by finding the first input_text
-// that doesn't start with known prefixes.
-function extractUserPrompt(messages) {
-  for (const m of messages) {
-    if (m.role !== 'user' || !m.content) continue;
-    try {
-      const parsed = JSON.parse(m.content);
-      if (Array.isArray(parsed) && parsed[0] && parsed[0].type === 'input_text') {
-        const text = parsed[0].text || '';
-        // Skip AGENTS.md / environment boilerplate
-        if (text.startsWith('#') || text.startsWith('<environment')) continue;
-        return m.content;
-      }
-    } catch {}
-  }
-  return null;
-}
-
-// Extract session ID from Anthropic metadata.user_id (contains _session_<uuid>)
-function extractSessionId(rawBody) {
-  const userId = rawBody?.metadata?.user_id;
-  if (!userId) return null;
-  const match = userId.match(/session_([a-f0-9-]+)/);
-  return match ? match[0] : null;
-}
-
-// Compute a sub-key to distinguish agents within a session
-function computeAgentKey(contextInfo) {
-  const userMsgs = (contextInfo.messages || []).filter(m => m.role === 'user');
-  let realText = '';
-  for (const msg of userMsgs) {
-    const t = extractReadableText(msg.content);
-    if (t) { realText = t; break; }
-  }
-  if (!realText) return null;
-  return crypto.createHash('sha256').update(realText).digest('hex').slice(0, 12);
-}
-
-function computeFingerprint(contextInfo, rawBody) {
-  // Anthropic session ID = one group per CLI session
-  const sessionId = extractSessionId(rawBody);
-  if (sessionId) {
-    return crypto.createHash('sha256').update(sessionId).digest('hex').slice(0, 16);
-  }
-
-  // Responses API chaining: if previous_response_id exists, reuse that conversation
-  if (rawBody && rawBody.previous_response_id) {
-    const existing = responseIdToConvo.get(rawBody.previous_response_id);
-    if (existing) return existing;
-  }
-
-  const userMsgs = (contextInfo.messages || []).filter(m => m.role === 'user');
-
-  let promptText;
-  if (contextInfo.apiFormat === 'responses' && userMsgs.length > 1) {
-    // Codex: find the actual user prompt, skipping injected context
-    promptText = extractUserPrompt(userMsgs) || '';
-  } else {
-    // Chat Completions / other: first user message
-    const firstUser = userMsgs[0];
-    promptText = firstUser ? firstUser.content : '';
-  }
-
-  // For non-session providers, use system prompt + prompt text
-  const systemText = (contextInfo.systemPrompts || []).map(sp => sp.content).join('\n');
-  if (!systemText && !promptText) return null;
-  return crypto.createHash('sha256').update(systemText + '\0' + promptText).digest('hex').slice(0, 16);
-}
-
-// Extract readable text from a message content string, stripping JSON wrappers and system-reminder blocks
-function extractReadableText(content) {
-  if (!content) return null;
-  let text = content;
-  try {
-    const parsed = JSON.parse(text);
-    if (Array.isArray(parsed)) {
-      // Anthropic content blocks or Codex input_text blocks
-      const textBlock = parsed.find(b =>
-        (b.type === 'text' && b.text && !b.text.startsWith('<system-reminder>'))
-        || (b.type === 'input_text' && b.text && !b.text.startsWith('#') && !b.text.startsWith('<environment'))
-      );
-      if (textBlock) text = textBlock.text;
-    }
-  } catch {}
-  text = text.replace(/\s+/g, ' ').trim();
-  return text || null;
-}
-
-function extractConversationLabel(contextInfo) {
-  const userMsgs = (contextInfo.messages || []).filter(m => m.role === 'user');
-
-  // For Responses API (Codex): skip boilerplate
-  if (contextInfo.apiFormat === 'responses' && userMsgs.length > 1) {
-    const prompt = extractUserPrompt(userMsgs);
-    const text = extractReadableText(prompt);
-    if (text) return text.length > 80 ? text.slice(0, 77) + '...' : text;
-  }
-
-  // Try each user message until we find readable text
-  for (const msg of userMsgs) {
-    const text = extractReadableText(msg.content);
-    if (text) return text.length > 80 ? text.slice(0, 77) + '...' : text;
-  }
-  return 'Unnamed conversation';
-}
-
-// Model context limits (tokens) — more specific keys first
-const CONTEXT_LIMITS = {
-  // Anthropic
-  'claude-opus-4': 200000,
-  'claude-sonnet-4': 200000,
-  'claude-haiku-4': 200000,
-  'claude-3-5-sonnet': 200000,
-  'claude-3-5-haiku': 200000,
-  'claude-3-opus': 200000,
-  // OpenAI — specific before generic
-  'gpt-4o-mini': 128000,
-  'gpt-4o': 128000,
-  'gpt-4-turbo': 128000,
-  'gpt-4': 8192,
-  'gpt-3.5-turbo': 16385,
-  'o4-mini': 200000,
-  'o3-mini': 200000,
-  'o3': 200000,
-  'o1-mini': 128000,
-  'o1': 200000,
-};
-
-// Simple token estimation: chars / 4
-function estimateTokens(text) {
-  if (!text) return 0;
-  if (typeof text === 'object') text = JSON.stringify(text);
-  return Math.ceil(text.length / 4);
-}
-
-// Detect provider from request
-// Anthropic SDK: base URL is https://api.anthropic.com, paths include /v1/ (e.g. /v1/messages)
-// OpenAI SDK:    base URL is https://api.openai.com/v1, paths have NO /v1/ (e.g. /responses, /chat/completions)
-// ChatGPT backend: base URL is https://chatgpt.com, paths like /backend-api/codex/...
-function detectProvider(pathname, headers) {
-  // ChatGPT backend (codex subscription) — paths like /api/codex/... or /backend-api/...
-  if (pathname.match(/^\/(api|backend-api)\//)) return 'chatgpt';
-  // Anthropic — paths always include /v1/
-  if (pathname.includes('/v1/messages') || pathname.includes('/v1/complete')) return 'anthropic';
-  if (headers['anthropic-version']) return 'anthropic';
-  // OpenAI — paths come without /v1/ prefix
-  if (pathname.match(/\/(responses|chat\/completions|models|embeddings)/)) return 'openai';
-  if (headers['authorization']?.startsWith('Bearer sk-')) return 'openai';
-  return 'unknown';
-}
-
-// Detect which API format is being used
-function detectApiFormat(pathname) {
-  if (pathname.includes('/v1/messages')) return 'anthropic-messages';
-  if (pathname.match(/^\/(api|backend-api)\//)) return 'chatgpt-backend';
-  if (pathname.includes('/responses')) return 'responses';
-  if (pathname.includes('/chat/completions')) return 'chat-completions';
-  return 'unknown';
-}
-
-// Parse request body and extract context info
-function parseContextInfo(provider, body, apiFormat) {
-  const info = {
-    provider,
-    apiFormat,
-    model: body.model || 'unknown',
-    systemTokens: 0,
-    toolsTokens: 0,
-    messagesTokens: 0,
-    totalTokens: 0,
-    systemPrompts: [],
-    tools: [],
-    messages: [],
-  };
-
-  if (provider === 'anthropic') {
-    // Parse Anthropic Messages format
-    if (body.system) {
-      const systemText = typeof body.system === 'string' ? body.system : JSON.stringify(body.system);
-      info.systemPrompts.push({ content: systemText });
-      info.systemTokens = estimateTokens(systemText);
-    }
-
-    if (body.tools && Array.isArray(body.tools)) {
-      info.tools = body.tools;
-      info.toolsTokens = estimateTokens(JSON.stringify(body.tools));
-    }
-
-    if (body.messages && Array.isArray(body.messages)) {
-      info.messages = body.messages.map(msg => {
-        const contentBlocks = Array.isArray(msg.content) ? msg.content : null;
-        return {
-          role: msg.role,
-          content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content),
-          contentBlocks,
-          tokens: estimateTokens(msg.content),
-        };
-      });
-      info.messagesTokens = info.messages.reduce((sum, m) => sum + m.tokens, 0);
-    }
-  } else if (apiFormat === 'responses') {
-    // Parse OpenAI Responses API format
-    if (body.instructions) {
-      info.systemPrompts.push({ content: body.instructions });
-      info.systemTokens = estimateTokens(body.instructions);
-    }
-
-    if (body.input) {
-      if (typeof body.input === 'string') {
-        // Simple string input
-        info.messages.push({ role: 'user', content: body.input, tokens: estimateTokens(body.input) });
-        info.messagesTokens = estimateTokens(body.input);
-      } else if (Array.isArray(body.input)) {
-        // Array of message objects
-        body.input.forEach(item => {
-          const content = typeof item.content === 'string' ? item.content : JSON.stringify(item.content || item);
-          if (item.role === 'system') {
-            info.systemPrompts.push({ content });
-            info.systemTokens += estimateTokens(content);
-          } else {
-            info.messages.push({ role: item.role || 'user', content, tokens: estimateTokens(content) });
-            info.messagesTokens += estimateTokens(content);
-          }
-        });
-      }
-    }
-
-    if (body.tools && Array.isArray(body.tools)) {
-      info.tools = body.tools;
-      info.toolsTokens = estimateTokens(JSON.stringify(body.tools));
-    }
-  } else if (provider === 'chatgpt') {
-    // ChatGPT backend format (codex subscription) — best-effort parsing
-    // The backend may use 'instructions', 'input', 'messages', or other fields
-    if (body.instructions) {
-      info.systemPrompts.push({ content: body.instructions });
-      info.systemTokens = estimateTokens(body.instructions);
-    }
-    if (body.system) {
-      const systemText = typeof body.system === 'string' ? body.system : JSON.stringify(body.system);
-      info.systemPrompts.push({ content: systemText });
-      info.systemTokens += estimateTokens(systemText);
-    }
-    // Try both 'input' and 'messages' since we don't know which the backend uses
-    const msgs = body.input || body.messages;
-    if (msgs) {
-      if (typeof msgs === 'string') {
-        info.messages.push({ role: 'user', content: msgs, tokens: estimateTokens(msgs) });
-        info.messagesTokens = estimateTokens(msgs);
-      } else if (Array.isArray(msgs)) {
-        msgs.forEach(item => {
-          const content = typeof item.content === 'string' ? item.content : JSON.stringify(item.content || item);
-          const role = item.role || 'user';
-          if (role === 'system' || role === 'developer') {
-            info.systemPrompts.push({ content });
-            info.systemTokens += estimateTokens(content);
-          } else {
-            info.messages.push({ role, content, tokens: estimateTokens(content) });
-            info.messagesTokens += estimateTokens(content);
-          }
-        });
-      }
-    }
-    if (body.tools && Array.isArray(body.tools)) {
-      info.tools = body.tools;
-      info.toolsTokens = estimateTokens(JSON.stringify(body.tools));
-    }
-  } else if (provider === 'openai') {
-    // Parse OpenAI Chat Completions format
-    if (body.messages && Array.isArray(body.messages)) {
-      body.messages.forEach(msg => {
-        if (msg.role === 'system' || msg.role === 'developer') {
-          info.systemPrompts.push({ content: msg.content });
-          info.systemTokens += estimateTokens(msg.content);
-        } else {
-          info.messages.push({
-            role: msg.role,
-            content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content),
-            tokens: estimateTokens(msg.content),
-          });
-          info.messagesTokens += estimateTokens(msg.content);
-        }
-      });
-    }
-
-    if (body.tools && Array.isArray(body.tools)) {
-      info.tools = body.tools;
-      info.toolsTokens = estimateTokens(JSON.stringify(body.tools));
-    } else if (body.functions && Array.isArray(body.functions)) {
-      info.tools = body.functions;
-      info.toolsTokens = estimateTokens(JSON.stringify(body.functions));
-    }
-  }
-
-  info.totalTokens = info.systemTokens + info.toolsTokens + info.messagesTokens;
-  return info;
-}
-
-// Get context limit for model
-function getContextLimit(model) {
-  for (const [key, limit] of Object.entries(CONTEXT_LIMITS)) {
-    if (model.includes(key)) return limit;
-  }
-  return 128000; // default fallback
-}
-
-// Auto-detect source tool from system prompt when not explicitly tagged
-const SOURCE_SIGNATURES = [
-  { pattern: 'Act as an expert software developer', source: 'aider' },
-  { pattern: 'You are Claude Code', source: 'claude' },
-  { pattern: 'You are Kimi Code CLI', source: 'kimi' },
-];
-
-function detectSource(contextInfo, source) {
-  if (source && source !== 'unknown') return source;
-  const systemText = (contextInfo.systemPrompts || []).map(sp => sp.content).join('\n');
-  for (const sig of SOURCE_SIGNATURES) {
-    if (systemText.includes(sig.pattern)) return sig.source;
-  }
-  return source || 'unknown';
-}
 
 // Store captured request
 function storeRequest(contextInfo, responseData, source, rawBody) {
   source = detectSource(contextInfo, source);
-  const fingerprint = computeFingerprint(contextInfo, rawBody);
+  const fingerprint = computeFingerprint(contextInfo, rawBody, responseIdToConvo);
 
   // Register or look up conversation
   let conversationId = null;
@@ -412,32 +95,16 @@ function storeRequest(contextInfo, responseData, source, rawBody) {
   return entry;
 }
 
-// Determine target URL for a request
-// Anthropic SDK sends paths WITH /v1  (base=https://api.anthropic.com → /v1/messages)
-// OpenAI SDK sends paths WITHOUT /v1  (base=https://api.openai.com/v1 → /responses)
-function resolveTargetUrl(parsedUrl, headers) {
-  const provider = detectProvider(parsedUrl.pathname, headers);
-  let targetUrl = headers['x-target-url'];
-  if (!targetUrl) {
-    if (provider === 'chatgpt') {
-      // ChatGPT backend paths include full path (e.g. /backend-api/codex/...)
-      targetUrl = UPSTREAM_CHATGPT_URL + parsedUrl.pathname;
-    } else if (provider === 'anthropic') {
-      // Anthropic paths include /v1, upstream URL doesn't
-      targetUrl = UPSTREAM_ANTHROPIC_URL + parsedUrl.pathname;
-    } else {
-      // OpenAI paths don't include /v1, upstream URL does
-      targetUrl = UPSTREAM_OPENAI_URL + parsedUrl.pathname;
-    }
-  } else if (!targetUrl.startsWith('http')) {
-    targetUrl = targetUrl + parsedUrl.pathname;
-  }
-  return { targetUrl, provider };
-}
+// Upstream config for resolveTargetUrl
+const UPSTREAMS = {
+  openai: UPSTREAM_OPENAI_URL,
+  anthropic: UPSTREAM_ANTHROPIC_URL,
+  chatgpt: UPSTREAM_CHATGPT_URL,
+};
 
 // Forward a request upstream (no body capture)
 function forwardRequest(req, res, parsedUrl, body) {
-  const { targetUrl } = resolveTargetUrl(parsedUrl, req.headers);
+  const { targetUrl } = resolveTargetUrl(parsedUrl, req.headers, UPSTREAMS);
   const targetParsed = url.parse(targetUrl);
 
   const forwardHeaders = { ...req.headers };
@@ -467,20 +134,6 @@ function forwardRequest(req, res, parsedUrl, body) {
   proxyReq.end();
 }
 
-// Extract source tag from URL path (e.g., /claude/v1/messages → source="claude", path="/v1/messages")
-// Only treats the first segment as a source prefix if it's NOT a known API path segment
-const API_PATH_SEGMENTS = new Set(['v1', 'responses', 'chat', 'models', 'embeddings', 'backend-api', 'api']);
-
-function extractSource(pathname) {
-  const match = pathname.match(/^\/([^\/]+)(\/.*)?$/);
-  if (match && match[2] && !API_PATH_SEGMENTS.has(match[1])) {
-    // Has a prefix like /claude/v1/messages (not /responses or /v1/messages)
-    return { source: decodeURIComponent(match[1]), cleanPath: match[2] || '/' };
-  }
-  // No prefix or first segment is a known API path
-  return { source: null, cleanPath: pathname };
-}
-
 // Proxy handler
 function handleProxy(req, res) {
   const parsedUrl = url.parse(req.url);
@@ -488,7 +141,7 @@ function handleProxy(req, res) {
   
   // Use clean path (without source prefix) for routing
   const cleanUrl = { ...parsedUrl, pathname: cleanPath };
-  const { targetUrl, provider } = resolveTargetUrl(cleanUrl, req.headers);
+  const { targetUrl, provider } = resolveTargetUrl(cleanUrl, req.headers, UPSTREAMS);
   const hasAuth = !!req.headers['authorization'];
   const sourceTag = source ? `[${source}]` : '';
   console.log(`${req.method} ${req.url} → ${targetUrl} [${provider}] ${sourceTag} auth=${hasAuth}`);
@@ -508,7 +161,7 @@ function handleProxy(req, res) {
     } catch (e) {
       console.log(`  ⚠ Body is not JSON (${body.length} bytes), capturing raw`);
       // Still capture the raw request even if body isn't JSON
-      const { provider } = resolveTargetUrl(cleanUrl, req.headers);
+      const { provider } = resolveTargetUrl(cleanUrl, req.headers, UPSTREAMS);
       const rawInfo = {
         provider,
         apiFormat: 'raw',
@@ -525,7 +178,7 @@ function handleProxy(req, res) {
     }
 
     console.log(`  ✓ Parsed JSON body (${Object.keys(bodyData).join(', ')})`);
-    const { targetUrl, provider } = resolveTargetUrl(cleanUrl, req.headers);
+    const { targetUrl, provider } = resolveTargetUrl(cleanUrl, req.headers, UPSTREAMS);
     const apiFormat = detectApiFormat(cleanUrl.pathname);
     const contextInfo = parseContextInfo(provider, bodyData, apiFormat);
 

@@ -1,0 +1,33 @@
+{
+  "model": "claude-sonnet-4-20250514",
+  "max_tokens": 16000,
+  "system": [
+    {"type": "text", "text": "You are Claude Code, a CLI-based AI assistant. cch=abc123"},
+    {"type": "text", "text": "Available tools: Read, Write, Bash"}
+  ],
+  "metadata": {
+    "user_id": "user_abc123_session_550e8400-e29b-41d4-a716-446655440000"
+  },
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {"type": "text", "text": "<system-reminder>Remember to follow instructions.</system-reminder>"},
+        {"type": "text", "text": "Help me refactor the auth module"}
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {"type": "text", "text": "I'll help you refactor the auth module. Let me start by reading the current code."},
+        {"type": "tool_use", "id": "tool_1", "name": "Read", "input": {"file_path": "/src/auth.js"}}
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {"type": "tool_result", "tool_use_id": "tool_1", "content": "const auth = require('express-auth');"}
+      ]
+    }
+  ]
+}

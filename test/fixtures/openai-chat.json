@@ -1,0 +1,24 @@
+{
+  "model": "gpt-4o-mini",
+  "messages": [
+    {"role": "system", "content": "Act as an expert software developer. Help the user with coding tasks."},
+    {"role": "user", "content": "How do I sort an array in Python?"},
+    {"role": "assistant", "content": "You can use sorted() or list.sort()."},
+    {"role": "user", "content": "What about reverse sorting?"}
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "execute_code",
+        "description": "Execute Python code",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "code": {"type": "string"}
+          }
+        }
+      }
+    }
+  ]
+}
