@@ -1,7 +1,12 @@
-const crypto = require('crypto');
+import { createHash } from 'node:crypto';
+import type {
+  Provider, ApiFormat, ContextInfo, ParsedMessage,
+  SourceSignature, ExtractSourceResult, ParsedUrl, Upstreams,
+  ResolveTargetResult,
+} from './types.js';
 
 // Model context limits (tokens) — more specific keys first
-const CONTEXT_LIMITS = {
+export const CONTEXT_LIMITS: Record<string, number> = {
   // Anthropic
   'claude-opus-4': 200000,
   'claude-sonnet-4': 200000,
@@ -23,24 +28,26 @@ const CONTEXT_LIMITS = {
 };
 
 // Auto-detect source tool from system prompt when not explicitly tagged
-const SOURCE_SIGNATURES = [
+export const SOURCE_SIGNATURES: SourceSignature[] = [
   { pattern: 'Act as an expert software developer', source: 'aider' },
   { pattern: 'You are Claude Code', source: 'claude' },
   { pattern: 'You are Kimi Code CLI', source: 'kimi' },
 ];
 
 // Known API path segments — not treated as source prefixes
-const API_PATH_SEGMENTS = new Set(['v1', 'responses', 'chat', 'models', 'embeddings', 'backend-api', 'api']);
+export const API_PATH_SEGMENTS = new Set([
+  'v1', 'responses', 'chat', 'models', 'embeddings', 'backend-api', 'api',
+]);
 
 // Simple token estimation: chars / 4
-function estimateTokens(text) {
+export function estimateTokens(text: unknown): number {
   if (!text) return 0;
-  if (typeof text === 'object') text = JSON.stringify(text);
-  return Math.ceil(text.length / 4);
+  const s = typeof text === 'object' ? JSON.stringify(text) : String(text);
+  return Math.ceil(s.length / 4);
 }
 
 // Detect provider from request
-function detectProvider(pathname, headers) {
+export function detectProvider(pathname: string, headers: Record<string, string | undefined>): Provider {
   if (pathname.match(/^\/(api|backend-api)\//)) return 'chatgpt';
   if (pathname.includes('/v1/messages') || pathname.includes('/v1/complete')) return 'anthropic';
   if (headers['anthropic-version']) return 'anthropic';
@@ -50,7 +57,7 @@ function detectProvider(pathname, headers) {
 }
 
 // Detect which API format is being used
-function detectApiFormat(pathname) {
+export function detectApiFormat(pathname: string): ApiFormat {
   if (pathname.includes('/v1/messages')) return 'anthropic-messages';
   if (pathname.match(/^\/(api|backend-api)\//)) return 'chatgpt-backend';
   if (pathname.includes('/responses')) return 'responses';
@@ -59,8 +66,8 @@ function detectApiFormat(pathname) {
 }
 
 // Parse request body and extract context info
-function parseContextInfo(provider, body, apiFormat) {
-  const info = {
+export function parseContextInfo(provider: string, body: Record<string, any>, apiFormat: string): ContextInfo {
+  const info: ContextInfo = {
     provider,
     apiFormat,
     model: body.model || 'unknown',
@@ -86,7 +93,7 @@ function parseContextInfo(provider, body, apiFormat) {
     }
 
     if (body.messages && Array.isArray(body.messages)) {
-      info.messages = body.messages.map(msg => {
+      info.messages = body.messages.map((msg: any): ParsedMessage => {
         const contentBlocks = Array.isArray(msg.content) ? msg.content : null;
         return {
           role: msg.role,
@@ -108,7 +115,7 @@ function parseContextInfo(provider, body, apiFormat) {
         info.messages.push({ role: 'user', content: body.input, tokens: estimateTokens(body.input) });
         info.messagesTokens = estimateTokens(body.input);
       } else if (Array.isArray(body.input)) {
-        body.input.forEach(item => {
+        body.input.forEach((item: any) => {
           const content = typeof item.content === 'string' ? item.content : JSON.stringify(item.content || item);
           if (item.role === 'system') {
             info.systemPrompts.push({ content });
@@ -141,7 +148,7 @@ function parseContextInfo(provider, body, apiFormat) {
         info.messages.push({ role: 'user', content: msgs, tokens: estimateTokens(msgs) });
         info.messagesTokens = estimateTokens(msgs);
       } else if (Array.isArray(msgs)) {
-        msgs.forEach(item => {
+        msgs.forEach((item: any) => {
           const content = typeof item.content === 'string' ? item.content : JSON.stringify(item.content || item);
           const role = item.role || 'user';
           if (role === 'system' || role === 'developer') {
@@ -160,7 +167,7 @@ function parseContextInfo(provider, body, apiFormat) {
     }
   } else if (provider === 'openai') {
     if (body.messages && Array.isArray(body.messages)) {
-      body.messages.forEach(msg => {
+      body.messages.forEach((msg: any) => {
         if (msg.role === 'system' || msg.role === 'developer') {
           info.systemPrompts.push({ content: msg.content });
           info.systemTokens += estimateTokens(msg.content);
@@ -189,7 +196,7 @@ function parseContextInfo(provider, body, apiFormat) {
 }
 
 // Get context limit for model
-function getContextLimit(model) {
+export function getContextLimit(model: string): number {
   for (const [key, limit] of Object.entries(CONTEXT_LIMITS)) {
     if (model.includes(key)) return limit;
   }
@@ -197,8 +204,8 @@ function getContextLimit(model) {
 }
 
 // Extract source tag from URL path
-function extractSource(pathname) {
-  const match = pathname.match(/^\/([^\/]+)(\/.*)?$/);
+export function extractSource(pathname: string): ExtractSourceResult {
+  const match = pathname.match(/^\/([^/]+)(\/.*)?$/);
   if (match && match[2] && !API_PATH_SEGMENTS.has(match[1])) {
     return { source: decodeURIComponent(match[1]), cleanPath: match[2] || '/' };
   }
@@ -206,7 +213,7 @@ function extractSource(pathname) {
 }
 
 // Determine target URL for a request
-function resolveTargetUrl(parsedUrl, headers, upstreams) {
+export function resolveTargetUrl(parsedUrl: ParsedUrl, headers: Record<string, string | undefined>, upstreams: Upstreams): ResolveTargetResult {
   const provider = detectProvider(parsedUrl.pathname, headers);
   const search = parsedUrl.search || '';
   let targetUrl = headers['x-target-url'];
@@ -225,13 +232,13 @@ function resolveTargetUrl(parsedUrl, headers, upstreams) {
 }
 
 // Extract readable text from message content, stripping JSON wrappers and system-reminder blocks
-function extractReadableText(content) {
+export function extractReadableText(content: string | null | undefined): string | null {
   if (!content) return null;
   let text = content;
   try {
     const parsed = JSON.parse(text);
     if (Array.isArray(parsed)) {
-      const textBlock = parsed.find(b =>
+      const textBlock = parsed.find((b: any) =>
         (b.type === 'text' && b.text && !b.text.startsWith('<system-reminder>'))
         || (b.type === 'input_text' && b.text && !b.text.startsWith('#') && !b.text.startsWith('<environment'))
       );
@@ -243,29 +250,29 @@ function extractReadableText(content) {
 }
 
 // Extract working directory from system prompt or messages
-function extractWorkingDirectory(contextInfo) {
+export function extractWorkingDirectory(contextInfo: ContextInfo): string | null {
   const allText = [
     ...(contextInfo.systemPrompts || []).map(sp => sp.content),
     ...(contextInfo.messages || []).filter(m => m.role === 'user').map(m => m.content),
   ].join('\n');
 
   // Claude Code: "Primary working directory: /path/to/dir"
-  let match = allText.match(/[Pp]rimary working directory[:\s]+[`]?([\/~][^\s`\n]+)/);
+  let match = allText.match(/[Pp]rimary working directory[:\s]+[`]?([/~][^\s`\n]+)/);
   if (match) return match[1];
   // Codex: "<cwd>/path/to/dir</cwd>"
   match = allText.match(/<cwd>([^<]+)<\/cwd>/);
   if (match) return match[1];
   // Generic: "working directory is /path" or "cwd: /path"
-  match = allText.match(/working directory (?:is |= ?)[`"]?([\/~][^\s`"'\n]+)/i);
+  match = allText.match(/working directory (?:is |= ?)[`"]?([/~][^\s`"'\n]+)/i);
   if (match) return match[1];
-  match = allText.match(/\bcwd[:\s]+[`"]?([\/~][^\s`"'\n]+)/);
+  match = allText.match(/\bcwd[:\s]+[`"]?([/~][^\s`"'\n]+)/);
   if (match) return match[1];
 
   return null;
 }
 
 // Extract the actual user prompt from a Responses API input array
-function extractUserPrompt(messages) {
+export function extractUserPrompt(messages: ParsedMessage[]): string | null {
   for (const m of messages) {
     if (m.role !== 'user' || !m.content) continue;
     try {
@@ -281,7 +288,7 @@ function extractUserPrompt(messages) {
 }
 
 // Extract session ID from Anthropic metadata.user_id
-function extractSessionId(rawBody) {
+export function extractSessionId(rawBody: Record<string, any> | null | undefined): string | null {
   const userId = rawBody?.metadata?.user_id;
   if (!userId) return null;
   const match = userId.match(/session_([a-f0-9-]+)/);
@@ -289,7 +296,7 @@ function extractSessionId(rawBody) {
 }
 
 // Compute a sub-key to distinguish agents within a session
-function computeAgentKey(contextInfo) {
+export function computeAgentKey(contextInfo: ContextInfo): string | null {
   const userMsgs = (contextInfo.messages || []).filter(m => m.role === 'user');
   let realText = '';
   for (const msg of userMsgs) {
@@ -297,15 +304,19 @@ function computeAgentKey(contextInfo) {
     if (t) { realText = t; break; }
   }
   if (!realText) return null;
-  return crypto.createHash('sha256').update(realText).digest('hex').slice(0, 12);
+  return createHash('sha256').update(realText).digest('hex').slice(0, 12);
 }
 
 // Compute fingerprint for conversation grouping
-function computeFingerprint(contextInfo, rawBody, responseIdToConvo) {
+export function computeFingerprint(
+  contextInfo: ContextInfo,
+  rawBody: Record<string, any> | null | undefined,
+  responseIdToConvo: Map<string, string>,
+): string | null {
   // Anthropic session ID = one group per CLI session
   const sessionId = extractSessionId(rawBody);
   if (sessionId) {
-    return crypto.createHash('sha256').update(sessionId).digest('hex').slice(0, 16);
+    return createHash('sha256').update(sessionId).digest('hex').slice(0, 16);
   }
 
   // Responses API chaining: if previous_response_id exists, reuse that conversation
@@ -316,7 +327,7 @@ function computeFingerprint(contextInfo, rawBody, responseIdToConvo) {
 
   const userMsgs = (contextInfo.messages || []).filter(m => m.role === 'user');
 
-  let promptText;
+  let promptText: string;
   if (contextInfo.apiFormat === 'responses' && userMsgs.length > 1) {
     promptText = extractUserPrompt(userMsgs) || '';
   } else {
@@ -326,11 +337,11 @@ function computeFingerprint(contextInfo, rawBody, responseIdToConvo) {
 
   const systemText = (contextInfo.systemPrompts || []).map(sp => sp.content).join('\n');
   if (!systemText && !promptText) return null;
-  return crypto.createHash('sha256').update(systemText + '\0' + promptText).digest('hex').slice(0, 16);
+  return createHash('sha256').update(systemText + '\0' + promptText).digest('hex').slice(0, 16);
 }
 
 // Extract a readable label for a conversation
-function extractConversationLabel(contextInfo) {
+export function extractConversationLabel(contextInfo: ContextInfo): string {
   const userMsgs = (contextInfo.messages || []).filter(m => m.role === 'user');
 
   if (contextInfo.apiFormat === 'responses' && userMsgs.length > 1) {
@@ -347,7 +358,7 @@ function extractConversationLabel(contextInfo) {
 }
 
 // Auto-detect source tool from system prompt
-function detectSource(contextInfo, source) {
+export function detectSource(contextInfo: ContextInfo, source: string | null): string {
   if (source && source !== 'unknown') return source;
   const systemText = (contextInfo.systemPrompts || []).map(sp => sp.content).join('\n');
   for (const sig of SOURCE_SIGNATURES) {
@@ -355,24 +366,3 @@ function detectSource(contextInfo, source) {
   }
   return source || 'unknown';
 }
-
-module.exports = {
-  CONTEXT_LIMITS,
-  SOURCE_SIGNATURES,
-  API_PATH_SEGMENTS,
-  estimateTokens,
-  detectProvider,
-  detectApiFormat,
-  parseContextInfo,
-  getContextLimit,
-  extractSource,
-  resolveTargetUrl,
-  extractReadableText,
-  extractWorkingDirectory,
-  extractUserPrompt,
-  extractSessionId,
-  computeAgentKey,
-  computeFingerprint,
-  extractConversationLabel,
-  detectSource,
-};

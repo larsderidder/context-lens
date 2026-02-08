@@ -1,20 +1,42 @@
 {
   "name": "context-lens",
   "version": "0.1.0",
+  "type": "module",
   "description": "Local HTTP proxy that intercepts LLM API calls and visualizes context windows",
-  "main": "server.js",
+  "main": "dist/server.js",
   "bin": {
-    "context-lens": "./cli.js"
+    "context-lens": "./dist/cli.js"
   },
   "scripts": {
-    "start": "node server.js",
-    "test": "node --test 'test/**/*.test.js'"
+    "build": "tsc",
+    "build:test": "tsc -p tsconfig.test.json",
+    "start": "node dist/server.js",
+    "test": "npm run build:test && node --test 'dist-test/test/**/*.test.js'",
+    "dev": "tsc --watch",
+    "postbuild": "chmod +x dist/cli.js",
+    "prepublishOnly": "npm run build"
   },
-  "keywords": ["llm", "proxy", "context", "anthropic", "openai", "visualization"],
+  "files": [
+    "dist/",
+    "public/",
+    "mitm_addon.py"
+  ],
+  "keywords": [
+    "llm",
+    "proxy",
+    "context",
+    "anthropic",
+    "openai",
+    "visualization"
+  ],
   "author": "Lars de Ridder",
   "repository": {
     "type": "git",
     "url": "https://github.com/larsderidder/context-lens"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^25.2.2",
+    "typescript": "^5.9.3"
+  }
 }

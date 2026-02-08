@@ -1,0 +1,421 @@
+#!/usr/bin/env node
+
+import http from 'node:http';
+import https from 'node:https';
+import url from 'node:url';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import {
+  estimateTokens, detectProvider, detectApiFormat,
+  parseContextInfo, getContextLimit, extractSource, resolveTargetUrl,
+  extractReadableText, extractWorkingDirectory, extractUserPrompt, extractSessionId,
+  computeAgentKey, computeFingerprint, extractConversationLabel, detectSource,
+} from './core.js';
+
+import type {
+  ContextInfo, Conversation, CapturedEntry, ResponseData, Upstreams,
+} from './types.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Upstream targets — configurable via env vars
+const UPSTREAM_OPENAI_URL = process.env.UPSTREAM_OPENAI_URL || 'https://api.openai.com/v1';
+const UPSTREAM_ANTHROPIC_URL = process.env.UPSTREAM_ANTHROPIC_URL || 'https://api.anthropic.com';
+const UPSTREAM_CHATGPT_URL = process.env.UPSTREAM_CHATGPT_URL || 'https://chatgpt.com';
+
+// In-memory storage for captured requests (last 100)
+const capturedRequests: CapturedEntry[] = [];
+const MAX_STORED = 100;
+
+// Conversation threading — group requests by fingerprint
+const conversations = new Map<string, Conversation>(); // fingerprint -> { id, label, source, firstSeen }
+// Responses API chaining: response_id -> conversationId
+const responseIdToConvo = new Map<string, string>();
+
+// Disk logging — one JSONL file per session/conversation
+const DATA_DIR = path.join(__dirname, '..', 'data');
+try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch {}
+
+function logToDisk(entry: CapturedEntry, rawBody: Record<string, any>): void {
+  const line = JSON.stringify({ ...entry, rawBody }) + '\n';
+  const filename = entry.conversationId
+    ? `${entry.source}-${entry.conversationId}.jsonl`
+    : 'ungrouped.jsonl';
+  const filePath = path.join(DATA_DIR, filename);
+  fs.appendFile(filePath, line, err => { if (err) console.error('Log write error:', err.message); });
+}
+
+// Store captured request
+function storeRequest(
+  contextInfo: ContextInfo,
+  responseData: ResponseData,
+  source: string | null,
+  rawBody?: Record<string, any>,
+): CapturedEntry {
+  const resolvedSource = detectSource(contextInfo, source);
+  const fingerprint = computeFingerprint(contextInfo, rawBody ?? null, responseIdToConvo);
+
+  // Register or look up conversation
+  let conversationId: string | null = null;
+  if (fingerprint) {
+    if (!conversations.has(fingerprint)) {
+      conversations.set(fingerprint, {
+        id: fingerprint,
+        label: extractConversationLabel(contextInfo),
+        source: resolvedSource || 'unknown',
+        workingDirectory: extractWorkingDirectory(contextInfo),
+        firstSeen: new Date().toISOString(),
+      });
+    } else if (!conversations.get(fingerprint)!.workingDirectory) {
+      // Backfill if first request didn't have it
+      const wd = extractWorkingDirectory(contextInfo);
+      if (wd) conversations.get(fingerprint)!.workingDirectory = wd;
+    }
+    conversationId = fingerprint;
+  }
+
+  // Agent key: distinguishes agents within a session (main vs subagents)
+  const agentKey = computeAgentKey(contextInfo);
+  const agentLabel = extractConversationLabel(contextInfo);
+
+  const entry: CapturedEntry = {
+    id: Date.now() + Math.random(),
+    timestamp: new Date().toISOString(),
+    contextInfo,
+    response: responseData,
+    contextLimit: getContextLimit(contextInfo.model),
+    source: resolvedSource || 'unknown',
+    conversationId,
+    agentKey,
+    agentLabel,
+  };
+
+  // Track response IDs for Responses API chaining
+  const respId = (responseData as Record<string, any>).id || (responseData as Record<string, any>).response_id;
+  if (respId && conversationId) {
+    responseIdToConvo.set(respId, conversationId);
+  }
+
+  capturedRequests.unshift(entry);
+  if (capturedRequests.length > MAX_STORED) {
+    const evicted = capturedRequests.pop()!;
+    // Clean up orphaned conversation keys
+    if (evicted.conversationId) {
+      const stillReferenced = capturedRequests.some(r => r.conversationId === evicted.conversationId);
+      if (!stillReferenced) {
+        conversations.delete(evicted.conversationId);
+      }
+    }
+  }
+
+  logToDisk(entry, rawBody ?? {});
+  return entry;
+}
+
+// Upstream config for resolveTargetUrl
+const UPSTREAMS: Upstreams = {
+  openai: UPSTREAM_OPENAI_URL,
+  anthropic: UPSTREAM_ANTHROPIC_URL,
+  chatgpt: UPSTREAM_CHATGPT_URL,
+};
+
+// Forward a request upstream (no body capture)
+function forwardRequest(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  parsedUrl: url.UrlWithStringQuery,
+  body: Buffer | null,
+): void {
+  const { targetUrl } = resolveTargetUrl(
+    { pathname: parsedUrl.pathname!, search: parsedUrl.search },
+    req.headers as Record<string, string | undefined>,
+    UPSTREAMS,
+  );
+  const targetParsed = url.parse(targetUrl);
+
+  const forwardHeaders = { ...req.headers } as Record<string, any>;
+  delete forwardHeaders['x-target-url'];
+  delete forwardHeaders['host'];
+  forwardHeaders['host'] = targetParsed.host;
+  // When we buffer the body, replace chunked encoding with exact content-length
+  if (body) {
+    delete forwardHeaders['transfer-encoding'];
+    forwardHeaders['content-length'] = body.length;
+  }
+
+  const protocol = targetParsed.protocol === 'https:' ? https : http;
+  const proxyReq = protocol.request({
+    hostname: targetParsed.hostname,
+    port: targetParsed.port,
+    path: targetParsed.path,
+    method: req.method,
+    headers: forwardHeaders,
+  }, (proxyRes) => {
+    res.writeHead(proxyRes.statusCode!, proxyRes.headers);
+    proxyRes.pipe(res);
+  });
+
+  proxyReq.on('error', (err) => {
+    console.error('Proxy error:', err.message);
+    if (!res.headersSent) {
+      res.writeHead(502, { 'Content-Type': 'application/json' });
+    }
+    res.end(JSON.stringify({ error: 'Proxy error', details: err.message }));
+  });
+
+  if (body) proxyReq.write(body);
+  proxyReq.end();
+}
+
+// Proxy handler
+function handleProxy(req: http.IncomingMessage, res: http.ServerResponse): void {
+  const parsedUrl = url.parse(req.url!);
+  const { source, cleanPath } = extractSource(parsedUrl.pathname!);
+
+  // Use clean path (without source prefix) for routing
+  const cleanUrl = { ...parsedUrl, pathname: cleanPath };
+  const { targetUrl, provider } = resolveTargetUrl(
+    { pathname: cleanPath, search: parsedUrl.search },
+    req.headers as Record<string, string | undefined>,
+    UPSTREAMS,
+  );
+  const hasAuth = !!req.headers['authorization'];
+  const sourceTag = source ? `[${source}]` : '';
+  console.log(`${req.method} ${req.url} → ${targetUrl} [${provider}] ${sourceTag} auth=${hasAuth}`);
+
+  // For non-POST requests (GET /v1/models, OPTIONS, etc.), pass through directly
+  if (req.method !== 'POST') {
+    return forwardRequest(req, res, cleanUrl as url.UrlWithStringQuery, null);
+  }
+
+  // Collect body as raw Buffers to avoid corrupting multi-byte UTF-8 at chunk boundaries
+  const chunks: Buffer[] = [];
+  let clientAborted = false;
+  req.on('data', (chunk: Buffer) => { chunks.push(chunk); });
+  req.on('error', () => { clientAborted = true; });
+
+  req.on('end', () => {
+    if (clientAborted) return;
+
+    const bodyBuffer = Buffer.concat(chunks);
+    const body = bodyBuffer.toString('utf8');
+
+    let bodyData: Record<string, any>;
+    try {
+      bodyData = JSON.parse(body);
+    } catch (e) {
+      console.log(`  ⚠ Body is not JSON (${bodyBuffer.length} bytes), capturing raw`);
+      // Still capture the raw request even if body isn't JSON
+      const rawInfo: ContextInfo = {
+        provider,
+        apiFormat: 'raw',
+        model: 'unknown',
+        systemTokens: 0, toolsTokens: 0,
+        messagesTokens: estimateTokens(body),
+        totalTokens: estimateTokens(body),
+        systemPrompts: [],
+        tools: [],
+        messages: [{ role: 'raw', content: body.substring(0, 2000), tokens: estimateTokens(body) }],
+      };
+      storeRequest(rawInfo, { raw: true }, source);
+      return forwardRequest(req, res, cleanUrl as url.UrlWithStringQuery, bodyBuffer);
+    }
+
+    console.log(`  ✓ Parsed JSON body (${Object.keys(bodyData).join(', ')})`);
+    const apiFormat = detectApiFormat(cleanPath);
+    const contextInfo = parseContextInfo(provider, bodyData, apiFormat);
+
+    const targetParsed = url.parse(targetUrl);
+
+    // Forward headers (remove proxy-specific ones)
+    const forwardHeaders = { ...req.headers } as Record<string, any>;
+    delete forwardHeaders['x-target-url'];
+    delete forwardHeaders['host'];
+    delete forwardHeaders['transfer-encoding'];
+    forwardHeaders['host'] = targetParsed.host;
+    // Ensure content-length matches the exact bytes we forward
+    forwardHeaders['content-length'] = bodyBuffer.length;
+
+    // Make request to actual API
+    const protocol = targetParsed.protocol === 'https:' ? https : http;
+    const proxyReq = protocol.request({
+      hostname: targetParsed.hostname,
+      port: targetParsed.port,
+      path: targetParsed.path,
+      method: req.method,
+      headers: forwardHeaders,
+    }, (proxyRes) => {
+      console.log(`  ← ${proxyRes.statusCode} ${proxyRes.statusMessage}`);
+      // Forward response headers
+      res.writeHead(proxyRes.statusCode!, proxyRes.headers);
+
+      // Handle streaming vs non-streaming
+      const isStreaming = proxyRes.headers['content-type']?.includes('text/event-stream');
+
+      if (isStreaming) {
+        // For streaming, pass through and capture chunks
+        let capturedChunks = '';
+        proxyRes.on('data', (chunk: Buffer) => {
+          capturedChunks += chunk.toString();
+          if (!res.destroyed) res.write(chunk);
+        });
+
+        proxyRes.on('end', () => {
+          storeRequest(contextInfo, { streaming: true, chunks: capturedChunks }, source, bodyData);
+          if (!res.destroyed) res.end();
+        });
+      } else {
+        // For non-streaming, capture full response
+        let responseBody = '';
+        proxyRes.on('data', (chunk: Buffer) => {
+          responseBody += chunk.toString();
+          if (!res.destroyed) res.write(chunk);
+        });
+
+        proxyRes.on('end', () => {
+          try {
+            const responseData = JSON.parse(responseBody);
+            storeRequest(contextInfo, responseData, source, bodyData);
+          } catch (e) {
+            storeRequest(contextInfo, { raw: responseBody }, source, bodyData);
+          }
+          if (!res.destroyed) res.end();
+        });
+      }
+
+      proxyRes.on('error', (err) => {
+        console.error('Upstream response error:', err.message);
+        if (!res.destroyed) res.end();
+      });
+    });
+
+    // Abort upstream request if client disconnects
+    res.on('close', () => { if (!proxyReq.destroyed) proxyReq.destroy(); });
+
+    proxyReq.on('error', (err) => {
+      console.error('Proxy error:', err.message);
+      if (!res.headersSent) {
+        res.writeHead(502, { 'Content-Type': 'application/json' });
+      }
+      if (!res.destroyed) {
+        res.end(JSON.stringify({ error: 'Proxy error', details: err.message }));
+      }
+    });
+
+    proxyReq.write(bodyBuffer);
+    proxyReq.end();
+  });
+}
+
+// Ingest endpoint — accepts captured data from external tools (e.g. mitmproxy addon)
+function handleIngest(req: http.IncomingMessage, res: http.ServerResponse): void {
+  if (req.method !== 'POST') {
+    res.writeHead(405);
+    res.end();
+    return;
+  }
+  let body = '';
+  req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+  req.on('end', () => {
+    try {
+      const data = JSON.parse(body);
+      const provider = data.provider || 'unknown';
+      const apiFormat = data.apiFormat || 'unknown';
+      const source = data.source || 'unknown';
+      const contextInfo = parseContextInfo(provider, data.body || {}, apiFormat);
+      storeRequest(contextInfo, data.response || {}, source, data.body || {});
+      console.log(`  📥 Ingested: [${provider}] ${contextInfo.model} from ${source}`);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true }));
+    } catch (e: any) {
+      console.error('Ingest error:', e.message);
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: e.message }));
+    }
+  });
+}
+
+// Load HTML UI from file at startup
+const htmlUI = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf-8');
+
+// Web UI handler
+function handleWebUI(req: http.IncomingMessage, res: http.ServerResponse): void {
+  const parsedUrl = url.parse(req.url!, true);
+
+  if (parsedUrl.pathname === '/api/ingest' && req.method === 'POST') {
+    return handleIngest(req, res);
+  }
+
+  if (parsedUrl.pathname === '/api/requests') {
+    // API endpoint: group requests by conversation
+    const grouped = new Map<string, CapturedEntry[]>(); // conversationId -> entries[]
+    const ungrouped: CapturedEntry[] = [];
+    for (const entry of capturedRequests) {
+      if (entry.conversationId) {
+        if (!grouped.has(entry.conversationId)) grouped.set(entry.conversationId, []);
+        grouped.get(entry.conversationId)!.push(entry);
+      } else {
+        ungrouped.push(entry);
+      }
+    }
+    const convos: any[] = [];
+    for (const [id, entries] of grouped) {
+      const meta = conversations.get(id) || { id, label: 'Unknown', source: 'unknown', firstSeen: entries[entries.length - 1].timestamp };
+      // Sub-group entries by agentKey
+      const agentMap = new Map<string, CapturedEntry[]>();
+      for (const e of entries) {
+        const ak = e.agentKey || '_default';
+        if (!agentMap.has(ak)) agentMap.set(ak, []);
+        agentMap.get(ak)!.push(e);
+      }
+      const agents: any[] = [];
+      for (const [ak, agentEntries] of agentMap) {
+        agents.push({
+          key: ak,
+          label: agentEntries[agentEntries.length - 1].agentLabel || 'Unnamed',
+          model: agentEntries[0].contextInfo.model,
+          entries: agentEntries, // newest-first (inherited from capturedRequests order)
+        });
+      }
+      // Sort agents: most recent activity first
+      agents.sort((a, b) => new Date(b.entries[0].timestamp).getTime() - new Date(a.entries[0].timestamp).getTime());
+      convos.push({ ...meta, agents, entries: entries.slice() });
+    }
+    // Sort conversations newest-first (by most recent entry)
+    convos.sort((a, b) => new Date(b.entries[0].timestamp).getTime() - new Date(a.entries[0].timestamp).getTime());
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ conversations: convos, ungrouped }));
+  } else if (parsedUrl.pathname === '/') {
+    // Serve HTML UI
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end(htmlUI);
+  } else {
+    res.writeHead(404, { 'Content-Type': 'text/plain' });
+    res.end('Not Found');
+  }
+}
+
+// Start servers
+const proxyServer = http.createServer(handleProxy);
+const webUIServer = http.createServer(handleWebUI);
+
+proxyServer.listen(4040, () => {
+  console.log('🔍 Context Lens Proxy running on http://localhost:4040');
+});
+
+webUIServer.listen(4041, () => {
+  console.log('🌐 Context Lens Web UI running on http://localhost:4041');
+  // Only show verbose help when running standalone (not spawned by cli.js)
+  if (!process.env.CONTEXT_LENS_CLI) {
+    console.log(`\nUpstream: OpenAI → ${UPSTREAM_OPENAI_URL}`);
+    console.log(`         Anthropic → ${UPSTREAM_ANTHROPIC_URL}`);
+    console.log('\nUsage:');
+    console.log('  Codex (subscription): UPSTREAM_OPENAI_URL=https://chatgpt.com/backend-api/codex node server.js');
+    console.log('  Codex (API key):      node server.js');
+    console.log('  Then: OPENAI_BASE_URL=http://localhost:4040 codex "your prompt"');
+    console.log('  Claude: ANTHROPIC_BASE_URL=http://localhost:4040 claude "your prompt"');
+  }
+});

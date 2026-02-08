@@ -5,6 +5,7 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 dist/
+dist-test/
 build/
 coverage/
 *.log

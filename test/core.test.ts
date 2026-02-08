@@ -1,20 +1,22 @@
-const { describe, it } = require('node:test');
-const assert = require('node:assert/strict');
-const path = require('path');
+import { describe, it } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
-const {
+import {
   estimateTokens, detectProvider, detectApiFormat,
   parseContextInfo, getContextLimit, extractSource, resolveTargetUrl,
   extractReadableText, extractWorkingDirectory, extractUserPrompt, extractSessionId,
   computeAgentKey, computeFingerprint, extractConversationLabel, detectSource,
   CONTEXT_LIMITS, SOURCE_SIGNATURES, API_PATH_SEGMENTS,
-} = require('../lib/core');
+} from '../src/core.js';
 
-// Load fixtures
-const anthropicBasic = require('./fixtures/anthropic-basic.json');
-const codexResponses = require('./fixtures/codex-responses.json');
-const claudeSession = require('./fixtures/claude-session.json');
-const openaiChat = require('./fixtures/openai-chat.json');
+// Load fixtures via readFileSync (avoids JSON import attribute complexity)
+const fixturesDir = join(process.cwd(), 'test', 'fixtures');
+const anthropicBasic = JSON.parse(readFileSync(join(fixturesDir, 'anthropic-basic.json'), 'utf-8'));
+const codexResponses = JSON.parse(readFileSync(join(fixturesDir, 'codex-responses.json'), 'utf-8'));
+const claudeSession = JSON.parse(readFileSync(join(fixturesDir, 'claude-session.json'), 'utf-8'));
+const openaiChat = JSON.parse(readFileSync(join(fixturesDir, 'openai-chat.json'), 'utf-8'));
 
 // --- estimateTokens ---
 
@@ -155,7 +157,7 @@ describe('parseContextInfo', () => {
       assert.equal(info.systemPrompts.length, 1);
       assert.ok(info.systemPrompts[0].content.includes('helpful assistant'));
       assert.equal(info.tools.length, 1);
-      assert.equal(info.tools[0].name, 'get_weather');
+      assert.equal((info.tools[0] as any).name, 'get_weather');
       assert.equal(info.messages.length, 3);
       assert.equal(info.messages[0].role, 'user');
       assert.ok(info.systemTokens > 0);
@@ -168,7 +170,7 @@ describe('parseContextInfo', () => {
       const info = parseContextInfo('anthropic', claudeSession, 'anthropic-messages');
       // First user message has array content
       assert.ok(info.messages[0].contentBlocks);
-      assert.equal(info.messages[0].contentBlocks.length, 2);
+      assert.equal(info.messages[0].contentBlocks!.length, 2);
       // Assistant message has array content with tool_use
       assert.ok(info.messages[1].contentBlocks);
     });
@@ -243,7 +245,7 @@ describe('parseContextInfo', () => {
       };
       const info = parseContextInfo('openai', body, 'chat-completions');
       assert.equal(info.tools.length, 1);
-      assert.equal(info.tools[0].name, 'search');
+      assert.equal((info.tools[0] as any).name, 'search');
     });
   });
 
@@ -361,7 +363,7 @@ describe('extractWorkingDirectory', () => {
     const info = {
       systemPrompts: [{ content: 'You are Claude Code.\n\nPrimary working directory: `/home/user/my-project`\nMore stuff.' }],
       messages: [],
-    };
+    } as any;
     assert.equal(extractWorkingDirectory(info), '/home/user/my-project');
   });
 
@@ -371,7 +373,7 @@ describe('extractWorkingDirectory', () => {
       messages: [
         { role: 'user', content: '<cwd>/home/user/codex-project</cwd>\nOther content' },
       ],
-    };
+    } as any;
     assert.equal(extractWorkingDirectory(info), '/home/user/codex-project');
   });
 
@@ -379,7 +381,7 @@ describe('extractWorkingDirectory', () => {
     const info = {
       systemPrompts: [{ content: 'The working directory is /tmp/build' }],
       messages: [],
-    };
+    } as any;
     assert.equal(extractWorkingDirectory(info), '/tmp/build');
   });
 
@@ -387,7 +389,7 @@ describe('extractWorkingDirectory', () => {
     const info = {
       systemPrompts: [{ content: 'Be a helpful assistant.' }],
       messages: [{ role: 'user', content: 'Hello' }],
-    };
+    } as any;
     assert.equal(extractWorkingDirectory(info), null);
   });
 
@@ -403,9 +405,9 @@ describe('extractWorkingDirectory', () => {
 describe('extractUserPrompt', () => {
   it('skips AGENTS.md and environment boilerplate', () => {
     const messages = [
-      { role: 'user', content: JSON.stringify([{ type: 'input_text', text: '# AGENTS.md\nStuff' }]) },
-      { role: 'user', content: JSON.stringify([{ type: 'input_text', text: '<environment_context>\nOS: Linux' }]) },
-      { role: 'user', content: JSON.stringify([{ type: 'input_text', text: 'Fix the login bug' }]) },
+      { role: 'user', content: JSON.stringify([{ type: 'input_text', text: '# AGENTS.md\nStuff' }]), tokens: 0 },
+      { role: 'user', content: JSON.stringify([{ type: 'input_text', text: '<environment_context>\nOS: Linux' }]), tokens: 0 },
+      { role: 'user', content: JSON.stringify([{ type: 'input_text', text: 'Fix the login bug' }]), tokens: 0 },
     ];
     const result = extractUserPrompt(messages);
     assert.ok(result);
@@ -414,23 +416,23 @@ describe('extractUserPrompt', () => {
 
   it('returns null when only boilerplate exists', () => {
     const messages = [
-      { role: 'user', content: JSON.stringify([{ type: 'input_text', text: '# AGENTS.md' }]) },
+      { role: 'user', content: JSON.stringify([{ type: 'input_text', text: '# AGENTS.md' }]), tokens: 0 },
     ];
     assert.equal(extractUserPrompt(messages), null);
   });
 
   it('skips non-user messages', () => {
     const messages = [
-      { role: 'assistant', content: JSON.stringify([{ type: 'input_text', text: 'Real text' }]) },
-      { role: 'user', content: JSON.stringify([{ type: 'input_text', text: 'User prompt' }]) },
+      { role: 'assistant', content: JSON.stringify([{ type: 'input_text', text: 'Real text' }]), tokens: 0 },
+      { role: 'user', content: JSON.stringify([{ type: 'input_text', text: 'User prompt' }]), tokens: 0 },
     ];
     const result = extractUserPrompt(messages);
-    assert.ok(result.includes('User prompt'));
+    assert.ok(result!.includes('User prompt'));
   });
 
   it('returns null for non-input_text messages', () => {
     const messages = [
-      { role: 'user', content: 'plain text, not JSON wrapped' },
+      { role: 'user', content: 'plain text, not JSON wrapped', tokens: 0 },
     ];
     assert.equal(extractUserPrompt(messages), null);
   });
@@ -461,7 +463,7 @@ describe('computeFingerprint', () => {
     const info = parseContextInfo('anthropic', claudeSession, 'anthropic-messages');
     const fp = computeFingerprint(info, claudeSession, new Map());
     assert.ok(fp);
-    assert.equal(fp.length, 16);
+    assert.equal(fp!.length, 16);
   });
 
   it('produces same fingerprint for same session', () => {
@@ -473,7 +475,7 @@ describe('computeFingerprint', () => {
   });
 
   it('uses response ID chaining when available', () => {
-    const map = new Map();
+    const map = new Map<string, string>();
     map.set('resp_123', 'existing-convo-fp');
     const body = { previous_response_id: 'resp_123', model: 'gpt-4o', input: 'test' };
     const info = parseContextInfo('openai', body, 'responses');
@@ -485,7 +487,7 @@ describe('computeFingerprint', () => {
     const info = parseContextInfo('openai', codexResponses, 'responses');
     const fp = computeFingerprint(info, codexResponses, new Map());
     assert.ok(fp);
-    assert.equal(fp.length, 16);
+    assert.equal(fp!.length, 16);
   });
 
   it('produces content-based fingerprint for simple messages', () => {
@@ -499,7 +501,7 @@ describe('computeFingerprint', () => {
     const info = parseContextInfo('openai', body, 'chat-completions');
     const fp = computeFingerprint(info, body, new Map());
     assert.ok(fp);
-    assert.equal(fp.length, 16);
+    assert.equal(fp!.length, 16);
   });
 
   it('same content produces same fingerprint', () => {
@@ -542,7 +544,7 @@ describe('computeAgentKey', () => {
     const info = parseContextInfo('anthropic', anthropicBasic, 'anthropic-messages');
     const key = computeAgentKey(info);
     assert.ok(key);
-    assert.equal(key.length, 12);
+    assert.equal(key!.length, 12);
   });
 
   it('returns same key for same first user message', () => {
