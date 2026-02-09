@@ -630,6 +630,8 @@ describe('resolveTargetUrl', () => {
     openai: 'https://api.openai.com/v1',
     anthropic: 'https://api.anthropic.com',
     chatgpt: 'https://chatgpt.com',
+    gemini: 'https://generativelanguage.googleapis.com',
+    geminiCodeAssist: 'https://cloudcode-pa.googleapis.com',
   };
 
   it('routes anthropic paths to anthropic upstream', () => {

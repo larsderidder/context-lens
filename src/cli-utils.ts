@@ -35,6 +35,15 @@ const TOOL_CONFIG: Record<string, ToolConfig> = {
     serverEnv: {},
     needsMitm: false,
   },
+  'gemini': {
+    childEnv: {
+      GOOGLE_GEMINI_BASE_URL: `${PROXY_URL}/gemini/`,       // API-key auth path
+      CODE_ASSIST_ENDPOINT: `${PROXY_URL}/gemini`,           // OAuth/Google login path
+    },
+    extraArgs: [],
+    serverEnv: {},
+    needsMitm: false,
+  },
 };
 
 export function getToolConfig(toolName: string): ToolConfig {

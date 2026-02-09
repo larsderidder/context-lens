@@ -1,12 +1,13 @@
 // --- Core domain types ---
 
-export type Provider = 'anthropic' | 'openai' | 'chatgpt' | 'unknown';
+export type Provider = 'anthropic' | 'openai' | 'chatgpt' | 'gemini' | 'unknown';
 
 export type ApiFormat =
   | 'anthropic-messages'
   | 'chatgpt-backend'
   | 'responses'
   | 'chat-completions'
+  | 'gemini'
   | 'raw'
   | 'unknown';
 
@@ -112,6 +113,8 @@ export interface Upstreams {
   openai: string;
   anthropic: string;
   chatgpt: string;
+  gemini: string;
+  geminiCodeAssist: string;
 }
 
 export interface ResolveTargetResult {
@@ -127,6 +130,7 @@ export interface Conversation {
   source: string;
   workingDirectory: string | null;
   firstSeen: string;
+  sessionId?: string | null;
 }
 
 export interface CapturedEntry {

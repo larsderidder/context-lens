@@ -25,6 +25,12 @@ export const CONTEXT_LIMITS: Record<string, number> = {
   'o3': 200000,
   'o1-mini': 128000,
   'o1': 200000,
+  // Gemini
+  'gemini-2.5-pro': 1048576,
+  'gemini-2.5-flash': 1048576,
+  'gemini-2.0-flash': 1048576,
+  'gemini-1.5-pro': 2097152,
+  'gemini-1.5-flash': 1048576,
 };
 
 // Auto-detect source tool from request headers (primary)
@@ -32,6 +38,7 @@ export const HEADER_SIGNATURES: HeaderSignature[] = [
   { header: 'user-agent', pattern: /^claude-cli\//, source: 'claude' },
   { header: 'user-agent', pattern: /aider/i, source: 'aider' },
   { header: 'user-agent', pattern: /kimi/i, source: 'kimi' },
+  { header: 'user-agent', pattern: /^GeminiCLI\//, source: 'gemini' },
 ];
 
 // Auto-detect source tool from system prompt (fallback)
@@ -43,7 +50,7 @@ export const SOURCE_SIGNATURES: SourceSignature[] = [
 
 // Known API path segments — not treated as source prefixes
 export const API_PATH_SEGMENTS = new Set([
-  'v1', 'responses', 'chat', 'models', 'embeddings', 'backend-api', 'api',
+  'v1', 'v1beta', 'v1alpha', 'v1internal', 'responses', 'chat', 'models', 'embeddings', 'backend-api', 'api',
 ]);
 
 // Simple token estimation: chars / 4
@@ -58,6 +65,10 @@ export function detectProvider(pathname: string, headers: Record<string, string 
   if (pathname.match(/^\/(api|backend-api)\//)) return 'chatgpt';
   if (pathname.includes('/v1/messages') || pathname.includes('/v1/complete')) return 'anthropic';
   if (headers['anthropic-version']) return 'anthropic';
+  // Gemini: must come BEFORE openai catch-all (which matches /models/)
+  if (pathname.includes(':generateContent') || pathname.includes(':streamGenerateContent') || pathname.match(/\/v1(beta|alpha)\/models\//) || pathname.includes('/v1internal:'))
+    return 'gemini';
+  if (headers['x-goog-api-key']) return 'gemini';
   if (pathname.match(/\/(responses|chat\/completions|models|embeddings)/)) return 'openai';
   if (headers['authorization']?.startsWith('Bearer sk-')) return 'openai';
   return 'unknown';
@@ -67,6 +78,8 @@ export function detectProvider(pathname: string, headers: Record<string, string 
 export function detectApiFormat(pathname: string): ApiFormat {
   if (pathname.includes('/v1/messages')) return 'anthropic-messages';
   if (pathname.match(/^\/(api|backend-api)\//)) return 'chatgpt-backend';
+  if (pathname.includes(':generateContent') || pathname.includes(':streamGenerateContent') || pathname.match(/\/v1(beta|alpha)\/models\//) || pathname.includes('/v1internal:'))
+    return 'gemini';
   if (pathname.includes('/responses')) return 'responses';
   if (pathname.includes('/chat/completions')) return 'chat-completions';
   return 'unknown';
@@ -226,6 +239,61 @@ export function parseContextInfo(provider: string, body: Record<string, any>, ap
       info.tools = body.tools;
       info.toolsTokens = estimateTokens(JSON.stringify(body.tools));
     }
+  } else if (provider === 'gemini' || apiFormat === 'gemini') {
+    // Gemini API: contents[], systemInstruction, tools[{functionDeclarations}]
+    // Code Assist wraps everything inside body.request: {contents, systemInstruction, tools, ...}
+    const geminiBody = body.request || body;
+    if (geminiBody.systemInstruction) {
+      const parts = geminiBody.systemInstruction.parts || [];
+      const systemText = parts.map((p: any) => p.text || '').join('\n');
+      info.systemPrompts.push({ content: systemText });
+      info.systemTokens = estimateTokens(systemText);
+    }
+    if (geminiBody.tools && Array.isArray(geminiBody.tools)) {
+      const allDecls = geminiBody.tools.flatMap((t: any) => t.functionDeclarations || []);
+      info.tools = allDecls;
+      info.toolsTokens = estimateTokens(JSON.stringify(geminiBody.tools));
+    }
+    if (geminiBody.contents && Array.isArray(geminiBody.contents)) {
+      info.messages = geminiBody.contents.map((turn: any): ParsedMessage => {
+        const role = turn.role || 'user';
+        const parts = turn.parts || [];
+        const contentBlocks: ContentBlock[] = [];
+        const textParts: string[] = [];
+        for (const part of parts) {
+          if (part.text) {
+            textParts.push(part.text);
+            contentBlocks.push({ type: 'text', text: part.text });
+          } else if (part.functionCall) {
+            contentBlocks.push({
+              type: 'tool_use', id: part.functionCall.id || '', name: part.functionCall.name || '',
+              input: part.functionCall.args || {},
+            });
+          } else if (part.functionResponse) {
+            const resp = part.functionResponse.response;
+            // Gemini CLI wraps tool output in {output: "..."} or {error: "..."}
+            const respText = typeof resp === 'string' ? resp
+              : typeof resp?.output === 'string' ? resp.output
+              : typeof resp?.error === 'string' ? resp.error
+              : JSON.stringify(resp || '');
+            contentBlocks.push({
+              type: 'tool_result', tool_use_id: part.functionResponse.id || '',
+              content: respText,
+            });
+          } else if (part.inlineData) {
+            contentBlocks.push({ type: 'image' });
+          } else if (part.executableCode) {
+            contentBlocks.push({ type: 'text', text: part.executableCode.code || '' });
+          } else if (part.codeExecutionResult) {
+            contentBlocks.push({ type: 'text', text: part.codeExecutionResult.output || '' });
+          }
+        }
+        const content = textParts.join('\n') || JSON.stringify(parts);
+        const tokens = estimateTokens(turn);
+        return { role: role === 'model' ? 'assistant' : role, content, contentBlocks, tokens };
+      });
+      info.messagesTokens = info.messages.reduce((sum, m) => sum + m.tokens, 0);
+    }
   } else if (provider === 'openai') {
     if (body.messages && Array.isArray(body.messages)) {
       body.messages.forEach((msg: any) => {
@@ -282,6 +350,18 @@ export const MODEL_PRICING: Record<string, [number, number]> = {
   'o3':              [10, 40],
   'o1-mini':         [3, 12],
   'o1':              [15, 60],
+  // Codex (subscription estimate)
+  'gpt-5.3-codex':       [1.75, 14],
+  'gpt-5.2-codex':       [1.75, 14],
+  'gpt-5.1-codex-mini':  [0.25, 2],
+  'gpt-5.1-codex':       [1.25, 10],
+  'gpt-5-codex':         [1.25, 10],
+  // Gemini
+  'gemini-2.5-pro':  [1.25, 10],
+  'gemini-2.5-flash': [0.15, 0.60],
+  'gemini-2.0-flash': [0.10, 0.40],
+  'gemini-1.5-pro':  [1.25, 5],
+  'gemini-1.5-flash': [0.075, 0.30],
 };
 
 export function estimateCost(model: string, inputTokens: number, outputTokens: number): number | null {
@@ -323,6 +403,9 @@ export function resolveTargetUrl(parsedUrl: ParsedUrl, headers: Record<string, s
       targetUrl = upstreams.chatgpt + parsedUrl.pathname + search;
     } else if (provider === 'anthropic') {
       targetUrl = upstreams.anthropic + parsedUrl.pathname + search;
+    } else if (provider === 'gemini') {
+      const isCodeAssist = parsedUrl.pathname.includes('/v1internal');
+      targetUrl = (isCodeAssist ? upstreams.geminiCodeAssist : upstreams.gemini) + parsedUrl.pathname + search;
     } else {
       targetUrl = upstreams.openai + parsedUrl.pathname + search;
     }
@@ -388,12 +471,18 @@ export function extractUserPrompt(messages: ParsedMessage[]): string | null {
   return null;
 }
 
-// Extract session ID from Anthropic metadata.user_id
+// Extract session ID from request body (Anthropic metadata.user_id or Gemini Code Assist session_id)
 export function extractSessionId(rawBody: Record<string, any> | null | undefined): string | null {
+  // Anthropic: metadata.user_id contains "session_<uuid>"
   const userId = rawBody?.metadata?.user_id;
-  if (!userId) return null;
-  const match = userId.match(/session_([a-f0-9-]+)/);
-  return match ? match[0] : null;
+  if (userId) {
+    const match = userId.match(/session_([a-f0-9-]+)/);
+    if (match) return match[0];
+  }
+  // Gemini Code Assist: request.session_id is a UUID
+  const geminiSessionId = rawBody?.request?.session_id;
+  if (geminiSessionId && typeof geminiSessionId === 'string') return `gemini_${geminiSessionId}`;
+  return null;
 }
 
 // Compute a sub-key to distinguish agents within a session
