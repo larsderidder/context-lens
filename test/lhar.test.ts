@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { parseContextInfo } from '../src/core.js';
-import { analyzeComposition, parseResponseUsage, buildLharRecord, buildSessionLine, toLharJsonl, toLharJson } from '../src/lhar.js';
+import { analyzeComposition, parseResponseUsage, buildLharRecord, buildSessionLine, toLharJsonl, toLharJson, redactHeaders, SENSITIVE_HEADERS } from '../src/lhar.js';
 import type { CapturedEntry, Conversation } from '../src/types.js';
 
 const fixturesDir = join(process.cwd(), 'test', 'fixtures');
@@ -457,5 +457,93 @@ describe('toLharJson', () => {
     const result = toLharJson([e1, e2, e3], new Map());
     assert.equal(result.lhar.sessions.length, 2); // Two distinct trace_ids
     assert.equal(result.lhar.entries.length, 3);
+  });
+});
+
+// --- redactHeaders ---
+
+describe('redactHeaders', () => {
+  it('strips all sensitive headers', () => {
+    const headers: Record<string, string> = {
+      'authorization': 'Bearer sk-secret',
+      'x-api-key': 'key123',
+      'cookie': 'session=abc',
+      'set-cookie': 'session=abc; Path=/',
+      'x-target-url': 'https://api.anthropic.com',
+      'proxy-authorization': 'Basic xyz',
+      'x-auth-token': 'tok',
+      'x-forwarded-authorization': 'Bearer forwarded',
+      'www-authenticate': 'Basic realm="test"',
+      'proxy-authenticate': 'Basic',
+      'content-type': 'application/json',
+    };
+    const result = redactHeaders(headers);
+    assert.deepEqual(Object.keys(result), ['content-type']);
+    assert.equal(result['content-type'], 'application/json');
+  });
+
+  it('is case-insensitive', () => {
+    const headers = {
+      'Authorization': 'Bearer secret',
+      'X-API-KEY': 'key123',
+      'Content-Type': 'application/json',
+    };
+    const result = redactHeaders(headers);
+    assert.deepEqual(Object.keys(result), ['Content-Type']);
+  });
+
+  it('does not mutate the input object', () => {
+    const headers = {
+      'authorization': 'Bearer secret',
+      'content-type': 'application/json',
+    };
+    const original = { ...headers };
+    redactHeaders(headers);
+    assert.deepEqual(headers, original);
+  });
+
+  it('handles empty input', () => {
+    const result = redactHeaders({});
+    assert.deepEqual(result, {});
+  });
+
+  it('passes through all non-sensitive headers', () => {
+    const headers = {
+      'content-type': 'application/json',
+      'anthropic-version': '2023-06-01',
+      'x-ratelimit-limit-tokens': '100000',
+    };
+    const result = redactHeaders(headers);
+    assert.deepEqual(result, headers);
+  });
+});
+
+// --- buildLharRecord header redaction ---
+
+describe('buildLharRecord header redaction', () => {
+  it('redacts sensitive headers from LHAR output', () => {
+    const entry = makeEntry({
+      requestHeaders: {
+        'content-type': 'application/json',
+        'authorization': 'Bearer sk-ant-secret-key',
+        'x-api-key': 'secret-api-key',
+        'anthropic-version': '2023-06-01',
+      },
+      responseHeaders: {
+        'x-ratelimit-limit-tokens': '100000',
+        'set-cookie': 'session=abc123',
+      },
+    });
+    const record = buildLharRecord(entry, []);
+
+    // Request headers: sensitive stripped, safe kept
+    assert.equal(record.http.request_headers['content-type'], 'application/json');
+    assert.equal(record.http.request_headers['anthropic-version'], '2023-06-01');
+    assert.equal(record.http.request_headers['authorization'], undefined);
+    assert.equal(record.http.request_headers['x-api-key'], undefined);
+
+    // Response headers: sensitive stripped, safe kept
+    assert.equal(record.http.response_headers['x-ratelimit-limit-tokens'], '100000');
+    assert.equal(record.http.response_headers['set-cookie'], undefined);
   });
 });

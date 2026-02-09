@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type {
-  Provider, ApiFormat, ContextInfo, ParsedMessage,
-  SourceSignature, ExtractSourceResult, ParsedUrl, Upstreams,
+  Provider, ApiFormat, ContextInfo, ParsedMessage, ContentBlock,
+  SourceSignature, HeaderSignature, ExtractSourceResult, ParsedUrl, Upstreams,
   ResolveTargetResult,
 } from './types.js';
 
@@ -27,7 +27,14 @@ export const CONTEXT_LIMITS: Record<string, number> = {
   'o1': 200000,
 };
 
-// Auto-detect source tool from system prompt when not explicitly tagged
+// Auto-detect source tool from request headers (primary)
+export const HEADER_SIGNATURES: HeaderSignature[] = [
+  { header: 'user-agent', pattern: /^claude-cli\//, source: 'claude' },
+  { header: 'user-agent', pattern: /aider/i, source: 'aider' },
+  { header: 'user-agent', pattern: /kimi/i, source: 'kimi' },
+];
+
+// Auto-detect source tool from system prompt (fallback)
 export const SOURCE_SIGNATURES: SourceSignature[] = [
   { pattern: 'Act as an expert software developer', source: 'aider' },
   { pattern: 'You are Claude Code', source: 'claude' },
@@ -63,6 +70,77 @@ export function detectApiFormat(pathname: string): ApiFormat {
   if (pathname.includes('/responses')) return 'responses';
   if (pathname.includes('/chat/completions')) return 'chat-completions';
   return 'unknown';
+}
+
+// Parse a single item from the OpenAI Responses API `input` array.
+// Maps typed items (function_call, function_call_output, reasoning, output_text, etc.)
+// to normalized ParsedMessage with proper role and contentBlocks.
+function parseResponsesItem(item: any): { message: ParsedMessage; tokens: number; isSystem: boolean; content: string } {
+  const type: string = item.type || '';
+
+  // Standard message with role/content (e.g. {"type":"message","role":"user","content":[...]})
+  if (item.role) {
+    const isSystem = item.role === 'system' || item.role === 'developer';
+    let content: string;
+    let contentBlocks: ContentBlock[] | null = null;
+    if (typeof item.content === 'string') {
+      content = item.content;
+    } else if (Array.isArray(item.content)) {
+      contentBlocks = item.content as ContentBlock[];
+      content = item.content.map((b: any) => b.text || '').join('\n');
+    } else {
+      content = JSON.stringify(item.content || item);
+    }
+    const tokens = estimateTokens(item.content ?? content);
+    return { message: { role: item.role, content, contentBlocks, tokens }, tokens, isSystem, content };
+  }
+
+  // function_call → assistant tool_use
+  if (type === 'function_call' || type === 'custom_tool_call') {
+    const name = item.name || 'unknown';
+    const args = item.arguments || '';
+    const content = name + '(' + (typeof args === 'string' ? args.slice(0, 200) : JSON.stringify(args).slice(0, 200)) + ')';
+    const tokens = estimateTokens(item);
+    const block: ContentBlock = { type: 'tool_use', id: item.call_id || '', name, input: typeof args === 'string' ? {} : (args || {}) };
+    return { message: { role: 'assistant', content, contentBlocks: [block], tokens }, tokens, isSystem: false, content };
+  }
+
+  // function_call_output → user tool_result
+  if (type === 'function_call_output' || type === 'custom_tool_call_output') {
+    const output = typeof item.output === 'string' ? item.output : JSON.stringify(item.output || '');
+    const tokens = estimateTokens(output);
+    const block: ContentBlock = { type: 'tool_result', tool_use_id: item.call_id || '', content: output };
+    return { message: { role: 'user', content: output, contentBlocks: [block], tokens }, tokens, isSystem: false, content: output };
+  }
+
+  // reasoning → assistant thinking
+  if (type === 'reasoning') {
+    const summary = Array.isArray(item.summary)
+      ? item.summary.map((s: any) => s.text || '').join('\n')
+      : '';
+    const content = summary || '[reasoning]';
+    const tokens = estimateTokens(item);
+    return { message: { role: 'assistant', content, contentBlocks: [{ type: 'thinking', thinking: content } as any], tokens }, tokens, isSystem: false, content };
+  }
+
+  // output_text → assistant text
+  if (type === 'output_text') {
+    const text = item.text || '';
+    const tokens = estimateTokens(text);
+    return { message: { role: 'assistant', content: text, contentBlocks: [{ type: 'text', text }], tokens }, tokens, isSystem: false, content: text };
+  }
+
+  // input_text → user text
+  if (type === 'input_text') {
+    const text = item.text || '';
+    const tokens = estimateTokens(text);
+    return { message: { role: 'user', content: text, contentBlocks: [{ type: 'text', text }], tokens }, tokens, isSystem: false, content: text };
+  }
+
+  // Fallback: serialize the whole item
+  const content = JSON.stringify(item);
+  const tokens = estimateTokens(content);
+  return { message: { role: item.role || 'user', content, tokens }, tokens, isSystem: false, content };
 }
 
 // Parse request body and extract context info
@@ -108,35 +186,8 @@ export function parseContextInfo(provider: string, body: Record<string, any>, ap
       });
       info.messagesTokens = info.messages.reduce((sum, m) => sum + m.tokens, 0);
     }
-  } else if (apiFormat === 'responses') {
-    if (body.instructions) {
-      info.systemPrompts.push({ content: body.instructions });
-      info.systemTokens = estimateTokens(body.instructions);
-    }
-
-    if (body.input) {
-      if (typeof body.input === 'string') {
-        info.messages.push({ role: 'user', content: body.input, tokens: estimateTokens(body.input) });
-        info.messagesTokens = estimateTokens(body.input);
-      } else if (Array.isArray(body.input)) {
-        body.input.forEach((item: any) => {
-          const content = typeof item.content === 'string' ? item.content : JSON.stringify(item.content || item);
-          if (item.role === 'system') {
-            info.systemPrompts.push({ content });
-            info.systemTokens += estimateTokens(content);
-          } else {
-            info.messages.push({ role: item.role || 'user', content, tokens: estimateTokens(content) });
-            info.messagesTokens += estimateTokens(content);
-          }
-        });
-      }
-    }
-
-    if (body.tools && Array.isArray(body.tools)) {
-      info.tools = body.tools;
-      info.toolsTokens = estimateTokens(JSON.stringify(body.tools));
-    }
-  } else if (provider === 'chatgpt') {
+  } else if (apiFormat === 'responses' || provider === 'chatgpt') {
+    // System prompts
     if (body.instructions) {
       info.systemPrompts.push({ content: body.instructions });
       info.systemTokens = estimateTokens(body.instructions);
@@ -150,6 +201,8 @@ export function parseContextInfo(provider: string, body: Record<string, any>, ap
       info.systemPrompts.push({ content: systemText });
       info.systemTokens += estimateTokens(systemText);
     }
+
+    // Parse input/messages — handle Responses API typed items
     const msgs = body.input || body.messages;
     if (msgs) {
       if (typeof msgs === 'string') {
@@ -157,18 +210,18 @@ export function parseContextInfo(provider: string, body: Record<string, any>, ap
         info.messagesTokens = estimateTokens(msgs);
       } else if (Array.isArray(msgs)) {
         msgs.forEach((item: any) => {
-          const content = typeof item.content === 'string' ? item.content : JSON.stringify(item.content || item);
-          const role = item.role || 'user';
-          if (role === 'system' || role === 'developer') {
-            info.systemPrompts.push({ content });
-            info.systemTokens += estimateTokens(content);
+          const parsed = parseResponsesItem(item);
+          if (parsed.isSystem) {
+            info.systemPrompts.push({ content: parsed.content });
+            info.systemTokens += parsed.tokens;
           } else {
-            info.messages.push({ role, content, tokens: estimateTokens(content) });
-            info.messagesTokens += estimateTokens(content);
+            info.messages.push(parsed.message);
+            info.messagesTokens += parsed.tokens;
           }
         });
       }
     }
+
     if (body.tools && Array.isArray(body.tools)) {
       info.tools = body.tools;
       info.toolsTokens = estimateTokens(JSON.stringify(body.tools));
@@ -244,7 +297,18 @@ export function estimateCost(model: string, inputTokens: number, outputTokens: n
 export function extractSource(pathname: string): ExtractSourceResult {
   const match = pathname.match(/^\/([^/]+)(\/.*)?$/);
   if (match && match[2] && !API_PATH_SEGMENTS.has(match[1])) {
-    return { source: decodeURIComponent(match[1]), cleanPath: match[2] || '/' };
+    // `decodeURIComponent` may introduce `/` via `%2f` (path traversal) or throw on bad encodings.
+    // Treat suspicious/invalid tags as "no source tag" and route the request normally.
+    let decoded = match[1];
+    try {
+      decoded = decodeURIComponent(match[1]);
+    } catch {
+      decoded = match[1];
+    }
+    if (decoded.includes('/') || decoded.includes('\\') || decoded.includes('..')) {
+      return { source: null, cleanPath: pathname };
+    }
+    return { source: decoded, cleanPath: match[2] || '/' };
   }
   return { source: null, cleanPath: pathname };
 }
@@ -394,9 +458,22 @@ export function extractConversationLabel(contextInfo: ContextInfo): string {
   return 'Unnamed conversation';
 }
 
-// Auto-detect source tool from system prompt
-export function detectSource(contextInfo: ContextInfo, source: string | null): string {
+// Auto-detect source tool from headers (primary) and system prompt (fallback)
+export function detectSource(contextInfo: ContextInfo, source: string | null, headers?: Record<string, string>): string {
   if (source && source !== 'unknown') return source;
+
+  // Primary: check request headers
+  if (headers) {
+    for (const sig of HEADER_SIGNATURES) {
+      const val = headers[sig.header];
+      if (!val) continue;
+      if (sig.pattern instanceof RegExp ? sig.pattern.test(val) : val.includes(sig.pattern)) {
+        return sig.source;
+      }
+    }
+  }
+
+  // Fallback: check system prompt content
   const systemText = (contextInfo.systemPrompts || []).map(sp => sp.content).join('\n');
   for (const sig of SOURCE_SIGNATURES) {
     if (systemText.includes(sig.pattern)) return sig.source;
