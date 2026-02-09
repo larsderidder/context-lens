@@ -838,16 +838,23 @@ body::after {
   function fmtCost(c) { return c != null ? '$' + c.toFixed(c < 0.01 ? 4 : 2) : '--'; }
   function fmtTime(iso) { return new Date(iso).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}); }
   function computeYTicks(max, count) {
-    if (max <= 0) return [0];
-    // Find nice step: 1, 2, 5, 10, 20, 50, 100, ...
+    if (!(max > 0)) return [0];
+    // Find a "nice" step: 1, 2, 5 * 10^n. Keep decimals for small ranges (e.g. cost in USD).
     var rough = max / count;
     var mag = Math.pow(10, Math.floor(Math.log10(rough)));
     var residual = rough / mag;
     var nice = residual <= 1.5 ? 1 : residual <= 3.5 ? 2 : 5;
     var step = nice * mag;
+
+    // If step is fractional, preserve enough decimals so ticks don't round to 0.
+    var decimals = step < 1 ? Math.min(8, Math.max(0, -Math.floor(Math.log10(step)))) : 0;
+
+    // Ensure top tick is >= max (otherwise labels can under-report the range).
+    var top = Math.ceil(max / step) * step;
+
     var ticks = [];
-    for (var v = 0; v <= max + step * 0.01; v += step) {
-      ticks.push(Math.round(v));
+    for (var v = 0; v <= top + step * 0.01; v += step) {
+      ticks.push(Number(v.toFixed(decimals)));
     }
     return ticks;
   }
@@ -1059,7 +1066,8 @@ body::after {
       html += '<span class="session-delete" data-delete="' + esc(c.id) + '">&times;</span>';
       html += '</div>';
       var latestTime = latestEntry && latestEntry.timestamp ? fmtTime(latestEntry.timestamp) : '';
-      html += '<div class="session-meta"><span>' + entries.length + ' turns</span><span>' + fmtK(sessionTotalTokens(c)) + ' tok</span><span style="color:var(--accent-green);">' + fmtCost(cost) + '</span>' + (latestTime ? '<span>' + esc(latestTime) + '</span>' : '') + '</div>';
+      var displayId = c.sessionId || c.id;
+      html += '<div class="session-meta"><span>' + entries.length + ' turns</span><span>' + fmtK(sessionTotalTokens(c)) + ' tok</span><span style="color:var(--accent-green);">' + fmtCost(cost) + '</span>' + (latestTime ? '<span>' + esc(latestTime) + '</span>' : '') + '<span class="session-id-copy" data-copy="' + esc(displayId) + '" title="Click to copy: ' + esc(displayId) + '" style="opacity:0.4;font-family:var(--font-mono);font-size:10px;cursor:pointer;">' + esc(displayId.slice(0, 8)) + '</span></div>';
       if (c.workingDirectory) html += '<div class="working-dir">' + esc(c.workingDirectory) + '</div>';
       html += '</div>';
 
@@ -1151,6 +1159,18 @@ body::after {
         selectedTurnIndex = turn;
         renderSidebar();
         renderMain();
+      });
+    });
+
+    sb.querySelectorAll('.session-id-copy').forEach(function(el) {
+      el.addEventListener('click', function(ev) {
+        ev.stopPropagation();
+        var text = el.getAttribute('data-copy');
+        navigator.clipboard.writeText(text).then(function() {
+          var orig = el.textContent;
+          el.textContent = 'copied';
+          setTimeout(function() { el.textContent = orig; }, 1000);
+        });
       });
     });
 
@@ -1445,10 +1465,12 @@ body::after {
       filtered = classified.filter(function(x) { return x.isMain; });
     }
 
-    var maxTok = 0;
+    var maxVal = 0;
     filtered.forEach(function(item) {
-      var val = timelineMode === 'cost' ? (item.entry.costUsd || 0) * 100000 : item.entry.contextInfo.totalTokens;
-      if (val > maxTok) maxTok = val;
+      var val = timelineMode === 'cost'
+        ? (Number(item.entry.costUsd) || 0)
+        : item.entry.contextInfo.totalTokens;
+      if (val > maxVal) maxVal = val;
     });
 
     var selectedEntry = getSelectedEntry(getSelectedSession());
@@ -1465,7 +1487,7 @@ body::after {
 
     // Compute Y-axis ticks
     var isCostMode = timelineMode === 'cost';
-    var yMax = isCostMode ? (maxTok / 100000) : maxTok; // convert back from scaled cost
+    var yMax = maxVal;
     var yTicks = computeYTicks(yMax, 4);
 
     html += '<div class="tl-container">';
@@ -1484,14 +1506,19 @@ body::after {
     var tlMainNum = 0;
     var tlNums = [];
     filtered.forEach(function(item) {
-      var val = timelineMode === 'cost' ? (item.entry.costUsd || 0) * 100000 : item.entry.contextInfo.totalTokens;
-      var pct = maxTok > 0 ? Math.max(3, Math.round(val / maxTok * 100)) : 3;
+      var val = timelineMode === 'cost'
+        ? (Number(item.entry.costUsd) || 0)
+        : item.entry.contextInfo.totalTokens;
+      var pct = maxVal > 0 ? Math.max(3, Math.round(val / maxVal * 100)) : 3;
       var isActive = selectedEntry && item.entry.id === selectedEntry.id;
       var model = item.entry.contextInfo.model;
       var origIdx = entries.indexOf(item.entry);
       if (item.isMain) tlMainNum++;
       tlNums.push(item.isMain ? tlMainNum : '');
-      html += '<div class="tl-bar' + (isActive ? ' active' : '') + '" style="height:' + pct + '%;background:' + modelBarGradient(model, item.isMain) + ';" data-tl-turn="' + origIdx + '" title="' + (item.isMain ? '' : 'Sub ') + esc(shortModel(model)) + ': ' + fmtK(item.entry.contextInfo.totalTokens) + ' tok"></div>';
+      var tt = (item.isMain ? '' : 'Sub ') + shortModel(model) + ': '
+        + fmtK(item.entry.contextInfo.totalTokens) + ' tok'
+        + (isCostMode ? (' / ' + fmtCost(Number(item.entry.costUsd) || 0)) : '');
+      html += '<div class="tl-bar' + (isActive ? ' active' : '') + '" style="height:' + pct + '%;background:' + modelBarGradient(model, item.isMain) + ';" data-tl-turn="' + origIdx + '" title="' + esc(tt) + '"></div>';
     });
 
     html += '</div>';
