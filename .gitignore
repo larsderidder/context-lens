@@ -25,8 +25,9 @@ __pycache__/
 # Captured request data
 data/
 
-# Design docs (keep locally, not in repo)
+# Design stuff
 design-docs/
+_archive
 
 # Local tool state
 .claude/
