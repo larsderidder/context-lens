@@ -8,8 +8,9 @@
     "context-lens": "./dist/cli.js"
   },
   "scripts": {
-    "build": "tsc",
-    "build:test": "tsc -p tsconfig.test.json",
+    "generate:types": "json2ts schema/lhar.schema.json src/lhar-types.generated.ts --unreachableDefinitions",
+    "build": "npm run generate:types && tsc",
+    "build:test": "npm run generate:types && tsc -p tsconfig.test.json",
     "start": "node dist/server.js",
     "test": "npm run build:test && node --test 'dist-test/test/**/*.test.js'",
     "dev": "tsc --watch",
@@ -19,6 +20,7 @@
   "files": [
     "dist/",
     "public/",
+    "schema/",
     "mitm_addon.py"
   ],
   "keywords": [
@@ -37,6 +39,7 @@
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^25.2.2",
+    "json-schema-to-typescript": "^15.0.4",
     "typescript": "^5.9.3"
   }
 }

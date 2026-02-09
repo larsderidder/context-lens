@@ -1,0 +1,325 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/larsderidder/context-lens/schema/lhar.schema.json",
+  "title": "LHAR (LLM HTTP Archive) Format",
+  "description": "JSON Schema for the LHAR format — what HAR is for web traffic, but for LLM API calls.",
+  "definitions": {
+    "CompositionCategory": {
+      "type": "string",
+      "enum": [
+        "system_prompt",
+        "tool_definitions",
+        "tool_results",
+        "tool_calls",
+        "assistant_text",
+        "user_text",
+        "thinking",
+        "system_injections",
+        "images",
+        "cache_markers",
+        "other"
+      ]
+    },
+
+    "CompositionEntry": {
+      "type": "object",
+      "properties": {
+        "category": { "$ref": "#/definitions/CompositionCategory" },
+        "tokens": { "type": "number" },
+        "pct": { "type": "number" },
+        "count": { "type": "number" }
+      },
+      "required": ["category", "tokens", "pct", "count"],
+      "additionalProperties": false
+    },
+
+    "Timings": {
+      "type": "object",
+      "properties": {
+        "send_ms": { "type": "number" },
+        "wait_ms": { "type": "number" },
+        "receive_ms": { "type": "number" },
+        "total_ms": { "type": "number" },
+        "tokens_per_second": {
+          "oneOf": [
+            { "type": "number" },
+            { "type": "null" }
+          ]
+        }
+      },
+      "required": ["send_ms", "wait_ms", "receive_ms", "total_ms", "tokens_per_second"],
+      "additionalProperties": false
+    },
+
+    "LharSessionLine": {
+      "type": "object",
+      "properties": {
+        "type": { "type": "string", "const": "session" },
+        "trace_id": { "type": "string" },
+        "started_at": { "type": "string" },
+        "tool": { "type": "string" },
+        "model": { "type": "string" }
+      },
+      "required": ["type", "trace_id", "started_at", "tool", "model"],
+      "additionalProperties": false
+    },
+
+    "LharRecord": {
+      "type": "object",
+      "properties": {
+        "type": { "type": "string", "const": "entry" },
+        "id": { "type": "string" },
+        "trace_id": { "type": "string" },
+        "span_id": { "type": "string" },
+        "parent_span_id": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "null" }
+          ]
+        },
+        "timestamp": { "type": "string" },
+        "sequence": { "type": "number" },
+
+        "source": {
+          "type": "object",
+          "properties": {
+            "tool": { "type": "string" },
+            "tool_version": {
+              "oneOf": [
+                { "type": "string" },
+                { "type": "null" }
+              ]
+            },
+            "agent_role": { "type": "string" },
+            "collector": { "type": "string" },
+            "collector_version": { "type": "string" }
+          },
+          "required": ["tool", "tool_version", "agent_role", "collector", "collector_version"],
+          "additionalProperties": false
+        },
+
+        "gen_ai": {
+          "type": "object",
+          "properties": {
+            "system": { "type": "string" },
+            "request": {
+              "type": "object",
+              "properties": {
+                "model": { "type": "string" },
+                "max_tokens": {
+                  "oneOf": [
+                    { "type": "number" },
+                    { "type": "null" }
+                  ]
+                },
+                "temperature": {
+                  "oneOf": [
+                    { "type": "number" },
+                    { "type": "null" }
+                  ]
+                },
+                "top_p": {
+                  "oneOf": [
+                    { "type": "number" },
+                    { "type": "null" }
+                  ]
+                },
+                "stop_sequences": {
+                  "type": "array",
+                  "items": { "type": "string" }
+                }
+              },
+              "required": ["model", "max_tokens", "temperature", "top_p", "stop_sequences"],
+              "additionalProperties": false
+            },
+            "response": {
+              "type": "object",
+              "properties": {
+                "model": {
+                  "oneOf": [
+                    { "type": "string" },
+                    { "type": "null" }
+                  ]
+                },
+                "finish_reasons": {
+                  "type": "array",
+                  "items": { "type": "string" }
+                }
+              },
+              "required": ["model", "finish_reasons"],
+              "additionalProperties": false
+            },
+            "usage": {
+              "type": "object",
+              "properties": {
+                "input_tokens": { "type": "number" },
+                "output_tokens": { "type": "number" },
+                "total_tokens": { "type": "number" }
+              },
+              "required": ["input_tokens", "output_tokens", "total_tokens"],
+              "additionalProperties": false
+            }
+          },
+          "required": ["system", "request", "response", "usage"],
+          "additionalProperties": false
+        },
+
+        "usage_ext": {
+          "type": "object",
+          "properties": {
+            "cache_read_tokens": { "type": "number" },
+            "cache_write_tokens": { "type": "number" },
+            "cost_usd": {
+              "oneOf": [
+                { "type": "number" },
+                { "type": "null" }
+              ]
+            }
+          },
+          "required": ["cache_read_tokens", "cache_write_tokens", "cost_usd"],
+          "additionalProperties": false
+        },
+
+        "http": {
+          "type": "object",
+          "properties": {
+            "method": { "type": "string" },
+            "url": {
+              "oneOf": [
+                { "type": "string" },
+                { "type": "null" }
+              ]
+            },
+            "status_code": {
+              "oneOf": [
+                { "type": "number" },
+                { "type": "null" }
+              ]
+            },
+            "api_format": { "type": "string" },
+            "stream": { "type": "boolean" },
+            "request_headers": {
+              "type": "object",
+              "additionalProperties": { "type": "string" }
+            },
+            "response_headers": {
+              "type": "object",
+              "additionalProperties": { "type": "string" }
+            }
+          },
+          "required": ["method", "url", "status_code", "api_format", "stream", "request_headers", "response_headers"],
+          "additionalProperties": false
+        },
+
+        "timings": {
+          "oneOf": [
+            { "$ref": "#/definitions/Timings" },
+            { "type": "null" }
+          ]
+        },
+
+        "transfer": {
+          "type": "object",
+          "properties": {
+            "request_bytes": { "type": "number" },
+            "response_bytes": { "type": "number" },
+            "compressed": { "type": "boolean" }
+          },
+          "required": ["request_bytes", "response_bytes", "compressed"],
+          "additionalProperties": false
+        },
+
+        "context_lens": {
+          "type": "object",
+          "properties": {
+            "window_size": { "type": "number" },
+            "utilization": { "type": "number" },
+            "system_tokens": { "type": "number" },
+            "tools_tokens": { "type": "number" },
+            "messages_tokens": { "type": "number" },
+            "composition": {
+              "type": "array",
+              "items": { "$ref": "#/definitions/CompositionEntry" }
+            },
+            "growth": {
+              "type": "object",
+              "properties": {
+                "tokens_added_this_turn": {
+                  "oneOf": [
+                    { "type": "number" },
+                    { "type": "null" }
+                  ]
+                },
+                "cumulative_tokens": { "type": "number" },
+                "compaction_detected": { "type": "boolean" }
+              },
+              "required": ["tokens_added_this_turn", "cumulative_tokens", "compaction_detected"],
+              "additionalProperties": false
+            }
+          },
+          "required": ["window_size", "utilization", "system_tokens", "tools_tokens", "messages_tokens", "composition", "growth"],
+          "additionalProperties": false
+        },
+
+        "raw": {
+          "type": "object",
+          "properties": {
+            "request_body": { "type": "null" },
+            "response_body": { "type": "null" }
+          },
+          "required": ["request_body", "response_body"],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "type", "id", "trace_id", "span_id", "parent_span_id",
+        "timestamp", "sequence", "source", "gen_ai", "usage_ext",
+        "http", "timings", "transfer", "context_lens", "raw"
+      ],
+      "additionalProperties": false
+    },
+
+    "LharJsonWrapper": {
+      "type": "object",
+      "properties": {
+        "lhar": {
+          "type": "object",
+          "properties": {
+            "version": { "type": "string" },
+            "creator": {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string" },
+                "version": { "type": "string" }
+              },
+              "required": ["name", "version"],
+              "additionalProperties": false
+            },
+            "sessions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "trace_id": { "type": "string" },
+                  "started_at": { "type": "string" },
+                  "tool": { "type": "string" },
+                  "model": { "type": "string" }
+                },
+                "required": ["trace_id", "started_at", "tool", "model"],
+                "additionalProperties": false
+              }
+            },
+            "entries": {
+              "type": "array",
+              "items": { "$ref": "#/definitions/LharRecord" }
+            }
+          },
+          "required": ["version", "creator", "sessions", "entries"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["lhar"],
+      "additionalProperties": false
+    }
+  }
+}
