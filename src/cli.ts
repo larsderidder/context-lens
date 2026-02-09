@@ -7,50 +7,13 @@ import fs from 'node:fs';
 import net from 'node:net';
 import { fileURLToPath } from 'node:url';
 
-import type { ToolConfig } from './types.js';
+import { getToolConfig, CLI_CONSTANTS } from './cli-utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 // Known tool config: env vars for the child process, extra CLI args, server env vars, and whether mitmproxy is needed
-const PROXY_URL = 'http://localhost:4040';
-const MITM_PORT = 8080;
-const MITM_PROXY_URL = `http://localhost:${MITM_PORT}`;
-
-const TOOL_CONFIG: Record<string, ToolConfig> = {
-  'claude': {
-    childEnv: { ANTHROPIC_BASE_URL: PROXY_URL },
-    extraArgs: [],
-    serverEnv: {},
-    needsMitm: false,
-  },
-  'codex': {
-    // Codex subscription uses chatgpt.com with Cloudflare — needs forward proxy (mitmproxy)
-    // to intercept HTTPS traffic without breaking TLS fingerprinting.
-    childEnv: {
-      https_proxy: MITM_PROXY_URL,
-      SSL_CERT_FILE: join(process.env.HOME || '', '.mitmproxy', 'mitmproxy-ca-cert.pem'),
-    },
-    extraArgs: [],
-    serverEnv: {},
-    needsMitm: true,
-  },
-  'aider': {
-    childEnv: { ANTHROPIC_BASE_URL: PROXY_URL, OPENAI_BASE_URL: PROXY_URL },
-    extraArgs: [],
-    serverEnv: {},
-    needsMitm: false,
-  },
-};
-
-function getToolConfig(toolName: string): ToolConfig {
-  return TOOL_CONFIG[toolName] || {
-    childEnv: { ANTHROPIC_BASE_URL: PROXY_URL, OPENAI_BASE_URL: PROXY_URL },
-    extraArgs: [],
-    serverEnv: {},
-    needsMitm: false,
-  };
-}
+// Note: actual tool config lives in cli-utils.ts so it can be unit-tested without importing this entrypoint.
 
 const LOCKFILE = '/tmp/context-lens.lock';
 
@@ -221,10 +184,10 @@ if (args.length === 0) {
       return startChild();
     }
 
-    const addonPath = join(__dirname, '..', 'mitm_addon.py');
+    const addonPath = CLI_CONSTANTS.MITM_ADDON_PATH;
     console.log('🔒 Starting mitmproxy (forward proxy for HTTPS interception)...');
 
-    mitmProcess = spawn('mitmdump', ['-s', addonPath, '--quiet', '--listen-port', String(MITM_PORT)], {
+    mitmProcess = spawn('mitmdump', ['-s', addonPath, '--quiet', '--listen-port', String(CLI_CONSTANTS.MITM_PORT)], {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
@@ -243,12 +206,12 @@ if (args.length === 0) {
 
     // Poll until mitmproxy is accepting connections
     const pollMitm = setInterval(() => {
-      const socket = net.connect({ port: MITM_PORT, host: 'localhost' }, () => {
+      const socket = net.connect({ port: CLI_CONSTANTS.MITM_PORT, host: 'localhost' }, () => {
         socket.end();
         if (!mitmReady) {
           mitmReady = true;
           clearInterval(pollMitm);
-          console.log(`🔒 mitmproxy listening on port ${MITM_PORT}`);
+          console.log(`🔒 mitmproxy listening on port ${CLI_CONSTANTS.MITM_PORT}`);
           startChild();
         }
       });
