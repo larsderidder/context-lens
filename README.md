@@ -4,8 +4,6 @@
 
 I kept wondering why my Claude Code sessions got so expensive. I couldn't find a tool that showed me what was exactly in the context window. So I built one.
 
-Turns out the "conversation" between you and your AI agent is a tiny fraction of what the model actually processes. Most of it is tool definitions, file contents, and internal bookkeeping you never see. Who knew. Interesting stuff!
-
 Zero dependencies. Sits between your tool and the API, captures everything, gives you a web UI to explore it. I've tested with Claude, Codex and Aider.
 
 ![Context Lens UI](screenshot-overview.png)
