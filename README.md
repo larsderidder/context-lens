@@ -2,17 +2,13 @@
 
 ![Early Development](https://img.shields.io/badge/status-early%20development-orange)
 
-I wanted to know what AI agent context looked like. So I built this.
-
-Zero dependencies. Sits between your tool and the API, captures everything, gives you a web UI to explore it.
-
-![Context Lens UI](screenshot-overview.png)
-
-## Why
-
-I kept wondering why my Claude Code sessions got so expensive. Couldn't find a tool that showed me what was exactly in the context window. So I built one.
+I kept wondering why my Claude Code sessions got so expensive. I couldn't find a tool that showed me what was exactly in the context window. So I built one.
 
 Turns out the "conversation" between you and your AI agent is a tiny fraction of what the model actually processes. Most of it is tool definitions, file contents, and internal bookkeeping you never see. Who knew. Interesting stuff!
+
+Zero dependencies. Sits between your tool and the API, captures everything, gives you a web UI to explore it. I've tested with Claude, Codex and Aider.
+
+![Context Lens UI](screenshot-overview.png)
 
 ## Quick Start
 
