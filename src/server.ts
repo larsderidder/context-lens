@@ -17,9 +17,11 @@ import {
 
 import type {
   ContextInfo, Conversation, CapturedEntry, ResponseData, Upstreams, RequestMeta,
+  ContentBlock,
 } from './types.js';
 
 import { analyzeComposition, parseResponseUsage, buildLharRecord, buildSessionLine, toLharJsonl, toLharJson } from './lhar.js';
+import { safeFilenamePart, headersForResolution, selectHeaders } from './server-utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -29,9 +31,15 @@ const UPSTREAM_OPENAI_URL = process.env.UPSTREAM_OPENAI_URL || 'https://api.open
 const UPSTREAM_ANTHROPIC_URL = process.env.UPSTREAM_ANTHROPIC_URL || 'https://api.anthropic.com';
 const UPSTREAM_CHATGPT_URL = process.env.UPSTREAM_CHATGPT_URL || 'https://chatgpt.com';
 
-// In-memory storage for captured requests (last 100)
+// Safety defaults:
+// - Bind only to localhost unless explicitly overridden.
+// - Do not honor `x-target-url` unless explicitly enabled (prevents accidental open-proxy/SSRF).
+const BIND_HOST = process.env.CONTEXT_LENS_BIND_HOST || '127.0.0.1';
+const ALLOW_TARGET_OVERRIDE = process.env.CONTEXT_LENS_ALLOW_TARGET_OVERRIDE === '1';
+
+// In-memory storage for captured requests
 const capturedRequests: CapturedEntry[] = [];
-const MAX_STORED = 100;
+const MAX_SESSIONS = 10;
 let dataRevision = 0; // Monotonic counter, incremented on every store
 let nextEntryId = 1; // Integer counter for entry IDs (fix float collision)
 
@@ -48,8 +56,10 @@ try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch {}
 const diskSessionsWritten = new Set<string>();
 
 function logToDisk(entry: CapturedEntry): void {
-  const filename = entry.conversationId
-    ? `${entry.source}-${entry.conversationId}.lhar`
+  const safeSource = safeFilenamePart(entry.source || 'unknown');
+  const safeConvo = entry.conversationId ? safeFilenamePart(entry.conversationId) : null;
+  const filename = safeConvo
+    ? `${safeSource}-${safeConvo}.lhar`
     : 'ungrouped.lhar';
   const filePath = path.join(DATA_DIR, filename);
 
@@ -71,12 +81,95 @@ function logToDisk(entry: CapturedEntry): void {
   fs.appendFile(filePath, output, err => { if (err) console.error('Log write error:', err.message); });
 }
 
-// Lightweight projection — strip rawBody, response, and heavy headers from entries
+// Compact a content block — keep tool metadata, truncate text
+function compactBlock(b: ContentBlock): ContentBlock {
+  switch (b.type) {
+    case 'tool_use':
+      return { type: 'tool_use', id: b.id, name: b.name, input: {} };
+    case 'tool_result': {
+      const rc = typeof b.content === 'string'
+        ? b.content.slice(0, 200)
+        : Array.isArray(b.content)
+          ? b.content.map(compactBlock)
+          : '';
+      return { type: 'tool_result', tool_use_id: b.tool_use_id, content: rc };
+    }
+    case 'text':
+      return { type: 'text', text: b.text.slice(0, 200) };
+    case 'input_text':
+      return { type: 'input_text', text: b.text.slice(0, 200) };
+    case 'image':
+      return { type: 'image' };
+    default: {
+      // Handle thinking blocks and other unknown types — truncate text-like fields
+      const any = b as any;
+      if (any.thinking) return { ...any, thinking: any.thinking.slice(0, 200) } as ContentBlock;
+      if (any.text) return { ...any, text: any.text.slice(0, 200) } as ContentBlock;
+      return b;
+    }
+  }
+}
+
+// Compact contextInfo — keep metadata and token counts, drop large text payloads
+function compactContextInfo(ci: ContextInfo) {
+  return {
+    provider: ci.provider,
+    apiFormat: ci.apiFormat,
+    model: ci.model,
+    systemTokens: ci.systemTokens,
+    toolsTokens: ci.toolsTokens,
+    messagesTokens: ci.messagesTokens,
+    totalTokens: ci.totalTokens,
+    systemPrompts: [],
+    tools: [],
+    messages: ci.messages.map(m => ({
+      role: m.role,
+      content: typeof m.content === 'string' ? m.content.slice(0, 200) : '',
+      tokens: m.tokens,
+      contentBlocks: m.contentBlocks?.map(compactBlock) ?? null,
+    })),
+  };
+}
+
+// Release heavy data from an entry after it's been logged to disk
+function compactEntry(entry: CapturedEntry): void {
+  // Extract and preserve usage data from response before dropping it
+  const usage = parseResponseUsage(entry.response);
+  entry.response = {
+    usage: {
+      input_tokens: usage.inputTokens,
+      output_tokens: usage.outputTokens,
+      cache_read_input_tokens: usage.cacheReadTokens,
+      cache_creation_input_tokens: usage.cacheWriteTokens,
+    },
+    model: usage.model,
+    stop_reason: usage.finishReasons[0] || null,
+  } as ResponseData;
+
+  entry.rawBody = undefined;
+  entry.requestHeaders = {};
+  entry.responseHeaders = {};
+
+  // Compact contextInfo in-place
+  entry.contextInfo.systemPrompts = [];
+  entry.contextInfo.tools = [];
+  entry.contextInfo.messages = entry.contextInfo.messages.map(m => ({
+    role: m.role,
+    content: typeof m.content === 'string' ? m.content.slice(0, 200) : '',
+    tokens: m.tokens,
+    contentBlocks: m.contentBlocks?.map(compactBlock) ?? null,
+  }));
+}
+
+// Lightweight projection — strip rawBody, response, heavy headers; compact contextInfo
 function projectEntry(e: CapturedEntry) {
+  // Extract compact usage info from response if available
+  const resp = e.response as Record<string, any> | undefined;
+  const usage = resp?.usage;
   return {
     id: e.id,
     timestamp: e.timestamp,
-    contextInfo: e.contextInfo,
+    contextInfo: compactContextInfo(e.contextInfo),
     contextLimit: e.contextLimit,
     source: e.source,
     conversationId: e.conversationId,
@@ -89,6 +182,14 @@ function projectEntry(e: CapturedEntry) {
     targetUrl: e.targetUrl,
     composition: e.composition,
     costUsd: e.costUsd,
+    usage: usage ? {
+      inputTokens: usage.input_tokens || 0,
+      outputTokens: usage.output_tokens || 0,
+      cacheReadTokens: usage.cache_read_input_tokens || 0,
+      cacheWriteTokens: usage.cache_creation_input_tokens || 0,
+    } : null,
+    responseModel: resp?.model || null,
+    stopReason: resp?.stop_reason || null,
   };
 }
 
@@ -147,6 +248,10 @@ function loadState(): void {
   if (loadedEntries > 0) {
     nextEntryId = maxId + 1;
     dataRevision = 1;
+    // Compact loaded entries to save memory (old state files may contain full text)
+    for (const entry of capturedRequests) {
+      compactEntry(entry);
+    }
     console.log(`Restored ${loadedEntries} entries from ${conversations.size} conversations`);
   }
 }
@@ -158,8 +263,9 @@ function storeRequest(
   source: string | null,
   rawBody?: Record<string, any>,
   meta?: RequestMeta,
+  requestHeaders?: Record<string, string>,
 ): CapturedEntry {
-  const resolvedSource = detectSource(contextInfo, source);
+  const resolvedSource = detectSource(contextInfo, source, requestHeaders);
   const fingerprint = computeFingerprint(contextInfo, rawBody ?? null, responseIdToConvo);
 
   // Register or look up conversation
@@ -173,10 +279,17 @@ function storeRequest(
         workingDirectory: extractWorkingDirectory(contextInfo),
         firstSeen: new Date().toISOString(),
       });
-    } else if (!conversations.get(fingerprint)!.workingDirectory) {
-      // Backfill if first request didn't have it
-      const wd = extractWorkingDirectory(contextInfo);
-      if (wd) conversations.get(fingerprint)!.workingDirectory = wd;
+    } else {
+      const convo = conversations.get(fingerprint)!;
+      // Backfill source if first request couldn't detect it
+      if (convo.source === 'unknown' && resolvedSource && resolvedSource !== 'unknown') {
+        convo.source = resolvedSource;
+      }
+      // Backfill working directory if first request didn't have it
+      if (!convo.workingDirectory) {
+        const wd = extractWorkingDirectory(contextInfo);
+        if (wd) convo.workingDirectory = wd;
+      }
     }
     conversationId = fingerprint;
   }
@@ -221,18 +334,33 @@ function storeRequest(
   }
 
   capturedRequests.unshift(entry);
-  if (capturedRequests.length > MAX_STORED) {
-    const evicted = capturedRequests.pop()!;
-    // Clean up orphaned conversation keys
-    if (evicted.conversationId) {
-      const stillReferenced = capturedRequests.some(r => r.conversationId === evicted.conversationId);
-      if (!stillReferenced) {
-        conversations.delete(evicted.conversationId);
-        diskSessionsWritten.delete(evicted.conversationId);
-        // Clean up responseIdToConvo entries for this conversation
-        for (const [rid, cid] of responseIdToConvo) {
-          if (cid === evicted.conversationId) responseIdToConvo.delete(rid);
-        }
+
+  // Evict oldest sessions when we exceed the session limit
+  if (conversations.size > MAX_SESSIONS) {
+    // Find the oldest session by its most recent entry timestamp
+    const sessionLatest = new Map<string, number>();
+    for (const r of capturedRequests) {
+      if (r.conversationId) {
+        const t = new Date(r.timestamp).getTime();
+        const cur = sessionLatest.get(r.conversationId) || 0;
+        if (t > cur) sessionLatest.set(r.conversationId, t);
+      }
+    }
+    // Sort sessions oldest-first, evict until we're at the limit
+    const sorted = [...sessionLatest.entries()].sort((a, b) => a[1] - b[1]);
+    const toEvict = sorted.slice(0, sorted.length - MAX_SESSIONS).map(s => s[0]);
+    const evictSet = new Set(toEvict);
+    // Remove all entries belonging to evicted sessions
+    for (let i = capturedRequests.length - 1; i >= 0; i--) {
+      if (capturedRequests[i].conversationId && evictSet.has(capturedRequests[i].conversationId!)) {
+        capturedRequests.splice(i, 1);
+      }
+    }
+    for (const cid of toEvict) {
+      conversations.delete(cid);
+      diskSessionsWritten.delete(cid);
+      for (const [rid, rcid] of responseIdToConvo) {
+        if (rcid === cid) responseIdToConvo.delete(rid);
       }
     }
   }
@@ -240,6 +368,7 @@ function storeRequest(
   dataRevision++;
   logToDisk(entry);
   saveState();
+  compactEntry(entry);
   return entry;
 }
 
@@ -259,7 +388,7 @@ function forwardRequest(
 ): void {
   const { targetUrl } = resolveTargetUrl(
     { pathname: parsedUrl.pathname!, search: parsedUrl.search },
-    req.headers as Record<string, string | undefined>,
+    headersForResolution(req.headers, req.socket.remoteAddress, ALLOW_TARGET_OVERRIDE),
     UPSTREAMS,
   );
   const targetParsed = url.parse(targetUrl);
@@ -294,7 +423,9 @@ function forwardRequest(
   res.on('close', () => { if (!proxyReq.destroyed) proxyReq.destroy(); });
 
   proxyReq.on('error', (err) => {
-    console.error('Proxy error:', err.message);
+    // Suppress errors from client-initiated disconnects
+    if (res.destroyed) return;
+    console.error('Proxy error:', err.message || (err as any).code || 'unknown');
     if (!res.headersSent) {
       res.writeHead(502, { 'Content-Type': 'application/json' });
     }
@@ -307,18 +438,6 @@ function forwardRequest(
   proxyReq.end();
 }
 
-// Headers to exclude from capture (auth/sensitive)
-const REDACTED_HEADERS = new Set(['authorization', 'x-api-key', 'cookie', 'set-cookie', 'x-target-url']);
-
-function selectHeaders(headers: Record<string, any>): Record<string, string> {
-  const result: Record<string, string> = {};
-  for (const [key, val] of Object.entries(headers)) {
-    if (REDACTED_HEADERS.has(key.toLowerCase())) continue;
-    if (typeof val === 'string') result[key] = val;
-  }
-  return result;
-}
-
 // Proxy handler
 function handleProxy(req: http.IncomingMessage, res: http.ServerResponse): void {
   const parsedUrl = url.parse(req.url!);
@@ -328,7 +447,7 @@ function handleProxy(req: http.IncomingMessage, res: http.ServerResponse): void 
   const cleanUrl = { ...parsedUrl, pathname: cleanPath };
   const { targetUrl, provider } = resolveTargetUrl(
     { pathname: cleanPath, search: parsedUrl.search },
-    req.headers as Record<string, string | undefined>,
+    headersForResolution(req.headers, req.socket.remoteAddress, ALLOW_TARGET_OVERRIDE),
     UPSTREAMS,
   );
   const hasAuth = !!req.headers['authorization'];
@@ -369,7 +488,7 @@ function handleProxy(req: http.IncomingMessage, res: http.ServerResponse): void 
         tools: [],
         messages: [{ role: 'raw', content: body.substring(0, 2000), tokens: estimateTokens(body) }],
       };
-      storeRequest(rawInfo, { raw: true }, source);
+      storeRequest(rawInfo, { raw: true }, source, undefined, undefined, selectHeaders(req.headers));
       return forwardRequest(req, res, cleanUrl as url.UrlWithStringQuery, bodyBuffer);
     }
 
@@ -443,13 +562,13 @@ function handleProxy(req: http.IncomingMessage, res: http.ServerResponse): void 
         };
         const respBody = Buffer.concat(respChunks).toString('utf8');
         if (isStreaming) {
-          storeRequest(contextInfo, { streaming: true, chunks: respBody }, source, bodyData, meta);
+          storeRequest(contextInfo, { streaming: true, chunks: respBody }, source, bodyData, meta, capturedReqHeaders);
         } else {
           try {
             const responseData = JSON.parse(respBody);
-            storeRequest(contextInfo, responseData, source, bodyData, meta);
+            storeRequest(contextInfo, responseData, source, bodyData, meta, capturedReqHeaders);
           } catch (e) {
-            storeRequest(contextInfo, { raw: respBody }, source, bodyData, meta);
+            storeRequest(contextInfo, { raw: respBody }, source, bodyData, meta, capturedReqHeaders);
           }
         }
         if (!res.destroyed) res.end();
@@ -465,7 +584,9 @@ function handleProxy(req: http.IncomingMessage, res: http.ServerResponse): void 
     res.on('close', () => { if (!proxyReq.destroyed) proxyReq.destroy(); });
 
     proxyReq.on('error', (err) => {
-      console.error('Proxy error:', err.message);
+      // Suppress errors from client-initiated disconnects
+      if (res.destroyed) return;
+      console.error('Proxy error:', err.message || (err as any).code || 'unknown');
       if (!res.headersSent) {
         res.writeHead(502, { 'Content-Type': 'application/json' });
       }
@@ -630,12 +751,12 @@ loadState();
 const proxyServer = http.createServer(handleProxy);
 const webUIServer = http.createServer(handleWebUI);
 
-proxyServer.listen(4040, () => {
-  console.log('🔍 Context Lens Proxy running on http://localhost:4040');
+proxyServer.listen(4040, BIND_HOST, () => {
+  console.log(`🔍 Context Lens Proxy running on http://${BIND_HOST}:4040`);
 });
 
-webUIServer.listen(4041, () => {
-  console.log('🌐 Context Lens Web UI running on http://localhost:4041');
+webUIServer.listen(4041, BIND_HOST, () => {
+  console.log(`🌐 Context Lens Web UI running on http://${BIND_HOST}:4041`);
   // Only show verbose help when running standalone (not spawned by cli.js)
   if (!process.env.CONTEXT_LENS_CLI) {
     console.log(`\nUpstream: OpenAI → ${UPSTREAM_OPENAI_URL}`);
@@ -644,6 +765,6 @@ webUIServer.listen(4041, () => {
     console.log('  Codex (subscription): UPSTREAM_OPENAI_URL=https://chatgpt.com/backend-api/codex node server.js');
     console.log('  Codex (API key):      node server.js');
     console.log('  Then: OPENAI_BASE_URL=http://localhost:4040 codex "your prompt"');
-    console.log('  Claude: ANTHROPIC_BASE_URL=http://localhost:4040 claude "your prompt"');
+    console.log('  Claude: ANTHROPIC_BASE_URL=http://localhost:4040/claude claude "your prompt"');
   }
 });

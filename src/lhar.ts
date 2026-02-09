@@ -1,13 +1,31 @@
 import { randomUUID, randomBytes, createHash } from 'node:crypto';
 import { estimateTokens } from './core.js';
 import type {
-  CapturedEntry, ContextInfo, CompositionCategory, CompositionEntry,
-  LharRecord, LharSessionLine, LharJsonWrapper, Conversation,
-} from './types.js';
+  CompositionCategory, CompositionEntry,
+  LharRecord, LharSessionLine, LharJsonWrapper,
+} from './lhar-types.generated.js';
+import type { CapturedEntry, ContextInfo, Conversation } from './types.js';
 
 const COLLECTOR_NAME = 'context-lens';
 const COLLECTOR_VERSION = '0.1.0';
 const LHAR_VERSION = '0.1.0';
+
+// --- Header Redaction ---
+
+export const SENSITIVE_HEADERS = new Set([
+  'authorization', 'x-api-key', 'cookie', 'set-cookie',
+  'x-target-url', 'proxy-authorization', 'x-auth-token',
+  'x-forwarded-authorization', 'www-authenticate', 'proxy-authenticate',
+]);
+
+export function redactHeaders(headers: Record<string, string>): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const [key, val] of Object.entries(headers)) {
+    if (SENSITIVE_HEADERS.has(key.toLowerCase())) continue;
+    result[key] = val;
+  }
+  return result;
+}
 
 // --- Composition Analysis ---
 
@@ -77,6 +95,32 @@ function classifyMessage(
   msg: Record<string, any>,
   add: (cat: CompositionCategory, tokens: number) => void,
 ): void {
+  const type: string = msg.type || '';
+
+  // OpenAI Responses API typed items (no role field)
+  if (!msg.role && type) {
+    if (type === 'function_call' || type === 'custom_tool_call') {
+      add('tool_calls', estimateTokens(msg));
+      return;
+    }
+    if (type === 'function_call_output' || type === 'custom_tool_call_output') {
+      add('tool_results', estimateTokens(msg.output || ''));
+      return;
+    }
+    if (type === 'reasoning') {
+      add('thinking', estimateTokens(msg));
+      return;
+    }
+    if (type === 'output_text') {
+      add('assistant_text', estimateTokens(msg.text || ''));
+      return;
+    }
+    if (type === 'input_text') {
+      add('user_text', estimateTokens(msg.text || ''));
+      return;
+    }
+  }
+
   const role: string = msg.role || 'user';
   const content = msg.content;
 
@@ -396,8 +440,8 @@ export function buildLharRecord(
       status_code: entry.httpStatus,
       api_format: ci.apiFormat,
       stream: usage.stream,
-      request_headers: entry.requestHeaders,
-      response_headers: entry.responseHeaders,
+      request_headers: redactHeaders(entry.requestHeaders),
+      response_headers: redactHeaders(entry.responseHeaders),
     },
 
     timings,
