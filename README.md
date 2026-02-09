@@ -2,9 +2,17 @@
 
 ![Early Development](https://img.shields.io/badge/status-early%20development-orange)
 
-See what's actually in your LLM's context window. A zero-dependency HTTP proxy that intercepts API calls and visualizes token usage in real-time.
+I wanted to know what AI agent context looked like. So I built this.
 
-![Context Lens UI](context-lens.png)
+Zero dependencies. Sits between your tool and the API, captures everything, gives you a web UI to explore it.
+
+![Context Lens UI](screenshot-overview.png)
+
+## Why
+
+I kept wondering why my Claude Code sessions got so expensive. Couldn't find a tool that showed me what was exactly in the context window. So I built one.
+
+Turns out the "conversation" between you and your AI agent is a tiny fraction of what the model actually processes. Most of it is tool definitions, file contents, and internal bookkeeping you never see. Who knew. Interesting stuff!
 
 ## Quick Start
 
@@ -15,7 +23,7 @@ npx context-lens aider --model claude-sonnet-4
 npx context-lens -- python my_agent.py
 ```
 
-This starts the proxy (port 4040), opens the web UI (http://localhost:4041), sets the right env vars, and runs your command. Multiple tools can share one proxy — just open more terminals.
+This starts the proxy (port 4040), opens the web UI (http://localhost:4041), sets the right env vars, and runs your command. Multiple tools can share one proxy, just open more terminals.
 
 ## What You Get
 
@@ -27,9 +35,23 @@ This starts the proxy (port 4040), opens the web UI (http://localhost:4041), set
 - **Context diff** — turn-to-turn delta showing what grew, shrank, or appeared
 - **Findings** — flags large tool results, unused tool definitions, context overflow risk, compaction events
 - **Auto-detection** — recognizes Claude Code, Codex, aider, and others by source tag or system prompt
-- **LHAR export** — download session data as LHAR (LLM HTTP Archive) format
+- **LHAR export** — download session data as LHAR (LLM HTTP Archive) format ([schema](schema/lhar.schema.json))
 - **State persistence** — data survives restarts; delete individual sessions or reset all from the UI
 - **Streaming support** — passes through SSE chunks in real-time
+
+### Screenshots
+
+**Findings**
+
+![Findings panel](findings-screenshot.png)
+
+**Diff view**
+
+![Context diff view](diff.png)
+
+**Drill-down details**
+
+![Drill-down details panel](overview-sidebar.png)
 
 ## Manual Mode
 
