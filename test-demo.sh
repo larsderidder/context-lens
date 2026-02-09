@@ -4,7 +4,7 @@
 # This simulates API calls to demonstrate the visualization
 
 echo "🔍 Starting Context Lens..."
-node server.js &
+node dist/server.js &
 SERVER_PID=$!
 
 # Wait for server to start
