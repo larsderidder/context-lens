@@ -35,7 +35,7 @@ This starts the proxy (port 4040), opens the web UI (http://localhost:4041), set
 - **Context diff** — turn-to-turn delta showing what grew, shrank, or appeared
 - **Findings** — flags large tool results, unused tool definitions, context overflow risk, compaction events
 - **Auto-detection** — recognizes Claude Code, Codex, aider, and others by source tag or system prompt
-- **LHAR export** — download session data as LHAR (LLM HTTP Archive) format ([schema](schema/lhar.schema.json))
+- **LHAR export** — download session data as LHAR (LLM HTTP Archive) format ([doc](docs/LHAR.md))
 - **State persistence** — data survives restarts; delete individual sessions or reset all from the UI
 - **Streaming support** — passes through SSE chunks in real-time
 
