@@ -16,6 +16,7 @@ export const SENSITIVE_HEADERS = new Set([
   'authorization', 'x-api-key', 'cookie', 'set-cookie',
   'x-target-url', 'proxy-authorization', 'x-auth-token',
   'x-forwarded-authorization', 'www-authenticate', 'proxy-authenticate',
+  'x-goog-api-key',
 ]);
 
 export function redactHeaders(headers: Record<string, string>): Record<string, string> {
@@ -77,8 +78,16 @@ export function analyzeComposition(
     add('tool_definitions', estimateTokens(JSON.stringify(rawBody.tools)));
   }
 
-  // Messages array (Anthropic, OpenAI chat completions)
-  const messages = rawBody.messages || rawBody.input;
+  // Gemini/Code Assist: unwrap .request wrapper if present
+  const geminiBody = rawBody.request || rawBody;
+  // Gemini systemInstruction
+  if (geminiBody.systemInstruction) {
+    const parts = geminiBody.systemInstruction.parts || [];
+    add('system_prompt', estimateTokens(parts.map((p: any) => p.text || '').join('\n')));
+  }
+
+  // Gemini contents[] or standard messages[]/input[]
+  const messages = geminiBody.contents || rawBody.messages || rawBody.input;
   if (Array.isArray(messages)) {
     for (const msg of messages) {
       classifyMessage(msg, add);
@@ -138,6 +147,14 @@ function classifyMessage(
       add('assistant_text', estimateTokens(content));
     } else {
       add('user_text', estimateTokens(content));
+    }
+    return;
+  }
+
+  // Gemini parts array (role + parts instead of role + content)
+  if (msg.parts && Array.isArray(msg.parts)) {
+    for (const part of msg.parts) {
+      classifyGeminiPart(part, role, add);
     }
     return;
   }
@@ -204,6 +221,26 @@ function classifyBlock(
   add('other', estimateTokens(block));
 }
 
+function classifyGeminiPart(
+  part: Record<string, any>,
+  role: string,
+  add: (cat: CompositionCategory, tokens: number) => void,
+): void {
+  if (part.text) {
+    if (role === 'model') {
+      add('assistant_text', estimateTokens(part.text));
+    } else {
+      add('user_text', estimateTokens(part.text));
+    }
+    return;
+  }
+  if (part.functionCall) { add('tool_calls', estimateTokens(part.functionCall)); return; }
+  if (part.functionResponse) { add('tool_results', estimateTokens(part.functionResponse)); return; }
+  if (part.inlineData || part.fileData) { add('images', estimateTokens(part)); return; }
+  if (part.executableCode || part.codeExecutionResult) { add('assistant_text', estimateTokens(part)); return; }
+  add('other', estimateTokens(part));
+}
+
 function buildCompositionArray(
   counts: Map<CompositionCategory, { tokens: number; count: number }>,
   total: number,
@@ -263,13 +300,30 @@ export function parseResponseUsage(responseData: any): ParsedResponseUsage {
     result.cacheWriteTokens = u.cache_creation_input_tokens || 0;
   }
 
-  result.model = responseData.model || null;
+  // Gemini usageMetadata (direct or inside Code Assist wrapper .response)
+  const geminiResp = responseData.usageMetadata ? responseData : responseData.response;
+  if (geminiResp?.usageMetadata) {
+    const u = geminiResp.usageMetadata;
+    result.inputTokens = u.promptTokenCount || 0;
+    result.outputTokens = u.candidatesTokenCount || u.totalTokenCount - (u.promptTokenCount || 0) || 0;
+    result.cacheReadTokens = u.cachedContentTokenCount || 0;
+  }
+
+  result.model = responseData.model || responseData.modelVersion || geminiResp?.modelVersion || null;
 
   if (responseData.stop_reason) {
     result.finishReasons = [responseData.stop_reason];
   } else if (responseData.choices && Array.isArray(responseData.choices)) {
     result.finishReasons = responseData.choices
       .map((c: any) => c.finish_reason)
+      .filter(Boolean);
+  } else if (responseData.candidates && Array.isArray(responseData.candidates)) {
+    result.finishReasons = responseData.candidates
+      .map((c: any) => c.finishReason)
+      .filter(Boolean);
+  } else if (geminiResp?.candidates && Array.isArray(geminiResp.candidates)) {
+    result.finishReasons = geminiResp.candidates
+      .map((c: any) => c.finishReason)
       .filter(Boolean);
   }
 
@@ -314,6 +368,18 @@ function parseStreamingUsage(chunks: string, result: ParsedResponseUsage): Parse
       }
       if (parsed.choices?.[0]?.finish_reason) {
         result.finishReasons = [parsed.choices[0].finish_reason];
+      }
+      // Gemini streaming: usageMetadata in chunks
+      if (parsed.usageMetadata) {
+        result.inputTokens = parsed.usageMetadata.promptTokenCount || result.inputTokens;
+        result.outputTokens = parsed.usageMetadata.candidatesTokenCount || result.outputTokens;
+        result.cacheReadTokens = parsed.usageMetadata.cachedContentTokenCount || result.cacheReadTokens;
+      }
+      if (parsed.candidates?.[0]?.finishReason) {
+        result.finishReasons = [parsed.candidates[0].finishReason];
+      }
+      if (parsed.modelVersion) {
+        result.model = parsed.modelVersion;
       }
       if (parsed.model) {
         result.model = parsed.model;
