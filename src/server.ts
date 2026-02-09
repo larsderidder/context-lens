@@ -161,15 +161,16 @@ function compactEntry(entry: CapturedEntry): void {
   }));
 }
 
-// Lightweight projection — strip rawBody, response, heavy headers; compact contextInfo
+// Lightweight projection — strip rawBody, heavy headers; compact contextInfo
+// NOTE: response is included because compactEntry has already reduced it to just usage data
 function projectEntry(e: CapturedEntry) {
-  // Extract compact usage info from response if available
   const resp = e.response as Record<string, any> | undefined;
   const usage = resp?.usage;
   return {
     id: e.id,
     timestamp: e.timestamp,
     contextInfo: compactContextInfo(e.contextInfo),
+    response: e.response,
     contextLimit: e.contextLimit,
     source: e.source,
     conversationId: e.conversationId,
@@ -232,7 +233,7 @@ function loadState(): void {
         const projected = record.data;
         const entry: CapturedEntry = {
           ...projected,
-          response: { raw: true },
+          response: projected.response || { raw: true },
           requestHeaders: {},
           responseHeaders: {},
           rawBody: undefined,
@@ -248,10 +249,8 @@ function loadState(): void {
   if (loadedEntries > 0) {
     nextEntryId = maxId + 1;
     dataRevision = 1;
-    // Compact loaded entries to save memory (old state files may contain full text)
-    for (const entry of capturedRequests) {
-      compactEntry(entry);
-    }
+    // Loaded entries are already compact (projectEntry strips heavy data before saving).
+    // Do NOT call compactEntry here — it would destroy the preserved response usage data.
     console.log(`Restored ${loadedEntries} entries from ${conversations.size} conversations`);
   }
 }
@@ -367,8 +366,8 @@ function storeRequest(
 
   dataRevision++;
   logToDisk(entry);
-  saveState();
   compactEntry(entry);
+  saveState();
   return entry;
 }
 

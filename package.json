@@ -21,7 +21,11 @@
     "dist/",
     "public/",
     "schema/",
-    "mitm_addon.py"
+    "mitm_addon.py",
+    "screenshot-overview.png",
+    "findings-screenshot.png",
+    "diff.png",
+    "overview-sidebar.png"
   ],
   "keywords": [
     "llm",
