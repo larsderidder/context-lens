@@ -30,6 +30,8 @@ const __dirname = path.dirname(__filename);
 const UPSTREAM_OPENAI_URL = process.env.UPSTREAM_OPENAI_URL || 'https://api.openai.com/v1';
 const UPSTREAM_ANTHROPIC_URL = process.env.UPSTREAM_ANTHROPIC_URL || 'https://api.anthropic.com';
 const UPSTREAM_CHATGPT_URL = process.env.UPSTREAM_CHATGPT_URL || 'https://chatgpt.com';
+const UPSTREAM_GEMINI_URL = process.env.UPSTREAM_GEMINI_URL || 'https://generativelanguage.googleapis.com';
+const UPSTREAM_GEMINI_CODE_ASSIST_URL = process.env.UPSTREAM_GEMINI_CODE_ASSIST_URL || 'https://cloudcode-pa.googleapis.com';
 
 // Safety defaults:
 // - Bind only to localhost unless explicitly overridden.
@@ -95,9 +97,9 @@ function compactBlock(b: ContentBlock): ContentBlock {
       return { type: 'tool_result', tool_use_id: b.tool_use_id, content: rc };
     }
     case 'text':
-      return { type: 'text', text: b.text.slice(0, 200) };
+      return { type: 'text', text: (b.text || '').slice(0, 200) };
     case 'input_text':
-      return { type: 'input_text', text: b.text.slice(0, 200) };
+      return { type: 'input_text', text: (b.text || '').slice(0, 200) };
     case 'image':
       return { type: 'image' };
     default: {
@@ -111,7 +113,12 @@ function compactBlock(b: ContentBlock): ContentBlock {
 }
 
 // Compact contextInfo — keep metadata and token counts, drop large text payloads
+// Cap messages to prevent state bloat (260+ messages × blocks = multi-MB entries)
+const MAX_COMPACT_MESSAGES = 60;
 function compactContextInfo(ci: ContextInfo) {
+  const msgs = ci.messages.length > MAX_COMPACT_MESSAGES
+    ? ci.messages.slice(-MAX_COMPACT_MESSAGES)
+    : ci.messages;
   return {
     provider: ci.provider,
     apiFormat: ci.apiFormat,
@@ -122,7 +129,7 @@ function compactContextInfo(ci: ContextInfo) {
     totalTokens: ci.totalTokens,
     systemPrompts: [],
     tools: [],
-    messages: ci.messages.map(m => ({
+    messages: msgs.map(m => ({
       role: m.role,
       content: typeof m.content === 'string' ? m.content.slice(0, 200) : '',
       tokens: m.tokens,
@@ -153,7 +160,10 @@ function compactEntry(entry: CapturedEntry): void {
   // Compact contextInfo in-place
   entry.contextInfo.systemPrompts = [];
   entry.contextInfo.tools = [];
-  entry.contextInfo.messages = entry.contextInfo.messages.map(m => ({
+  const msgs = entry.contextInfo.messages.length > MAX_COMPACT_MESSAGES
+    ? entry.contextInfo.messages.slice(-MAX_COMPACT_MESSAGES)
+    : entry.contextInfo.messages;
+  entry.contextInfo.messages = msgs.map(m => ({
     role: m.role,
     content: typeof m.content === 'string' ? m.content.slice(0, 200) : '',
     tokens: m.tokens,
@@ -266,6 +276,7 @@ function storeRequest(
 ): CapturedEntry {
   const resolvedSource = detectSource(contextInfo, source, requestHeaders);
   const fingerprint = computeFingerprint(contextInfo, rawBody ?? null, responseIdToConvo);
+  const rawSessionId = extractSessionId(rawBody ?? null);
 
   // Register or look up conversation
   let conversationId: string | null = null;
@@ -277,6 +288,7 @@ function storeRequest(
         source: resolvedSource || 'unknown',
         workingDirectory: extractWorkingDirectory(contextInfo),
         firstSeen: new Date().toISOString(),
+        sessionId: rawSessionId,
       });
     } else {
       const convo = conversations.get(fingerprint)!;
@@ -376,6 +388,8 @@ const UPSTREAMS: Upstreams = {
   openai: UPSTREAM_OPENAI_URL,
   anthropic: UPSTREAM_ANTHROPIC_URL,
   chatgpt: UPSTREAM_CHATGPT_URL,
+  gemini: UPSTREAM_GEMINI_URL,
+  geminiCodeAssist: UPSTREAM_GEMINI_CODE_ASSIST_URL,
 };
 
 // Forward a request upstream (no body capture)
@@ -493,7 +507,14 @@ function handleProxy(req: http.IncomingMessage, res: http.ServerResponse): void 
 
     console.log(`  ✓ Parsed JSON body (${Object.keys(bodyData).join(', ')})`);
     const apiFormat = detectApiFormat(cleanPath);
+    // Gemini: model is in the URL path, not in the body
+    if (apiFormat === 'gemini' && !bodyData.model) {
+      const modelMatch = cleanPath.match(/\/models\/([^/:]+)/);
+      if (modelMatch) bodyData.model = modelMatch[1];
+    }
     const contextInfo = parseContextInfo(provider, bodyData, apiFormat);
+    // Skip capturing utility endpoints (count_tokens, etc.) — they're not real conversation turns
+    const isUtilityEndpoint = /\/count_tokens\b|:countTokens\b|:loadCodeAssist\b|:retrieveUserQuota\b|:listExperiments\b|:onboardUser\b|:fetchAdminControls\b|:recordCodeAssistMetrics\b/.test(cleanPath);
 
     const targetParsed = url.parse(targetUrl);
 
@@ -560,14 +581,16 @@ function handleProxy(req: http.IncomingMessage, res: http.ServerResponse): void 
           responseHeaders: capturedResHeaders,
         };
         const respBody = Buffer.concat(respChunks).toString('utf8');
-        if (isStreaming) {
-          storeRequest(contextInfo, { streaming: true, chunks: respBody }, source, bodyData, meta, capturedReqHeaders);
-        } else {
-          try {
-            const responseData = JSON.parse(respBody);
-            storeRequest(contextInfo, responseData, source, bodyData, meta, capturedReqHeaders);
-          } catch (e) {
-            storeRequest(contextInfo, { raw: respBody }, source, bodyData, meta, capturedReqHeaders);
+        if (!isUtilityEndpoint) {
+          if (isStreaming) {
+            storeRequest(contextInfo, { streaming: true, chunks: respBody }, source, bodyData, meta, capturedReqHeaders);
+          } else {
+            try {
+              const responseData = JSON.parse(respBody);
+              storeRequest(contextInfo, responseData, source, bodyData, meta, capturedReqHeaders);
+            } catch (e) {
+              storeRequest(contextInfo, { raw: respBody }, source, bodyData, meta, capturedReqHeaders);
+            }
           }
         }
         if (!res.destroyed) res.end();
