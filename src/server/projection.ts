@@ -29,6 +29,8 @@ export function projectEntry(
     targetUrl: e.targetUrl,
     composition: e.composition,
     costUsd: e.costUsd,
+    healthScore: e.healthScore,
+    securityAlerts: e.securityAlerts || [],
     usage: usage
       ? {
           inputTokens: usage.input_tokens || 0,

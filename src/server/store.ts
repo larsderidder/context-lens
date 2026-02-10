@@ -3,12 +3,14 @@ import path from "node:path";
 import {
   computeAgentKey,
   computeFingerprint,
+  computeHealthScore,
   detectSource,
   estimateCost,
   extractConversationLabel,
   extractSessionId,
   extractWorkingDirectory,
   getContextLimit,
+  scanSecurity,
 } from "../core.js";
 import {
   analyzeComposition,
@@ -22,16 +24,26 @@ import type {
   ContentBlock,
   ContextInfo,
   Conversation,
+  PrivacyLevel,
   RequestMeta,
   ResponseData,
 } from "../types.js";
 import { projectEntry } from "./projection.js";
+
+export interface StoreChangeEvent {
+  type: string;
+  revision: number;
+  conversationId?: string | null;
+}
+
+type StoreChangeListener = (event: StoreChangeEvent) => void;
 
 export class Store {
   private readonly dataDir: string;
   private readonly stateFile: string;
   private readonly maxSessions: number;
   private readonly maxCompactMessages: number;
+  private readonly privacy: PrivacyLevel;
 
   private capturedRequests: CapturedEntry[] = [];
   private conversations = new Map<string, Conversation>(); // fingerprint -> conversation
@@ -41,16 +53,21 @@ export class Store {
   private dataRevision = 0;
   private nextEntryId = 1;
 
+  // SSE change listeners
+  private changeListeners = new Set<StoreChangeListener>();
+
   constructor(opts: {
     dataDir: string;
     stateFile: string;
     maxSessions: number;
     maxCompactMessages: number;
+    privacy?: PrivacyLevel;
   }) {
     this.dataDir = opts.dataDir;
     this.stateFile = opts.stateFile;
     this.maxSessions = opts.maxSessions;
     this.maxCompactMessages = opts.maxCompactMessages;
+    this.privacy = opts.privacy ?? "standard";
 
     try {
       fs.mkdirSync(this.dataDir, { recursive: true });
@@ -61,6 +78,38 @@ export class Store {
 
   getRevision(): number {
     return this.dataRevision;
+  }
+
+  getPrivacy(): PrivacyLevel {
+    return this.privacy;
+  }
+
+  // --- SSE event emitter ---
+
+  on(_event: "change", listener: StoreChangeListener): void {
+    this.changeListeners.add(listener);
+  }
+
+  off(_event: "change", listener: StoreChangeListener): void {
+    this.changeListeners.delete(listener);
+  }
+
+  private emitChange(
+    type: string,
+    conversationId?: string | null,
+  ): void {
+    const event: StoreChangeEvent = {
+      type,
+      revision: this.dataRevision,
+      conversationId,
+    };
+    for (const listener of this.changeListeners) {
+      try {
+        listener(event);
+      } catch {
+        // Don't let a broken SSE connection crash the store
+      }
+    }
   }
 
   getCapturedRequests(): CapturedEntry[] {
@@ -96,6 +145,8 @@ export class Store {
             requestHeaders: {},
             responseHeaders: {},
             rawBody: undefined,
+            healthScore: projected.healthScore ?? null,
+            securityAlerts: projected.securityAlerts || [],
           };
           this.capturedRequests.push(entry);
           if (entry.id > maxId) maxId = entry.id;
@@ -113,6 +164,7 @@ export class Store {
       this.dataRevision = 1;
       // Loaded entries are already compact (projectEntry strips heavy data before saving).
       // Do NOT call compactEntry here. It would destroy the preserved response usage data.
+      this.backfillHealthScores();
       console.log(
         `Restored ${loadedEntries} entries from ${this.conversations.size} conversations`,
       );
@@ -198,7 +250,53 @@ export class Store {
       rawBody,
       composition,
       costUsd,
+      healthScore: null,
+      securityAlerts: [],
     };
+
+    // Compute health score
+    const sameConvo = conversationId
+      ? this.capturedRequests.filter(
+          (e) => e.conversationId === conversationId,
+        )
+      : [];
+    const prevMain = sameConvo
+      .filter((e) => !e.agentKey)
+      .sort(
+        (a, b) =>
+          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+      )[0];
+    const sessionToolsUsed = new Set<string>();
+    for (const e of sameConvo) {
+      for (const msg of e.contextInfo.messages) {
+        if (msg.contentBlocks) {
+          for (const b of msg.contentBlocks) {
+            if (b.type === "tool_use" && "name" in b && b.name)
+              sessionToolsUsed.add(b.name);
+          }
+        }
+      }
+    }
+    // Also scan current entry (not yet in capturedRequests)
+    for (const msg of contextInfo.messages) {
+      if (msg.contentBlocks) {
+        for (const b of msg.contentBlocks) {
+          if (b.type === "tool_use" && "name" in b && b.name)
+            sessionToolsUsed.add(b.name);
+        }
+      }
+    }
+    const turnCount = sameConvo.filter((e) => !e.agentKey).length + 1;
+    entry.healthScore = computeHealthScore(
+      entry,
+      prevMain ? prevMain.contextInfo.totalTokens : null,
+      sessionToolsUsed,
+      turnCount,
+    );
+
+    // Security scanning — must happen before compaction strips message content
+    const securityResult = scanSecurity(contextInfo);
+    entry.securityAlerts = securityResult.alerts;
 
     // Track response IDs for Responses API chaining
     const respId =
@@ -246,6 +344,7 @@ export class Store {
     }
 
     this.dataRevision++;
+    this.emitChange("entry-added", conversationId);
     this.logToDisk(entry);
     this.compactEntry(entry);
     this.saveState();
@@ -263,6 +362,7 @@ export class Store {
       if (cid === convoId) this.responseIdToConvo.delete(rid);
     }
     this.dataRevision++;
+    this.emitChange("conversation-deleted", convoId);
     this.saveState();
   }
 
@@ -273,10 +373,61 @@ export class Store {
     this.responseIdToConvo.clear();
     this.nextEntryId = 1;
     this.dataRevision++;
+    this.emitChange("reset");
     this.saveState();
   }
 
   // ----- Internals -----
+
+  /** Backfill health scores for entries loaded from state that don't have one. */
+  private backfillHealthScores(): void {
+    // Process oldest-first so previousTokens lookups work correctly.
+    const sorted = [...this.capturedRequests].sort(
+      (a, b) =>
+        new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+    );
+    for (const entry of sorted) {
+      if (entry.healthScore) continue;
+
+      const sameConvo = entry.conversationId
+        ? sorted.filter(
+            (e) =>
+              e.conversationId === entry.conversationId &&
+              new Date(e.timestamp).getTime() <
+                new Date(entry.timestamp).getTime(),
+          )
+        : [];
+      const prevMain = sameConvo
+        .filter((e) => !e.agentKey)
+        .sort(
+          (a, b) =>
+            new Date(b.timestamp).getTime() -
+            new Date(a.timestamp).getTime(),
+        )[0];
+
+      const sessionToolsUsed = new Set<string>();
+      for (const e of [...sameConvo, entry]) {
+        for (const msg of e.contextInfo.messages) {
+          if (msg.contentBlocks) {
+            for (const b of msg.contentBlocks) {
+              if (b.type === "tool_use" && "name" in b && b.name)
+                sessionToolsUsed.add(b.name);
+            }
+          }
+        }
+      }
+      const turnCount =
+        sameConvo.filter((e) => !e.agentKey).length +
+        (entry.agentKey ? 0 : 1);
+
+      entry.healthScore = computeHealthScore(
+        entry,
+        prevMain ? prevMain.contextInfo.totalTokens : null,
+        sessionToolsUsed,
+        turnCount,
+      );
+    }
+  }
 
   private logToDisk(entry: CapturedEntry): void {
     const safeSource = safeFilenamePart(entry.source || "unknown");
@@ -307,7 +458,7 @@ export class Store {
       }
     }
 
-    const record = buildLharRecord(entry, this.capturedRequests);
+    const record = buildLharRecord(entry, this.capturedRequests, this.privacy);
     output += `${JSON.stringify(record)}\n`;
 
     try {
