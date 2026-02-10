@@ -19,6 +19,7 @@ export const SOURCE_SIGNATURES: SourceSignature[] = [
   { pattern: 'Act as an expert software developer', source: 'aider' },
   { pattern: 'You are Claude Code', source: 'claude' },
   { pattern: 'You are Kimi Code CLI', source: 'kimi' },
+  { pattern: 'operating inside pi, a coding agent harness', source: 'pi' },
 ];
 
 /**

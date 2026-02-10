@@ -45,7 +45,7 @@ export function extractWorkingDirectory(contextInfo: ContextInfo): string | null
   if (match) return match[1];
   match = allText.match(/<cwd>([^<]+)<\/cwd>/);
   if (match) return match[1];
-  match = allText.match(/working directory (?:is |= ?)[`"]?([/~][^\s`"'\n]+)/i);
+  match = allText.match(/working directory(?:(?:is |= ?)|[:\s]+)[`"]?([/~][^\s`"'\n]+)/i);
   if (match) return match[1];
   match = allText.match(/\bcwd[:\s]+[`"]?([/~][^\s`"'\n]+)/);
   if (match) return match[1];
