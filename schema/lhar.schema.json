@@ -58,7 +58,9 @@
         "trace_id": { "type": "string" },
         "started_at": { "type": "string" },
         "tool": { "type": "string" },
-        "model": { "type": "string" }
+        "model": { "type": "string" },
+        "label": { "type": "string" },
+        "working_directory": { "type": "string" }
       },
       "required": ["type", "trace_id", "started_at", "tool", "model"],
       "additionalProperties": false

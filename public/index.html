@@ -394,6 +394,43 @@ body::after {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
+/* Archived sessions */
+.archived-section {
+  padding: 12px 14px 6px;
+  font-size: 10px; color: var(--text-dim);
+  text-transform: uppercase; letter-spacing: 0.1em;
+  font-weight: 600;
+  border-top: 1px solid var(--border-mid);
+  border-bottom: 1px solid var(--border-dim);
+  cursor: pointer; user-select: none;
+  display: flex; align-items: center; gap: 6px;
+}
+.archived-section:hover { color: var(--text-secondary); }
+.archived-toggle { font-size: 8px; transition: transform 0.2s; }
+.archived-toggle.open { transform: rotate(90deg); }
+.archived-item {
+  padding: 8px 14px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+  transition: background 0.15s, border-color 0.15s;
+  opacity: 0.7;
+}
+.archived-item:hover { background: var(--bg-surface); opacity: 1; }
+.archived-meta {
+  display: flex; gap: 10px; margin-top: 4px; padding-left: 14px;
+  font-family: var(--font-mono); font-size: 11px; color: var(--text-dim);
+}
+.archived-load {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10px; padding: 2px 8px; border-radius: 3px;
+  background: rgba(91, 156, 245, 0.1); color: var(--accent-blue);
+  border: 1px solid rgba(91, 156, 245, 0.2);
+  cursor: pointer; opacity: 0; transition: opacity 0.15s;
+}
+.archived-item:hover .archived-load { opacity: 1; }
+.archived-load:hover { background: rgba(91, 156, 245, 0.2); }
+
 /* Model color helpers */
 .model-opus { color: #fb923c; }
 .model-sonnet { color: #60a5fa; }
@@ -825,6 +862,8 @@ body::after {
   let turnDetailMode = 'calls'; // 'calls' or 'diff'
   let expandedCategories = new Set();
   let expandedAgentGroups = new Set();
+  let archivedSessions = [];
+  let archivedExpanded = false;
   let turnCallsExpanded = false;
   let sourceFilter = '';
 
@@ -1124,6 +1163,33 @@ body::after {
     html += '<div><span>Total cost</span><span style="color:var(--accent-green);">' + fmtCost(totalCost) + '</span></div>';
     html += '</div>';
 
+    // Archived sessions section
+    if (archivedSessions.length > 0) {
+      html += '<div class="archived-section" id="archived-toggle">';
+      html += '<span class="archived-toggle' + (archivedExpanded ? ' open' : '') + '">&#9654;</span>';
+      html += 'Archived (' + archivedSessions.length + ')';
+      html += '</div>';
+      if (archivedExpanded) {
+        archivedSessions.forEach(function(a) {
+          var label = a.label || ('Session ' + a.id.slice(0, 8));
+          var dateStr = a.startedAt ? new Date(a.startedAt).toLocaleDateString([], {month:'short', day:'numeric'}) : '';
+          html += '<div class="archived-item" data-archived-file="' + esc(a.filename) + '" data-archived-dir="' + esc(a.dir || '') + '">';
+          html += '<div class="session-head">';
+          html += '<span class="badge ' + sourceBadgeClass(a.source) + '">' + esc(a.source || '?') + '</span>';
+          html += '<span style="font-family:var(--font-mono);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-secondary);">' + esc(shortModel(a.model)) + '</span>';
+          html += '<span class="archived-load" data-load-file="' + esc(a.filename) + '" data-load-dir="' + esc(a.dir || '') + '">Load</span>';
+          html += '</div>';
+          html += '<div class="archived-meta">';
+          html += '<span>' + esc(label) + '</span>';
+          html += '<span>' + a.entryCount + ' turns</span>';
+          if (dateStr) html += '<span>' + esc(dateStr) + '</span>';
+          html += '</div>';
+          if (a.workingDirectory) html += '<div class="working-dir">' + esc(a.workingDirectory) + '</div>';
+          html += '</div>';
+        });
+      }
+    }
+
     sb.innerHTML = html;
 
     sb.querySelectorAll('.session-item').forEach(function(el) {
@@ -1165,7 +1231,52 @@ body::after {
           }
           expandedSessions.delete(sid);
           fetchAndRender();
+          fetchArchivedSessions();
         });
+      });
+    });
+
+    // Archived section toggle
+    var archToggle = sb.querySelector('#archived-toggle');
+    if (archToggle) {
+      archToggle.addEventListener('click', function() {
+        archivedExpanded = !archivedExpanded;
+        renderSidebar();
+      });
+    }
+
+    // Archived load buttons
+    sb.querySelectorAll('.archived-load').forEach(function(el) {
+      el.addEventListener('click', function(ev) {
+        ev.stopPropagation();
+        var filename = el.getAttribute('data-load-file');
+        var dir = el.getAttribute('data-load-dir');
+        el.textContent = '...';
+        fetch('/api/sessions/load', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filename: filename, dir: dir || undefined }),
+        }).then(function(r) { return r.json(); }).then(function(data) {
+          if (data.conversationId) {
+            selectedSessionId = data.conversationId;
+            selectedTurnIndex = -1;
+            expandedSessions.add(data.conversationId);
+            currentRevision = -1; // Force re-fetch
+            fetchAndRender();
+            fetchArchivedSessions();
+          }
+        }).catch(function(err) {
+          console.error('Load error:', err);
+          el.textContent = 'Error';
+        });
+      });
+    });
+
+    // Archived item click (same as load)
+    sb.querySelectorAll('.archived-item').forEach(function(el) {
+      el.addEventListener('click', function() {
+        var loadBtn = el.querySelector('.archived-load');
+        if (loadBtn) loadBtn.click();
       });
     });
 
@@ -2237,6 +2348,20 @@ body::after {
     });
   });
 
+  // --- Archived Sessions ---
+  function fetchArchivedSessions() {
+    fetch('/api/sessions/archived').then(function(r) { return r.json(); }).then(function(data) {
+      if (Array.isArray(data)) {
+        var changed = JSON.stringify(data.map(function(a) { return a.id; }))
+          !== JSON.stringify(archivedSessions.map(function(a) { return a.id; }));
+        archivedSessions = data;
+        if (changed) renderSidebar();
+      }
+    }).catch(function(err) {
+      console.error('Archived fetch error:', err);
+    });
+  }
+
   // --- Polling ---
   function fetchAndRender() {
     // Flash poll indicator
@@ -2797,6 +2922,7 @@ body::after {
   }
 
   fetchAndRender();
+  fetchArchivedSessions();
   setInterval(fetchAndRender, 2000);
 })();
 </script>

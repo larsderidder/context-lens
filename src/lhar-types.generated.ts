@@ -59,6 +59,8 @@ export interface LharSessionLine {
   started_at: string;
   tool: string;
   model: string;
+  label?: string;
+  working_directory?: string;
 }
 /**
  * This interface was referenced by `LHARLLMHTTPArchiveFormat`'s JSON-Schema

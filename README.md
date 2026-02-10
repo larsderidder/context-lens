@@ -111,7 +111,13 @@ Each request is parsed to extract: model name, system prompts, tool definitions,
 
 ## Data
 
-Captured requests are kept in memory (last 100) and persisted to `data/state.jsonl` across restarts. Each session is also logged as a separate `.lhar` file in `data/`. Use the Reset button in the UI to clear everything.
+Captured requests are kept in memory (last 10 sessions) and persisted to `data/state.jsonl` across restarts. Each session is also logged as a separate `.lhar` file in `data/`. Use the Reset button in the UI to clear everything.
+
+Evicted or old sessions remain on disk as `.lhar` files. The sidebar shows an **Archived** section where you can browse and reload them. To include `.lhar` files from other directories (e.g. a previous `npx` install), set:
+
+```bash
+CONTEXT_LENS_ARCHIVE_DIRS=/path/to/old/data,/another/path context-lens wrap claude "prompt"
+```
 
 ## License
 

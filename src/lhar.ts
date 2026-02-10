@@ -1,7 +1,7 @@
 import { randomUUID, randomBytes, createHash } from 'node:crypto';
 import { estimateTokens } from './core.js';
 import type {
-  CompositionCategory, CompositionEntry,
+  CompositionCategory, CompositionEntry, Timings,
   LharRecord, LharSessionLine, LharJsonWrapper,
 } from './lhar-types.generated.js';
 import type { CapturedEntry, ContextInfo, Conversation } from './types.js';
@@ -482,12 +482,86 @@ export function buildSessionLine(
   conversation: Conversation,
   model: string,
 ): LharSessionLine {
-  return {
+  const line: LharSessionLine = {
     type: 'session',
     trace_id: traceIdFromConversation(conversationId),
     started_at: conversation.firstSeen,
     tool: conversation.source,
     model,
+  };
+  if (conversation.label) line.label = conversation.label;
+  if (conversation.workingDirectory) line.working_directory = conversation.workingDirectory;
+  return line;
+}
+
+// --- LHAR Record → CapturedEntry ---
+
+/**
+ * Convert a parsed LharRecord back into a CapturedEntry.
+ * Used when loading archived sessions from .lhar files on disk.
+ * Fields not preserved in LHAR (systemPrompts, tools, messages) are left empty.
+ */
+export function lharRecordToEntry(
+  record: LharRecord,
+  conversationId: string,
+  entryId: number,
+): CapturedEntry {
+  const cl = record.context_lens;
+  const timings: Timings | null = record.timings
+    ? {
+        send_ms: record.timings.send_ms,
+        wait_ms: record.timings.wait_ms,
+        receive_ms: record.timings.receive_ms,
+        total_ms: record.timings.total_ms,
+        tokens_per_second: null, // strip derived field
+      }
+    : null;
+
+  const contextInfo: ContextInfo = {
+    provider: record.gen_ai.system,
+    apiFormat: record.http.api_format,
+    model: record.gen_ai.request.model,
+    systemTokens: cl.system_tokens,
+    toolsTokens: cl.tools_tokens,
+    messagesTokens: cl.messages_tokens,
+    totalTokens: record.gen_ai.usage.input_tokens,
+    systemPrompts: [],
+    tools: [],
+    messages: [],
+  };
+
+  const agentKey = record.source.agent_role === 'subagent'
+    ? `${record.gen_ai.request.model}:subagent`
+    : null;
+
+  return {
+    id: entryId,
+    timestamp: record.timestamp,
+    contextInfo,
+    response: {
+      usage: {
+        input_tokens: record.gen_ai.usage.input_tokens,
+        output_tokens: record.gen_ai.usage.output_tokens,
+        cache_read_input_tokens: record.usage_ext.cache_read_tokens,
+        cache_creation_input_tokens: record.usage_ext.cache_write_tokens,
+      },
+      model: record.gen_ai.response.model ?? null,
+      stop_reason: record.gen_ai.response.finish_reasons[0] ?? null,
+    },
+    contextLimit: cl.window_size,
+    source: record.source.tool,
+    conversationId,
+    agentKey,
+    agentLabel: '',
+    httpStatus: record.http.status_code,
+    timings,
+    requestBytes: record.transfer.request_bytes,
+    responseBytes: record.transfer.response_bytes,
+    targetUrl: record.http.url,
+    requestHeaders: {},
+    responseHeaders: {},
+    composition: cl.composition,
+    costUsd: record.usage_ext.cost_usd,
   };
 }
 

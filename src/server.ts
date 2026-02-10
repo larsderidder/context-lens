@@ -20,7 +20,8 @@ import type {
   ContentBlock,
 } from './types.js';
 
-import { analyzeComposition, parseResponseUsage, buildLharRecord, buildSessionLine, toLharJsonl, toLharJson } from './lhar.js';
+import { analyzeComposition, parseResponseUsage, buildLharRecord, buildSessionLine, toLharJsonl, toLharJson, lharRecordToEntry } from './lhar.js';
+import type { LharRecord, LharSessionLine } from './lhar-types.generated.js';
 import { safeFilenamePart, headersForResolution, selectHeaders } from './server-utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -51,6 +52,22 @@ const responseIdToConvo = new Map<string, string>();
 // Disk logging — one LHAR file per session/conversation
 const DATA_DIR = path.join(__dirname, '..', 'data');
 try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch {}
+
+// Additional directories to scan for archived .lhar files (e.g. from previous npx runs)
+// Comma-separated paths via CONTEXT_LENS_ARCHIVE_DIRS env var
+const ARCHIVE_DIRS: string[] = [DATA_DIR];
+if (process.env.CONTEXT_LENS_ARCHIVE_DIRS) {
+  for (const dir of process.env.CONTEXT_LENS_ARCHIVE_DIRS.split(',')) {
+    const trimmed = dir.trim();
+    if (trimmed && trimmed !== DATA_DIR) {
+      try {
+        if (fs.statSync(trimmed).isDirectory()) ARCHIVE_DIRS.push(trimmed);
+      } catch {
+        console.warn(`Archive dir not found, skipping: ${trimmed}`);
+      }
+    }
+  }
+}
 
 // Track which conversations already have a session preamble on disk
 const diskSessionsWritten = new Set<string>();
@@ -672,6 +689,162 @@ function handleWebUI(req: http.IncomingMessage, res: http.ServerResponse): void 
     return;
   }
 
+  // GET /api/sessions/archived — list archived .lhar files not currently active
+  if (parsedUrl.pathname === '/api/sessions/archived' && req.method === 'GET') {
+    try {
+      const archived: any[] = [];
+      const seenIds = new Set<string>();
+      for (const dir of ARCHIVE_DIRS) {
+        let files: string[];
+        try {
+          files = fs.readdirSync(dir).filter(f => f.endsWith('.lhar') && f !== 'ungrouped.lhar');
+        } catch { continue; }
+
+        for (const filename of files) {
+          const dashIdx = filename.indexOf('-');
+          if (dashIdx < 0) continue;
+          const convoId = filename.slice(dashIdx + 1, -5);
+          if (conversations.has(convoId)) continue;
+          if (seenIds.has(convoId)) continue;
+          seenIds.add(convoId);
+
+          const filePath = path.join(dir, filename);
+          let firstLine: string;
+          try {
+            const fd = fs.openSync(filePath, 'r');
+            const buf = Buffer.alloc(4096);
+            const bytesRead = fs.readSync(fd, buf, 0, 4096, 0);
+            fs.closeSync(fd);
+            const chunk = buf.toString('utf8', 0, bytesRead);
+            const nlIdx = chunk.indexOf('\n');
+            firstLine = nlIdx >= 0 ? chunk.slice(0, nlIdx) : chunk;
+          } catch { continue; }
+
+          try {
+            const preamble = JSON.parse(firstLine);
+            if (preamble.type !== 'session') continue;
+
+            const content = fs.readFileSync(filePath, 'utf8');
+            const lines = content.split('\n').filter(l => l.length > 0);
+            const entryCount = lines.filter(l => {
+              try { return JSON.parse(l).type === 'entry'; } catch { return false; }
+            }).length;
+
+            archived.push({
+              id: convoId,
+              source: preamble.tool || 'unknown',
+              model: preamble.model || 'unknown',
+              label: preamble.label || null,
+              workingDirectory: preamble.working_directory || null,
+              startedAt: preamble.started_at,
+              filename,
+              dir,
+              entryCount,
+            });
+          } catch { continue; }
+        }
+      }
+      archived.sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(archived));
+    } catch (err: any) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+
+  // POST /api/sessions/load — load an archived .lhar file into active memory
+  if (parsedUrl.pathname === '/api/sessions/load' && req.method === 'POST') {
+    const bodyChunks: Buffer[] = [];
+    req.on('data', (chunk: Buffer) => { bodyChunks.push(chunk); });
+    req.on('end', () => {
+      try {
+        const body = JSON.parse(Buffer.concat(bodyChunks).toString('utf8'));
+        const filename = body.filename;
+        const dir = body.dir || DATA_DIR;
+        // Path traversal protection on filename
+        if (!filename || typeof filename !== 'string' || !filename.endsWith('.lhar')
+            || filename.includes('/') || filename.includes('\\') || filename.includes('..')) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Invalid filename' }));
+          return;
+        }
+        // Validate dir is one of the allowed archive directories
+        if (!ARCHIVE_DIRS.includes(dir)) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Directory not in allowed archive paths' }));
+          return;
+        }
+        const filePath = path.join(dir, filename);
+        if (!fs.existsSync(filePath)) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'File not found' }));
+          return;
+        }
+
+        const content = fs.readFileSync(filePath, 'utf8');
+        const lines = content.split('\n').filter(l => l.length > 0);
+        if (lines.length === 0) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Empty file' }));
+          return;
+        }
+
+        // Parse session preamble
+        const preamble = JSON.parse(lines[0]) as LharSessionLine;
+        if (preamble.type !== 'session') {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing session preamble' }));
+          return;
+        }
+
+        // Extract conversationId from filename
+        const dashIdx = filename.indexOf('-');
+        const convoId = dashIdx >= 0 ? filename.slice(dashIdx + 1, -5) : filename.slice(0, -5);
+
+        // Skip if already loaded
+        if (conversations.has(convoId)) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ conversationId: convoId, alreadyLoaded: true }));
+          return;
+        }
+
+        // Reconstruct Conversation object
+        const convo: Conversation = {
+          id: convoId,
+          label: preamble.label || `Session ${convoId.slice(0, 8)}`,
+          source: preamble.tool || 'unknown',
+          workingDirectory: preamble.working_directory || null,
+          firstSeen: preamble.started_at,
+        };
+        conversations.set(convoId, convo);
+        diskSessionsWritten.add(convoId);
+
+        // Parse entry records
+        for (let i = 1; i < lines.length; i++) {
+          try {
+            const record = JSON.parse(lines[i]);
+            if (record.type !== 'entry') continue;
+            const entry = lharRecordToEntry(record as LharRecord, convoId, nextEntryId++);
+            capturedRequests.push(entry);
+          } catch {
+            // Skip malformed lines
+          }
+        }
+
+        dataRevision++;
+        saveState();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ conversationId: convoId }));
+      } catch (err: any) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
   if (parsedUrl.pathname === '/api/requests') {
     // API endpoint: group requests by conversation
     const grouped = new Map<string, CapturedEntry[]>(); // conversationId -> entries[]
@@ -756,6 +929,9 @@ proxyServer.listen(4040, BIND_HOST, () => {
 
 webUIServer.listen(4041, BIND_HOST, () => {
   console.log(`🌐 Context Lens Web UI running on http://${BIND_HOST}:4041`);
+  if (ARCHIVE_DIRS.length > 1) {
+    console.log(`📂 Archive dirs: ${ARCHIVE_DIRS.join(', ')}`);
+  }
   // Only show verbose help when running standalone (not spawned by cli.js)
   if (!process.env.CONTEXT_LENS_CLI) {
     console.log(`\nUpstream: OpenAI → ${UPSTREAM_OPENAI_URL}`);
