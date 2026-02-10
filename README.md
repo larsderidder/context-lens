@@ -2,9 +2,9 @@
 
 ![Early Development](https://img.shields.io/badge/status-early%20development-orange)
 
-I kept wondering why my Claude Code sessions got so expensive. I couldn't find a tool that showed me what was exactly in the context window. So I built one.
+Context window visualizer for LLM coding tools. Sits between your tool and the API as a proxy, captures every request, and gives you a web UI to explore what's actually in the context window: composition treemaps, turn-by-turn diffs, cost tracking, and automatic findings.
 
-Zero dependencies. Sits between your tool and the API, captures everything, gives you a web UI to explore it. I've tested with Claude, Codex, Gemini, Kimi, Aider and Pi.
+Zero dependencies. Works with Claude Code, Codex, Gemini CLI, Aider, Kimi, Pi, and anything else that talks to OpenAI/Anthropic/Google APIs.
 
 ![Context Lens UI](screenshot-overview.png)
 
@@ -14,7 +14,7 @@ Zero dependencies. Sits between your tool and the API, captures everything, give
 npm install -g context-lens
 ```
 
-Or run it directly without installing:
+Or run directly:
 
 ```bash
 npx context-lens ...
@@ -30,7 +30,7 @@ npx context-lens aider --model claude-sonnet-4
 npx context-lens -- python my_agent.py
 ```
 
-This starts the proxy (port 4040), opens the web UI (http://localhost:4041), sets the right env vars, and runs your command. Multiple tools can share one proxy, just open more terminals.
+This starts the proxy (port 4040), opens the web UI (http://localhost:4041), sets the right env vars, and runs your command. Multiple tools can share one proxy; just open more terminals.
 
 ## Supported Providers
 
@@ -44,17 +44,17 @@ This starts the proxy (port 4040), opens the web UI (http://localhost:4041), set
 
 ## What You Get
 
-- **Composition treemap** — visual breakdown of what's filling your context: system prompts, tool definitions, tool results, messages, thinking, images
-- **Cost tracking** — per-turn and per-session cost estimates across models
-- **Conversation threading** — groups API calls by session, shows main agent vs subagent turns
-- **Agent breakdown** — token usage and cost per agent within a session
-- **Timeline** — bar chart of context size over time, filterable by main/all/cost
-- **Context diff** — turn-to-turn delta showing what grew, shrank, or appeared
-- **Findings** — flags large tool results, unused tool definitions, context overflow risk, compaction events
-- **Auto-detection** — recognizes Claude Code, Codex, aider, Pi, and others by source tag or system prompt
-- **LHAR export** — download session data as LHAR (LLM HTTP Archive) format ([doc](docs/LHAR.md))
-- **State persistence** — data survives restarts; delete individual sessions or reset all from the UI
-- **Streaming support** — passes through SSE chunks in real-time
+- **Composition treemap:** visual breakdown of what's filling your context (system prompts, tool definitions, tool results, messages, thinking, images)
+- **Cost tracking:** per-turn and per-session cost estimates across models
+- **Conversation threading:** groups API calls by session, shows main agent vs subagent turns
+- **Agent breakdown:** token usage and cost per agent within a session
+- **Timeline:** bar chart of context size over time, filterable by main/all/cost
+- **Context diff:** turn-to-turn delta showing what grew, shrank, or appeared
+- **Findings:** flags large tool results, unused tool definitions, context overflow risk, compaction events
+- **Auto-detection:** recognizes Claude Code, Codex, aider, Pi, and others by source tag or system prompt
+- **LHAR export:** download session data as LHAR (LLM HTTP Archive) format ([doc](docs/LHAR.md))
+- **State persistence:** data survives restarts; delete individual sessions or reset all from the UI
+- **Streaming support:** passes through SSE chunks in real-time
 
 ### Screenshots
 
@@ -105,13 +105,13 @@ Pi ignores standard base-URL environment variables, so the CLI wrapper can't red
 }
 ```
 
-Start the proxy (`npm start`), then run Pi normally — no CLI wrapper needed. The config hot-reloads when you switch models via `/model`, but adding new provider overrides requires restarting Pi.
+Start the proxy (`npm start`), then run Pi normally. No CLI wrapper needed. The config hot-reloads when you switch models via `/model`, but adding new provider overrides requires restarting Pi.
 
-Tested with: Claude Opus 4.6, Gemini 2.5 Flash (via Gemini CLI subscription), GPT-OSS 120B (via Antigravity). The `openai-codex` provider (ChatGPT subscription) has the same Cloudflare limitation as Codex — not supported through the reverse proxy. A forward HTTPS proxy via mitmproxy + `global-agent` to make Node.js respect `https_proxy` would be the path forward.
+Tested with: Claude Opus 4.6, Gemini 2.5 Flash (via Gemini CLI subscription), GPT-OSS 120B (via Antigravity). The `openai-codex` provider (ChatGPT subscription) has the same Cloudflare limitation as Codex and is not supported through the reverse proxy.
 
 ### Codex Subscription Mode
 
-Codex with a ChatGPT subscription needs mitmproxy for HTTPS interception (Cloudflare blocks reverse proxies). The CLI handles this automatically — just make sure `mitmdump` is installed:
+Codex with a ChatGPT subscription needs mitmproxy for HTTPS interception (Cloudflare blocks reverse proxies). The CLI handles this automatically. Just make sure `mitmdump` is installed:
 
 ```bash
 pipx install mitmproxy
@@ -125,7 +125,7 @@ Context Lens sits between your coding tool and the LLM API, capturing requests i
 **Reverse proxy (Claude Code, aider, OpenAI API tools)**
 
 ```
-Tool  ──HTTP──▶  Context Lens (:4040)  ──HTTPS──▶  api.anthropic.com / api.openai.com
+Tool  ─HTTP─▶  Context Lens (:4040)  ─HTTPS─▶  api.anthropic.com / api.openai.com
                       │
                       ▼
                  Web UI (:4041)
@@ -138,7 +138,7 @@ The CLI sets env vars like `ANTHROPIC_BASE_URL=http://localhost:4040` so the too
 Some tools can't be reverse-proxied. Codex with a ChatGPT subscription authenticates against `chatgpt.com`, which is behind Cloudflare. A reverse proxy changes the TLS fingerprint, causing Cloudflare to reject the request with a 403. For these tools, Context Lens uses mitmproxy as a forward HTTPS proxy instead:
 
 ```
-Tool  ──HTTPS via proxy──▶  mitmproxy (:8080)  ──HTTPS──▶  chatgpt.com
+Tool  ─HTTPS via proxy─▶  mitmproxy (:8080)  ─HTTPS─▶  chatgpt.com
                                   │
                             mitm_addon.py
                                   │
