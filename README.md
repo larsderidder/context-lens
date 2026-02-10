@@ -1,6 +1,8 @@
 # Context Lens
 
 ![Early Development](https://img.shields.io/badge/status-early%20development-orange)
+[![CI](https://github.com/larsderidder/context-lens/actions/workflows/ci.yml/badge.svg)](https://github.com/larsderidder/context-lens/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/context-lens)](https://www.npmjs.com/package/context-lens)
 
 Context window visualizer for LLM coding tools. Sits between your tool and the API as a proxy, captures every request, and gives you a web UI to explore what's actually in the context window: composition treemaps, turn-by-turn diffs, cost tracking, and automatic findings.
 
