@@ -23,7 +23,7 @@ export type CompositionCategory =
   | "other";
 
 /**
- * JSON Schema for the LHAR format — what HAR is for web traffic, but for LLM API calls.
+ * JSON Schema for the LHAR format. What HAR is for web traffic, but for LLM API calls.
  */
 export interface LHARLLMHTTPArchiveFormat {
   [k: string]: unknown;

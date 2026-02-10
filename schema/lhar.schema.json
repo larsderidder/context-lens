@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://github.com/larsderidder/context-lens/schema/lhar.schema.json",
   "title": "LHAR (LLM HTTP Archive) Format",
-  "description": "JSON Schema for the LHAR format — what HAR is for web traffic, but for LLM API calls.",
+  "description": "JSON Schema for the LHAR format. What HAR is for web traffic, but for LLM API calls.",
   "definitions": {
     "CompositionCategory": {
       "type": "string",
