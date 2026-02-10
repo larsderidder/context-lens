@@ -1,6 +1,6 @@
 import path from "node:path";
 
-import type { Upstreams } from "../types.js";
+import type { PrivacyLevel, Upstreams } from "../types.js";
 
 export interface ServerConfig {
   upstreams: Upstreams;
@@ -10,6 +10,7 @@ export interface ServerConfig {
   stateFile: string;
   maxSessions: number;
   maxCompactMessages: number;
+  privacy: PrivacyLevel;
 }
 
 export function loadServerConfig(baseDir: string): ServerConfig {
@@ -34,6 +35,10 @@ export function loadServerConfig(baseDir: string): ServerConfig {
   const allowTargetOverride =
     process.env.CONTEXT_LENS_ALLOW_TARGET_OVERRIDE === "1";
 
+  const privacyEnv = (process.env.CONTEXT_LENS_PRIVACY || "standard").toLowerCase();
+  const privacy: PrivacyLevel =
+    privacyEnv === "minimal" || privacyEnv === "full" ? privacyEnv : "standard";
+
   const dataDir = path.join(baseDir, "..", "data");
 
   return {
@@ -50,5 +55,6 @@ export function loadServerConfig(baseDir: string): ServerConfig {
     stateFile: path.join(dataDir, "state.jsonl"),
     maxSessions: 10,
     maxCompactMessages: 60,
+    privacy,
   };
 }

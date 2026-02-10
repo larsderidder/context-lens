@@ -20,10 +20,39 @@ const LOCKFILE = "/tmp/context-lens.lock";
 // Parse command line arguments
 const args = process.argv.slice(2);
 
-if (args.length === 0) {
+// Extract --privacy flag from args (before or after command)
+let privacyLevel: string | undefined;
+const filteredArgs: string[] = [];
+for (let i = 0; i < args.length; i++) {
+  if (args[i] === "--privacy" && i + 1 < args.length) {
+    privacyLevel = args[i + 1];
+    i++; // skip the value
+  } else if (args[i].startsWith("--privacy=")) {
+    privacyLevel = args[i].split("=", 2)[1];
+  } else {
+    filteredArgs.push(args[i]);
+  }
+}
+
+// Validate privacy level
+if (privacyLevel !== undefined) {
+  if (!["minimal", "standard", "full"].includes(privacyLevel)) {
+    console.error(
+      `Error: Invalid privacy level '${privacyLevel}'. Must be one of: minimal, standard, full`,
+    );
+    process.exit(1);
+  }
+  // Pass to server via env var
+  process.env.CONTEXT_LENS_PRIVACY = privacyLevel;
+}
+
+if (filteredArgs.length === 0) {
   // Standalone mode: just start the proxy server
   const serverPath = join(__dirname, "server.js");
-  const server = spawn("node", [serverPath], { stdio: "inherit" });
+  const server = spawn("node", [serverPath], {
+    stdio: "inherit",
+    env: { ...process.env },
+  });
   server.on("exit", (code) => process.exit(code || 0));
   process.on("SIGINT", () => server.kill("SIGINT"));
   process.on("SIGTERM", () => server.kill("SIGTERM"));
@@ -31,9 +60,9 @@ if (args.length === 0) {
   process.stdin.resume();
 } else {
   // Skip '--' separator if present
-  let commandArgs = args;
-  if (args[0] === "--") {
-    commandArgs = args.slice(1);
+  let commandArgs = filteredArgs;
+  if (filteredArgs[0] === "--") {
+    commandArgs = filteredArgs.slice(1);
   }
 
   if (commandArgs.length === 0) {

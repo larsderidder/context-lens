@@ -18,6 +18,7 @@ const store = new Store({
   stateFile: config.stateFile,
   maxSessions: config.maxSessions,
   maxCompactMessages: config.maxCompactMessages,
+  privacy: config.privacy,
 });
 
 // Start servers
