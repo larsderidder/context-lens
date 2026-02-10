@@ -15,6 +15,7 @@ export {
   extractWorkingDirectory,
 } from "./core/conversation.js";
 
+export { computeHealthScore } from "./core/health.js";
 export {
   estimateCost,
   getContextLimit,
@@ -26,5 +27,6 @@ export {
   extractSource,
   resolveTargetUrl,
 } from "./core/routing.js";
+export { scanSecurity } from "./core/security.js";
 export { detectSource } from "./core/source.js";
 export { estimateTokens } from "./core/tokens.js";

@@ -143,6 +143,56 @@ export interface Conversation {
   sessionId?: string | null;
 }
 
+// --- Security scanning ---
+
+export type AlertSeverity = "high" | "medium" | "info";
+
+export interface SecurityAlert {
+  /** Index into contextInfo.messages */
+  messageIndex: number;
+  role: string;
+  /** Tool name if the message is a tool result/call */
+  toolName: string | null;
+  severity: AlertSeverity;
+  /** Machine-readable pattern identifier */
+  pattern: string;
+  /** The matched text snippet (truncated to ~120 chars) */
+  match: string;
+  /** Character offset into the message content where the match starts */
+  offset: number;
+  /** Length of the matched region in the original content */
+  length: number;
+}
+
+export interface SecuritySummary {
+  high: number;
+  medium: number;
+  info: number;
+}
+
+export interface SecurityResult {
+  alerts: SecurityAlert[];
+  summary: SecuritySummary;
+}
+
+// --- Health scoring ---
+
+export interface AuditResult {
+  id: string; // e.g. 'utilization', 'tool-results'
+  name: string; // e.g. 'Context Utilization'
+  score: number; // 0-100
+  weight: number;
+  description: string; // One-sentence explanation of this score
+}
+
+export type HealthRating = "good" | "needs-work" | "poor";
+
+export interface HealthScore {
+  overall: number; // 0-100
+  rating: HealthRating;
+  audits: AuditResult[];
+}
+
 export interface CapturedEntry {
   id: number;
   timestamp: string;
@@ -163,6 +213,8 @@ export interface CapturedEntry {
   rawBody?: Record<string, any>;
   composition: CompositionEntry[];
   costUsd: number | null;
+  healthScore: HealthScore | null;
+  securityAlerts: SecurityAlert[];
 }
 
 export type ResponseData =
@@ -219,6 +271,8 @@ export interface ProjectedEntry {
   targetUrl: string | null;
   composition: CompositionEntry[];
   costUsd: number | null;
+  healthScore: HealthScore | null;
+  securityAlerts: SecurityAlert[];
   usage: ProjectedUsage | null;
   responseModel: string | null;
   stopReason: string | null;
@@ -235,6 +289,10 @@ export interface ConversationGroup extends Conversation {
   agents: AgentGroup[];
   entries: ProjectedEntry[];
 }
+
+// --- Privacy ---
+
+export type PrivacyLevel = "minimal" | "standard" | "full";
 
 // --- CLI types ---
 
