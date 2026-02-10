@@ -1,4 +1,11 @@
-import type { Provider, ApiFormat, ExtractSourceResult, ParsedUrl, Upstreams, ResolveTargetResult } from '../types.js';
+import type {
+  ApiFormat,
+  ExtractSourceResult,
+  ParsedUrl,
+  Provider,
+  ResolveTargetResult,
+  Upstreams,
+} from "../types.js";
 
 /**
  * URL path segments that represent API resources rather than "source tool" prefixes.
@@ -6,7 +13,16 @@ import type { Provider, ApiFormat, ExtractSourceResult, ParsedUrl, Upstreams, Re
  * Example: `/v1/messages` should not treat `v1` as a source tag.
  */
 export const API_PATH_SEGMENTS = new Set([
-  'v1', 'v1beta', 'v1alpha', 'v1internal', 'responses', 'chat', 'models', 'embeddings', 'backend-api', 'api',
+  "v1",
+  "v1beta",
+  "v1alpha",
+  "v1internal",
+  "responses",
+  "chat",
+  "models",
+  "embeddings",
+  "backend-api",
+  "api",
 ]);
 
 /**
@@ -14,7 +30,10 @@ export const API_PATH_SEGMENTS = new Set([
  *
  * This is used for routing (choosing which upstream base URL to use) and parsing.
  */
-export function detectProvider(pathname: string, headers: Record<string, string | undefined>): Provider {
+export function detectProvider(
+  pathname: string,
+  headers: Record<string, string | undefined>,
+): Provider {
   return classifyRequest(pathname, headers).provider;
 }
 
@@ -33,29 +52,42 @@ export function detectApiFormat(pathname: string): ApiFormat {
  * Keep all path/format heuristics in one place to avoid drift between
  * routing decisions and parsing decisions.
  */
-export function classifyRequest(pathname: string, headers: Record<string, string | undefined>): { provider: Provider; apiFormat: ApiFormat } {
+export function classifyRequest(
+  pathname: string,
+  headers: Record<string, string | undefined>,
+): { provider: Provider; apiFormat: ApiFormat } {
   // ChatGPT backend traffic (Codex subscription)
-  if (pathname.match(/^\/(api|backend-api)\//)) return { provider: 'chatgpt', apiFormat: 'chatgpt-backend' };
+  if (pathname.match(/^\/(api|backend-api)\//))
+    return { provider: "chatgpt", apiFormat: "chatgpt-backend" };
 
   // Anthropic Messages API
-  if (pathname.includes('/v1/messages')) return { provider: 'anthropic', apiFormat: 'anthropic-messages' };
-  if (pathname.includes('/v1/complete')) return { provider: 'anthropic', apiFormat: 'unknown' };
-  if (headers['anthropic-version']) return { provider: 'anthropic', apiFormat: 'unknown' };
+  if (pathname.includes("/v1/messages"))
+    return { provider: "anthropic", apiFormat: "anthropic-messages" };
+  if (pathname.includes("/v1/complete"))
+    return { provider: "anthropic", apiFormat: "unknown" };
+  if (headers["anthropic-version"])
+    return { provider: "anthropic", apiFormat: "unknown" };
 
   // Gemini: must come BEFORE openai catch-all (which matches /models/)
-  const isGeminiPath = pathname.includes(':generateContent')
-    || pathname.includes(':streamGenerateContent')
-    || pathname.match(/\/v1(beta|alpha)\/models\//)
-    || pathname.includes('/v1internal:');
-  if (isGeminiPath || headers['x-goog-api-key']) return { provider: 'gemini', apiFormat: 'gemini' };
+  const isGeminiPath =
+    pathname.includes(":generateContent") ||
+    pathname.includes(":streamGenerateContent") ||
+    pathname.match(/\/v1(beta|alpha)\/models\//) ||
+    pathname.includes("/v1internal:");
+  if (isGeminiPath || headers["x-goog-api-key"])
+    return { provider: "gemini", apiFormat: "gemini" };
 
   // OpenAI
-  if (pathname.includes('/responses')) return { provider: 'openai', apiFormat: 'responses' };
-  if (pathname.includes('/chat/completions')) return { provider: 'openai', apiFormat: 'chat-completions' };
-  if (pathname.match(/\/(models|embeddings)/)) return { provider: 'openai', apiFormat: 'unknown' };
-  if (headers['authorization']?.startsWith('Bearer sk-')) return { provider: 'openai', apiFormat: 'unknown' };
+  if (pathname.includes("/responses"))
+    return { provider: "openai", apiFormat: "responses" };
+  if (pathname.includes("/chat/completions"))
+    return { provider: "openai", apiFormat: "chat-completions" };
+  if (pathname.match(/\/(models|embeddings)/))
+    return { provider: "openai", apiFormat: "unknown" };
+  if (headers.authorization?.startsWith("Bearer sk-"))
+    return { provider: "openai", apiFormat: "unknown" };
 
-  return { provider: 'unknown', apiFormat: 'unknown' };
+  return { provider: "unknown", apiFormat: "unknown" };
 }
 
 /**
@@ -67,7 +99,7 @@ export function classifyRequest(pathname: string, headers: Record<string, string
  */
 export function extractSource(pathname: string): ExtractSourceResult {
   const match = pathname.match(/^\/([^/]+)(\/.*)?$/);
-  if (match && match[2] && !API_PATH_SEGMENTS.has(match[1])) {
+  if (match?.[2] && !API_PATH_SEGMENTS.has(match[1])) {
     // `decodeURIComponent` may introduce `/` via `%2f` (path traversal) or throw on bad encodings.
     // Treat suspicious/invalid tags as "no source tag" and route the request normally.
     let decoded = match[1];
@@ -76,10 +108,14 @@ export function extractSource(pathname: string): ExtractSourceResult {
     } catch {
       decoded = match[1];
     }
-    if (decoded.includes('/') || decoded.includes('\\') || decoded.includes('..')) {
+    if (
+      decoded.includes("/") ||
+      decoded.includes("\\") ||
+      decoded.includes("..")
+    ) {
       return { source: null, cleanPath: pathname };
     }
-    return { source: decoded, cleanPath: match[2] || '/' };
+    return { source: decoded, cleanPath: match[2] || "/" };
   }
   return { source: null, cleanPath: pathname };
 }
@@ -92,22 +128,29 @@ export function extractSource(pathname: string): ExtractSourceResult {
  * @param upstreams - Base URLs for each provider.
  * @returns `{ targetUrl, provider }`.
  */
-export function resolveTargetUrl(parsedUrl: ParsedUrl, headers: Record<string, string | undefined>, upstreams: Upstreams): ResolveTargetResult {
+export function resolveTargetUrl(
+  parsedUrl: ParsedUrl,
+  headers: Record<string, string | undefined>,
+  upstreams: Upstreams,
+): ResolveTargetResult {
   const provider = classifyRequest(parsedUrl.pathname, headers).provider;
-  const search = parsedUrl.search || '';
-  let targetUrl = headers['x-target-url'];
+  const search = parsedUrl.search || "";
+  let targetUrl = headers["x-target-url"];
   if (!targetUrl) {
-    if (provider === 'chatgpt') {
+    if (provider === "chatgpt") {
       targetUrl = upstreams.chatgpt + parsedUrl.pathname + search;
-    } else if (provider === 'anthropic') {
+    } else if (provider === "anthropic") {
       targetUrl = upstreams.anthropic + parsedUrl.pathname + search;
-    } else if (provider === 'gemini') {
-      const isCodeAssist = parsedUrl.pathname.includes('/v1internal');
-      targetUrl = (isCodeAssist ? upstreams.geminiCodeAssist : upstreams.gemini) + parsedUrl.pathname + search;
+    } else if (provider === "gemini") {
+      const isCodeAssist = parsedUrl.pathname.includes("/v1internal");
+      targetUrl =
+        (isCodeAssist ? upstreams.geminiCodeAssist : upstreams.gemini) +
+        parsedUrl.pathname +
+        search;
     } else {
       targetUrl = upstreams.openai + parsedUrl.pathname + search;
     }
-  } else if (!targetUrl.startsWith('http')) {
+  } else if (!targetUrl.startsWith("http")) {
     targetUrl = targetUrl + parsedUrl.pathname + search;
   }
   return { targetUrl, provider };

@@ -1,15 +1,19 @@
-import { randomUUID, randomBytes, createHash } from 'node:crypto';
-import { estimateTokens } from './core.js';
+import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { estimateTokens } from "./core.js";
+import { redactHeaders, SENSITIVE_HEADERS } from "./http/headers.js";
 import type {
-  CompositionCategory, CompositionEntry,
-  LharRecord, LharSessionLine, LharJsonWrapper,
-} from './lhar-types.generated.js';
-import type { CapturedEntry, ContextInfo, Conversation } from './types.js';
-import { redactHeaders, SENSITIVE_HEADERS } from './http/headers.js';
+  CompositionCategory,
+  CompositionEntry,
+  LharJsonWrapper,
+  LharRecord,
+  LharSessionLine,
+} from "./lhar-types.generated.js";
+import type { CapturedEntry, ContextInfo, Conversation } from "./types.js";
+import { VERSION } from "./version.generated.js";
 
-const COLLECTOR_NAME = 'context-lens';
-const COLLECTOR_VERSION = '0.1.0';
-const LHAR_VERSION = '0.1.0';
+const COLLECTOR_NAME = "context-lens";
+const COLLECTOR_VERSION = VERSION;
+const LHAR_VERSION = "0.1.0";
 
 // --- Header Redaction ---
 // Kept as exports for backward compatibility, but implemented in `src/http/headers.ts`.
@@ -21,7 +25,10 @@ export function analyzeComposition(
   contextInfo: ContextInfo,
   rawBody: Record<string, any> | undefined,
 ): CompositionEntry[] {
-  const counts = new Map<CompositionCategory, { tokens: number; count: number }>();
+  const counts = new Map<
+    CompositionCategory,
+    { tokens: number; count: number }
+  >();
 
   function add(category: CompositionCategory, tokens: number): void {
     const existing = counts.get(category);
@@ -35,34 +42,37 @@ export function analyzeComposition(
 
   if (!rawBody) {
     // Fallback to contextInfo aggregates
-    if (contextInfo.systemTokens > 0) add('system_prompt', contextInfo.systemTokens);
-    if (contextInfo.toolsTokens > 0) add('tool_definitions', contextInfo.toolsTokens);
-    if (contextInfo.messagesTokens > 0) add('other', contextInfo.messagesTokens);
+    if (contextInfo.systemTokens > 0)
+      add("system_prompt", contextInfo.systemTokens);
+    if (contextInfo.toolsTokens > 0)
+      add("tool_definitions", contextInfo.toolsTokens);
+    if (contextInfo.messagesTokens > 0)
+      add("other", contextInfo.messagesTokens);
     return buildCompositionArray(counts, contextInfo.totalTokens);
   }
 
   // System prompt(s)
   if (rawBody.system) {
-    if (typeof rawBody.system === 'string') {
-      add('system_prompt', estimateTokens(rawBody.system));
+    if (typeof rawBody.system === "string") {
+      add("system_prompt", estimateTokens(rawBody.system));
     } else if (Array.isArray(rawBody.system)) {
       for (const block of rawBody.system) {
         if (block.cache_control) {
-          add('cache_markers', estimateTokens(block.cache_control));
+          add("cache_markers", estimateTokens(block.cache_control));
         }
-        add('system_prompt', estimateTokens(block.text || block));
+        add("system_prompt", estimateTokens(block.text || block));
       }
     }
   }
 
   // Instructions (OpenAI Responses API / ChatGPT)
   if (rawBody.instructions) {
-    add('system_prompt', estimateTokens(rawBody.instructions));
+    add("system_prompt", estimateTokens(rawBody.instructions));
   }
 
   // Tool definitions
   if (rawBody.tools && Array.isArray(rawBody.tools)) {
-    add('tool_definitions', estimateTokens(JSON.stringify(rawBody.tools)));
+    add("tool_definitions", estimateTokens(JSON.stringify(rawBody.tools)));
   }
 
   // Gemini/Code Assist: unwrap .request wrapper if present
@@ -70,7 +80,10 @@ export function analyzeComposition(
   // Gemini systemInstruction
   if (geminiBody.systemInstruction) {
     const parts = geminiBody.systemInstruction.parts || [];
-    add('system_prompt', estimateTokens(parts.map((p: any) => p.text || '').join('\n')));
+    add(
+      "system_prompt",
+      estimateTokens(parts.map((p: any) => p.text || "").join("\n")),
+    );
   }
 
   // Gemini contents[] or standard messages[]/input[]
@@ -79,8 +92,8 @@ export function analyzeComposition(
     for (const msg of messages) {
       classifyMessage(msg, add);
     }
-  } else if (typeof messages === 'string') {
-    add('user_text', estimateTokens(messages));
+  } else if (typeof messages === "string") {
+    add("user_text", estimateTokens(messages));
   }
 
   const total = Array.from(counts.values()).reduce((s, e) => s + e.tokens, 0);
@@ -91,49 +104,49 @@ function classifyMessage(
   msg: Record<string, any>,
   add: (cat: CompositionCategory, tokens: number) => void,
 ): void {
-  const type: string = msg.type || '';
+  const type: string = msg.type || "";
 
   // OpenAI Responses API typed items (no role field)
   if (!msg.role && type) {
-    if (type === 'function_call' || type === 'custom_tool_call') {
-      add('tool_calls', estimateTokens(msg));
+    if (type === "function_call" || type === "custom_tool_call") {
+      add("tool_calls", estimateTokens(msg));
       return;
     }
-    if (type === 'function_call_output' || type === 'custom_tool_call_output') {
-      add('tool_results', estimateTokens(msg.output || ''));
+    if (type === "function_call_output" || type === "custom_tool_call_output") {
+      add("tool_results", estimateTokens(msg.output || ""));
       return;
     }
-    if (type === 'reasoning') {
-      add('thinking', estimateTokens(msg));
+    if (type === "reasoning") {
+      add("thinking", estimateTokens(msg));
       return;
     }
-    if (type === 'output_text') {
-      add('assistant_text', estimateTokens(msg.text || ''));
+    if (type === "output_text") {
+      add("assistant_text", estimateTokens(msg.text || ""));
       return;
     }
-    if (type === 'input_text') {
-      add('user_text', estimateTokens(msg.text || ''));
+    if (type === "input_text") {
+      add("user_text", estimateTokens(msg.text || ""));
       return;
     }
   }
 
-  const role: string = msg.role || 'user';
+  const role: string = msg.role || "user";
   const content = msg.content;
 
   // System / developer messages
-  if (role === 'system' || role === 'developer') {
-    add('system_prompt', estimateTokens(content));
+  if (role === "system" || role === "developer") {
+    add("system_prompt", estimateTokens(content));
     return;
   }
 
   // String content
-  if (typeof content === 'string') {
-    if (content.includes('<system-reminder>')) {
-      add('system_injections', estimateTokens(content));
-    } else if (role === 'assistant') {
-      add('assistant_text', estimateTokens(content));
+  if (typeof content === "string") {
+    if (content.includes("<system-reminder>")) {
+      add("system_injections", estimateTokens(content));
+    } else if (role === "assistant") {
+      add("assistant_text", estimateTokens(content));
     } else {
-      add('user_text', estimateTokens(content));
+      add("user_text", estimateTokens(content));
     }
     return;
   }
@@ -156,7 +169,7 @@ function classifyMessage(
 
   // Fallback
   if (content) {
-    add('other', estimateTokens(content));
+    add("other", estimateTokens(content));
   }
 }
 
@@ -165,47 +178,47 @@ function classifyBlock(
   role: string,
   add: (cat: CompositionCategory, tokens: number) => void,
 ): void {
-  const type: string = block.type || '';
+  const type: string = block.type || "";
 
-  if (type === 'tool_use') {
-    add('tool_calls', estimateTokens(block));
+  if (type === "tool_use") {
+    add("tool_calls", estimateTokens(block));
     return;
   }
-  if (type === 'tool_result') {
-    add('tool_results', estimateTokens(block.content || ''));
+  if (type === "tool_result") {
+    add("tool_results", estimateTokens(block.content || ""));
     return;
   }
-  if (type === 'thinking') {
-    add('thinking', estimateTokens(block.thinking || block.text || ''));
+  if (type === "thinking") {
+    add("thinking", estimateTokens(block.thinking || block.text || ""));
     return;
   }
-  if (type === 'image' || type === 'image_url') {
-    add('images', estimateTokens(block));
+  if (type === "image" || type === "image_url") {
+    add("images", estimateTokens(block));
     return;
   }
 
   // Text blocks
-  const text: string = block.text || '';
-  if (type === 'text' || type === 'input_text' || !type) {
-    if (text.includes('<system-reminder>')) {
-      add('system_injections', estimateTokens(text));
+  const text: string = block.text || "";
+  if (type === "text" || type === "input_text" || !type) {
+    if (text.includes("<system-reminder>")) {
+      add("system_injections", estimateTokens(text));
     } else if (block.cache_control) {
-      add('cache_markers', estimateTokens(block.cache_control));
+      add("cache_markers", estimateTokens(block.cache_control));
       // Still count the text content in its natural category
-      if (role === 'assistant') {
-        add('assistant_text', estimateTokens(text));
+      if (role === "assistant") {
+        add("assistant_text", estimateTokens(text));
       } else {
-        add('user_text', estimateTokens(text));
+        add("user_text", estimateTokens(text));
       }
-    } else if (role === 'assistant') {
-      add('assistant_text', estimateTokens(text));
+    } else if (role === "assistant") {
+      add("assistant_text", estimateTokens(text));
     } else {
-      add('user_text', estimateTokens(text));
+      add("user_text", estimateTokens(text));
     }
     return;
   }
 
-  add('other', estimateTokens(block));
+  add("other", estimateTokens(block));
 }
 
 function classifyGeminiPart(
@@ -214,18 +227,30 @@ function classifyGeminiPart(
   add: (cat: CompositionCategory, tokens: number) => void,
 ): void {
   if (part.text) {
-    if (role === 'model') {
-      add('assistant_text', estimateTokens(part.text));
+    if (role === "model") {
+      add("assistant_text", estimateTokens(part.text));
     } else {
-      add('user_text', estimateTokens(part.text));
+      add("user_text", estimateTokens(part.text));
     }
     return;
   }
-  if (part.functionCall) { add('tool_calls', estimateTokens(part.functionCall)); return; }
-  if (part.functionResponse) { add('tool_results', estimateTokens(part.functionResponse)); return; }
-  if (part.inlineData || part.fileData) { add('images', estimateTokens(part)); return; }
-  if (part.executableCode || part.codeExecutionResult) { add('assistant_text', estimateTokens(part)); return; }
-  add('other', estimateTokens(part));
+  if (part.functionCall) {
+    add("tool_calls", estimateTokens(part.functionCall));
+    return;
+  }
+  if (part.functionResponse) {
+    add("tool_results", estimateTokens(part.functionResponse));
+    return;
+  }
+  if (part.inlineData || part.fileData) {
+    add("images", estimateTokens(part));
+    return;
+  }
+  if (part.executableCode || part.codeExecutionResult) {
+    add("assistant_text", estimateTokens(part));
+    return;
+  }
+  add("other", estimateTokens(part));
 }
 
 function buildCompositionArray(
@@ -272,8 +297,8 @@ export function parseResponseUsage(responseData: any): ParsedResponseUsage {
 
   if (!responseData) return result;
 
-  // Streaming response — scan SSE chunks for usage
-  if (responseData.streaming && typeof responseData.chunks === 'string') {
+  // Streaming response: scan SSE chunks for usage
+  if (responseData.streaming && typeof responseData.chunks === "string") {
     result.stream = true;
     return parseStreamingUsage(responseData.chunks, result);
   }
@@ -288,15 +313,24 @@ export function parseResponseUsage(responseData: any): ParsedResponseUsage {
   }
 
   // Gemini usageMetadata (direct or inside Code Assist wrapper .response)
-  const geminiResp = responseData.usageMetadata ? responseData : responseData.response;
+  const geminiResp = responseData.usageMetadata
+    ? responseData
+    : responseData.response;
   if (geminiResp?.usageMetadata) {
     const u = geminiResp.usageMetadata;
     result.inputTokens = u.promptTokenCount || 0;
-    result.outputTokens = u.candidatesTokenCount || u.totalTokenCount - (u.promptTokenCount || 0) || 0;
+    result.outputTokens =
+      u.candidatesTokenCount ||
+      u.totalTokenCount - (u.promptTokenCount || 0) ||
+      0;
     result.cacheReadTokens = u.cachedContentTokenCount || 0;
   }
 
-  result.model = responseData.model || responseData.modelVersion || geminiResp?.modelVersion || null;
+  result.model =
+    responseData.model ||
+    responseData.modelVersion ||
+    geminiResp?.modelVersion ||
+    null;
 
   if (responseData.stop_reason) {
     result.finishReasons = [responseData.stop_reason];
@@ -304,7 +338,10 @@ export function parseResponseUsage(responseData: any): ParsedResponseUsage {
     result.finishReasons = responseData.choices
       .map((c: any) => c.finish_reason)
       .filter(Boolean);
-  } else if (responseData.candidates && Array.isArray(responseData.candidates)) {
+  } else if (
+    responseData.candidates &&
+    Array.isArray(responseData.candidates)
+  ) {
     result.finishReasons = responseData.candidates
       .map((c: any) => c.finishReason)
       .filter(Boolean);
@@ -317,50 +354,61 @@ export function parseResponseUsage(responseData: any): ParsedResponseUsage {
   return result;
 }
 
-function parseStreamingUsage(chunks: string, result: ParsedResponseUsage): ParsedResponseUsage {
+function parseStreamingUsage(
+  chunks: string,
+  result: ParsedResponseUsage,
+): ParsedResponseUsage {
   // Parse SSE events looking for usage data
-  const lines = chunks.split('\n');
+  const lines = chunks.split("\n");
   for (const line of lines) {
-    if (!line.startsWith('data: ')) continue;
+    if (!line.startsWith("data: ")) continue;
     const data = line.slice(6).trim();
-    if (data === '[DONE]') continue;
+    if (data === "[DONE]") continue;
 
     try {
       const parsed = JSON.parse(data);
 
       // Anthropic message_start: contains model
-      if (parsed.type === 'message_start' && parsed.message) {
+      if (parsed.type === "message_start" && parsed.message) {
         result.model = parsed.message.model || result.model;
         if (parsed.message.usage) {
           result.inputTokens = parsed.message.usage.input_tokens || 0;
-          result.cacheReadTokens = parsed.message.usage.cache_read_input_tokens || 0;
-          result.cacheWriteTokens = parsed.message.usage.cache_creation_input_tokens || 0;
+          result.cacheReadTokens =
+            parsed.message.usage.cache_read_input_tokens || 0;
+          result.cacheWriteTokens =
+            parsed.message.usage.cache_creation_input_tokens || 0;
         }
       }
 
       // Anthropic message_delta: contains stop_reason and output token count
-      if (parsed.type === 'message_delta') {
+      if (parsed.type === "message_delta") {
         if (parsed.delta?.stop_reason) {
           result.finishReasons = [parsed.delta.stop_reason];
         }
         if (parsed.usage) {
-          result.outputTokens = parsed.usage.output_tokens || result.outputTokens;
+          result.outputTokens =
+            parsed.usage.output_tokens || result.outputTokens;
         }
       }
 
       // OpenAI streaming: final chunk with usage
       if (parsed.usage && parsed.choices) {
         result.inputTokens = parsed.usage.prompt_tokens || result.inputTokens;
-        result.outputTokens = parsed.usage.completion_tokens || result.outputTokens;
+        result.outputTokens =
+          parsed.usage.completion_tokens || result.outputTokens;
       }
       if (parsed.choices?.[0]?.finish_reason) {
         result.finishReasons = [parsed.choices[0].finish_reason];
       }
       // Gemini streaming: usageMetadata in chunks
       if (parsed.usageMetadata) {
-        result.inputTokens = parsed.usageMetadata.promptTokenCount || result.inputTokens;
-        result.outputTokens = parsed.usageMetadata.candidatesTokenCount || result.outputTokens;
-        result.cacheReadTokens = parsed.usageMetadata.cachedContentTokenCount || result.cacheReadTokens;
+        result.inputTokens =
+          parsed.usageMetadata.promptTokenCount || result.inputTokens;
+        result.outputTokens =
+          parsed.usageMetadata.candidatesTokenCount || result.outputTokens;
+        result.cacheReadTokens =
+          parsed.usageMetadata.cachedContentTokenCount ||
+          result.cacheReadTokens;
       }
       if (parsed.candidates?.[0]?.finishReason) {
         result.finishReasons = [parsed.candidates[0].finishReason];
@@ -381,13 +429,13 @@ function parseStreamingUsage(chunks: string, result: ParsedResponseUsage): Parse
 // --- LHAR Record Builder ---
 
 function hexId(bytes: number): string {
-  return randomBytes(bytes).toString('hex');
+  return randomBytes(bytes).toString("hex");
 }
 
 function traceIdFromConversation(conversationId: string | null): string {
   if (!conversationId) return hexId(16);
   // Deterministic: hash the conversationId to a 32-hex-char trace ID
-  return createHash('sha256').update(conversationId).digest('hex').slice(0, 32);
+  return createHash("sha256").update(conversationId).digest("hex").slice(0, 32);
 }
 
 export function buildLharRecord(
@@ -396,31 +444,38 @@ export function buildLharRecord(
 ): LharRecord {
   const ci = entry.contextInfo;
   // Use pre-computed composition from storeRequest; fall back to recomputing
-  const composition = entry.composition.length > 0
-    ? entry.composition
-    : analyzeComposition(ci, entry.rawBody);
+  const composition =
+    entry.composition.length > 0
+      ? entry.composition
+      : analyzeComposition(ci, entry.rawBody);
   const usage = parseResponseUsage(entry.response);
 
   // Sequence + growth must be derived from a stable ordering.
   // Use oldest-first timestamp ordering within the conversation; tie-break by id.
   let convoEntries = entry.conversationId
-    ? prevEntries.filter(e => e.conversationId === entry.conversationId)
+    ? prevEntries.filter((e) => e.conversationId === entry.conversationId)
     : [entry];
 
-  // Make buildLharRecord robust even if the caller doesn't include `entry` in `prevEntries`.
+  // Make buildLharRecord work even if the caller doesn't include `entry` in `prevEntries`.
   if (entry.conversationId) {
-    const found = convoEntries.some(e => e.id === entry.id && e.timestamp === entry.timestamp);
+    const found = convoEntries.some(
+      (e) => e.id === entry.id && e.timestamp === entry.timestamp,
+    );
     if (!found) convoEntries = [...convoEntries, entry];
   }
 
   convoEntries.sort((a, b) => {
-    const dt = new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
+    const dt =
+      new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
     if (dt !== 0) return dt;
     return a.id - b.id;
   });
 
-  let convoIndex = convoEntries.findIndex(e => e.id === entry.id && e.timestamp === entry.timestamp);
-  if (convoIndex < 0) convoIndex = convoEntries.findIndex(e => e.id === entry.id);
+  let convoIndex = convoEntries.findIndex(
+    (e) => e.id === entry.id && e.timestamp === entry.timestamp,
+  );
+  if (convoIndex < 0)
+    convoIndex = convoEntries.findIndex((e) => e.id === entry.id);
   if (convoIndex < 0) convoIndex = 0;
   const sequence = convoIndex + 1;
 
@@ -431,21 +486,25 @@ export function buildLharRecord(
   const compactionDetected = tokensAdded !== null && tokensAdded < 0;
 
   // Agent role
-  const agentRole = entry.agentKey ? 'subagent' : 'main';
+  const agentRole = entry.agentKey ? "subagent" : "main";
 
   // Tokens per second
   let tokensPerSecond: number | null = null;
   if (entry.timings && entry.timings.receive_ms > 0 && usage.outputTokens > 0) {
-    tokensPerSecond = Math.round((usage.outputTokens / entry.timings.receive_ms) * 1000 * 10) / 10;
+    tokensPerSecond =
+      Math.round((usage.outputTokens / entry.timings.receive_ms) * 1000 * 10) /
+      10;
   }
 
-  const timings = entry.timings ? {
-    ...entry.timings,
-    tokens_per_second: tokensPerSecond,
-  } : null;
+  const timings = entry.timings
+    ? {
+        ...entry.timings,
+        tokens_per_second: tokensPerSecond,
+      }
+    : null;
 
   return {
-    type: 'entry',
+    type: "entry",
     id: randomUUID(),
     trace_id: traceIdFromConversation(entry.conversationId),
     span_id: hexId(8),
@@ -454,7 +513,7 @@ export function buildLharRecord(
     sequence,
 
     source: {
-      tool: entry.source || 'unknown',
+      tool: entry.source || "unknown",
       tool_version: null,
       agent_role: agentRole,
       collector: COLLECTOR_NAME,
@@ -477,7 +536,8 @@ export function buildLharRecord(
       usage: {
         input_tokens: usage.inputTokens || ci.totalTokens,
         output_tokens: usage.outputTokens,
-        total_tokens: (usage.inputTokens || ci.totalTokens) + usage.outputTokens,
+        total_tokens:
+          (usage.inputTokens || ci.totalTokens) + usage.outputTokens,
       },
     },
 
@@ -488,7 +548,7 @@ export function buildLharRecord(
     },
 
     http: {
-      method: 'POST',
+      method: "POST",
       url: entry.targetUrl,
       status_code: entry.httpStatus,
       api_format: ci.apiFormat,
@@ -507,9 +567,10 @@ export function buildLharRecord(
 
     context_lens: {
       window_size: entry.contextLimit,
-      utilization: entry.contextLimit > 0
-        ? Math.round((ci.totalTokens / entry.contextLimit) * 1000) / 1000
-        : 0,
+      utilization:
+        entry.contextLimit > 0
+          ? Math.round((ci.totalTokens / entry.contextLimit) * 1000) / 1000
+          : 0,
       system_tokens: ci.systemTokens,
       tools_tokens: ci.toolsTokens,
       messages_tokens: ci.messagesTokens,
@@ -536,7 +597,7 @@ export function buildSessionLine(
   model: string,
 ): LharSessionLine {
   return {
-    type: 'session',
+    type: "session",
     trace_id: traceIdFromConversation(conversationId),
     started_at: conversation.firstSeen,
     tool: conversation.source,
@@ -546,10 +607,13 @@ export function buildSessionLine(
 
 // --- Export Serialization ---
 
-export function toLharJsonl(entries: CapturedEntry[], conversations: Map<string, Conversation>): string {
+export function toLharJsonl(
+  entries: CapturedEntry[],
+  conversations: Map<string, Conversation>,
+): string {
   // Sort oldest-first for JSONL
   const sorted = [...entries].sort(
-    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
   );
 
   const lines: string[] = [];
@@ -565,14 +629,22 @@ export function toLharJsonl(entries: CapturedEntry[], conversations: Map<string,
         ? conversations.get(entry.conversationId)
         : undefined;
       if (convo) {
-        lines.push(JSON.stringify(buildSessionLine(entry.conversationId!, convo, record.gen_ai.request.model)));
+        lines.push(
+          JSON.stringify(
+            buildSessionLine(
+              entry.conversationId!,
+              convo,
+              record.gen_ai.request.model,
+            ),
+          ),
+        );
       }
     }
 
     lines.push(JSON.stringify(record));
   }
 
-  return lines.join('\n') + '\n';
+  return `${lines.join("\n")}\n`;
 }
 
 export function toLharJson(
@@ -580,20 +652,20 @@ export function toLharJson(
   conversations: Map<string, Conversation>,
 ): LharJsonWrapper {
   const sorted = [...entries].sort(
-    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
   );
 
-  const records = sorted.map(entry => buildLharRecord(entry, entries));
+  const records = sorted.map((entry) => buildLharRecord(entry, entries));
 
   // Build sessions from conversations map
-  const sessions: LharJsonWrapper['lhar']['sessions'] = [];
+  const sessions: LharJsonWrapper["lhar"]["sessions"] = [];
   const seenTraces = new Set<string>();
   for (const record of records) {
     if (!seenTraces.has(record.trace_id)) {
       seenTraces.add(record.trace_id);
       const convo = record.trace_id
         ? Array.from(conversations.values()).find(
-            c => traceIdFromConversation(c.id) === record.trace_id
+            (c) => traceIdFromConversation(c.id) === record.trace_id,
           )
         : undefined;
       sessions.push({

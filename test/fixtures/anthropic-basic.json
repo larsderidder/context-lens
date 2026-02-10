@@ -9,15 +9,15 @@
       "input_schema": {
         "type": "object",
         "properties": {
-          "location": {"type": "string", "description": "City name"}
+          "location": { "type": "string", "description": "City name" }
         },
         "required": ["location"]
       }
     }
   ],
   "messages": [
-    {"role": "user", "content": "What's the weather like in Paris?"},
-    {"role": "assistant", "content": "Let me check that for you."},
-    {"role": "user", "content": "Thanks! Also, what's the capital of France?"}
+    { "role": "user", "content": "What's the weather like in Paris?" },
+    { "role": "assistant", "content": "Let me check that for you." },
+    { "role": "user", "content": "Thanks! Also, what's the capital of France?" }
   ]
 }

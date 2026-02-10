@@ -1,4 +1,8 @@
-import type { ContextInfo, SourceSignature, HeaderSignature } from '../types.js';
+import type {
+  ContextInfo,
+  HeaderSignature,
+  SourceSignature,
+} from "../types.js";
 
 /**
  * Header signatures used to infer which CLI/tool produced a request.
@@ -6,20 +10,20 @@ import type { ContextInfo, SourceSignature, HeaderSignature } from '../types.js'
  * This is best-effort: many tools do not have stable identifiers.
  */
 export const HEADER_SIGNATURES: HeaderSignature[] = [
-  { header: 'user-agent', pattern: /^claude-cli\//, source: 'claude' },
-  { header: 'user-agent', pattern: /aider/i, source: 'aider' },
-  { header: 'user-agent', pattern: /kimi/i, source: 'kimi' },
-  { header: 'user-agent', pattern: /^GeminiCLI\//, source: 'gemini' },
+  { header: "user-agent", pattern: /^claude-cli\//, source: "claude" },
+  { header: "user-agent", pattern: /aider/i, source: "aider" },
+  { header: "user-agent", pattern: /kimi/i, source: "kimi" },
+  { header: "user-agent", pattern: /^GeminiCLI\//, source: "gemini" },
 ];
 
 /**
  * System-prompt signatures used as a fallback when headers are missing/ambiguous.
  */
 export const SOURCE_SIGNATURES: SourceSignature[] = [
-  { pattern: 'Act as an expert software developer', source: 'aider' },
-  { pattern: 'You are Claude Code', source: 'claude' },
-  { pattern: 'You are Kimi Code CLI', source: 'kimi' },
-  { pattern: 'operating inside pi, a coding agent harness', source: 'pi' },
+  { pattern: "Act as an expert software developer", source: "aider" },
+  { pattern: "You are Claude Code", source: "claude" },
+  { pattern: "You are Kimi Code CLI", source: "kimi" },
+  { pattern: "operating inside pi, a coding agent harness", source: "pi" },
 ];
 
 /**
@@ -31,25 +35,34 @@ export const SOURCE_SIGNATURES: SourceSignature[] = [
  * 3. system prompt signatures
  * 4. fallback to `"unknown"`
  */
-export function detectSource(contextInfo: ContextInfo, source: string | null, headers?: Record<string, string>): string {
-  if (source && source !== 'unknown') return source;
+export function detectSource(
+  contextInfo: ContextInfo,
+  source: string | null,
+  headers?: Record<string, string>,
+): string {
+  if (source && source !== "unknown") return source;
 
   // Primary: check request headers
   if (headers) {
     for (const sig of HEADER_SIGNATURES) {
       const val = headers[sig.header];
       if (!val) continue;
-      if (sig.pattern instanceof RegExp ? sig.pattern.test(val) : val.includes(sig.pattern)) {
+      if (
+        sig.pattern instanceof RegExp
+          ? sig.pattern.test(val)
+          : val.includes(sig.pattern)
+      ) {
         return sig.source;
       }
     }
   }
 
   // Fallback: check system prompt content
-  const systemText = (contextInfo.systemPrompts || []).map(sp => sp.content).join('\n');
+  const systemText = (contextInfo.systemPrompts || [])
+    .map((sp) => sp.content)
+    .join("\n");
   for (const sig of SOURCE_SIGNATURES) {
     if (systemText.includes(sig.pattern)) return sig.source;
   }
-  return source || 'unknown';
+  return source || "unknown";
 }
-

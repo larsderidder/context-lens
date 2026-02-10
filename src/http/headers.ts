@@ -9,17 +9,17 @@
 
 /** Case-insensitive set of header names that must never be persisted/exported. */
 export const SENSITIVE_HEADERS = new Set([
-  'authorization',
-  'x-api-key',
-  'cookie',
-  'set-cookie',
-  'x-target-url',
-  'proxy-authorization',
-  'x-auth-token',
-  'x-forwarded-authorization',
-  'www-authenticate',
-  'proxy-authenticate',
-  'x-goog-api-key',
+  "authorization",
+  "x-api-key",
+  "cookie",
+  "set-cookie",
+  "x-target-url",
+  "proxy-authorization",
+  "x-auth-token",
+  "x-forwarded-authorization",
+  "www-authenticate",
+  "proxy-authenticate",
+  "x-goog-api-key",
 ]);
 
 /**
@@ -28,7 +28,9 @@ export const SENSITIVE_HEADERS = new Set([
  * @param headers - Header map (string -> string)
  * @returns A new object with sensitive headers removed.
  */
-export function redactHeaders(headers: Record<string, string>): Record<string, string> {
+export function redactHeaders(
+  headers: Record<string, string>,
+): Record<string, string> {
   const result: Record<string, string> = {};
   for (const [key, val] of Object.entries(headers)) {
     if (SENSITIVE_HEADERS.has(key.toLowerCase())) continue;
@@ -43,12 +45,13 @@ export function redactHeaders(headers: Record<string, string>): Record<string, s
  * - Drops sensitive headers (see `SENSITIVE_HEADERS`)
  * - Keeps only string-valued headers (Node can represent multi-valued headers as arrays)
  */
-export function selectHeaders(headers: Record<string, any>): Record<string, string> {
+export function selectHeaders(
+  headers: Record<string, any>,
+): Record<string, string> {
   const result: Record<string, string> = {};
   for (const [key, val] of Object.entries(headers)) {
     if (SENSITIVE_HEADERS.has(key.toLowerCase())) continue;
-    if (typeof val === 'string') result[key] = val;
+    if (typeof val === "string") result[key] = val;
   }
   return result;
 }
-

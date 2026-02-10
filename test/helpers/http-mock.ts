@@ -1,4 +1,4 @@
-import { Readable, Writable } from 'node:stream';
+import { Readable, Writable } from "node:stream";
 
 export interface MockResponse {
   statusCode: number;
@@ -18,32 +18,44 @@ class MockRes extends Writable {
     this.statusCode = code;
     if (headers) {
       for (const [k, v] of Object.entries(headers)) {
-        if (typeof v === 'string') this.headers[k.toLowerCase()] = v;
+        if (typeof v === "string") this.headers[k.toLowerCase()] = v;
       }
     }
     this.headersSent = true;
     return this;
   }
 
-  override _write(chunk: any, _enc: BufferEncoding, cb: (err?: Error | null) => void) {
-    this.chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
+  override _write(
+    chunk: any,
+    _enc: BufferEncoding,
+    cb: (err?: Error | null) => void,
+  ) {
+    this.chunks.push(
+      Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)),
+    );
     cb();
   }
 
   text(): string {
-    return Buffer.concat(this.chunks).toString('utf8');
+    return Buffer.concat(this.chunks).toString("utf8");
   }
 }
 
 export async function dispatch(
   handler: (req: any, res: any) => void,
-  opts: { method: string; url: string; headers?: Record<string, string>; remoteAddress?: string; body?: string },
+  opts: {
+    method: string;
+    url: string;
+    headers?: Record<string, string>;
+    remoteAddress?: string;
+    body?: string;
+  },
 ): Promise<MockResponse> {
   const req = new Readable({ read() {} }) as any;
   req.method = opts.method;
   req.url = opts.url;
   req.headers = opts.headers || {};
-  req.socket = { remoteAddress: opts.remoteAddress || '127.0.0.1' };
+  req.socket = { remoteAddress: opts.remoteAddress || "127.0.0.1" };
 
   const res = new MockRes() as any;
 
@@ -51,11 +63,11 @@ export async function dispatch(
   handler(req, res);
 
   queueMicrotask(() => {
-    if (opts.body) req.push(Buffer.from(opts.body, 'utf8'));
+    if (opts.body) req.push(Buffer.from(opts.body, "utf8"));
     req.push(null);
   });
 
-  await new Promise<void>((resolve) => res.on('finish', () => resolve()));
+  await new Promise<void>((resolve) => res.on("finish", () => resolve()));
 
   return {
     statusCode: res.statusCode,

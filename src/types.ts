@@ -1,15 +1,20 @@
 // --- Core domain types ---
 
-export type Provider = 'anthropic' | 'openai' | 'chatgpt' | 'gemini' | 'unknown';
+export type Provider =
+  | "anthropic"
+  | "openai"
+  | "chatgpt"
+  | "gemini"
+  | "unknown";
 
 export type ApiFormat =
-  | 'anthropic-messages'
-  | 'chatgpt-backend'
-  | 'responses'
-  | 'chat-completions'
-  | 'gemini'
-  | 'raw'
-  | 'unknown';
+  | "anthropic-messages"
+  | "chatgpt-backend"
+  | "responses"
+  | "chat-completions"
+  | "gemini"
+  | "raw"
+  | "unknown";
 
 export interface SystemPrompt {
   content: string;
@@ -24,34 +29,39 @@ export interface ParsedMessage {
 
 // Anthropic content block types
 export interface TextBlock {
-  type: 'text';
+  type: "text";
   text: string;
 }
 
 export interface ToolUseBlock {
-  type: 'tool_use';
+  type: "tool_use";
   id: string;
   name: string;
   input: Record<string, unknown>;
 }
 
 export interface ToolResultBlock {
-  type: 'tool_result';
+  type: "tool_result";
   tool_use_id: string;
   content: string | ContentBlock[];
 }
 
 export interface ImageBlock {
-  type: 'image';
+  type: "image";
   source?: unknown;
 }
 
 export interface InputTextBlock {
-  type: 'input_text';
+  type: "input_text";
   text: string;
 }
 
-export type ContentBlock = TextBlock | ToolUseBlock | ToolResultBlock | ImageBlock | InputTextBlock;
+export type ContentBlock =
+  | TextBlock
+  | ToolUseBlock
+  | ToolResultBlock
+  | ImageBlock
+  | InputTextBlock;
 
 // Tool definitions (union of Anthropic and OpenAI formats)
 export interface AnthropicTool {
@@ -61,7 +71,7 @@ export interface AnthropicTool {
 }
 
 export interface OpenAITool {
-  type: 'function';
+  type: "function";
   function: {
     name: string;
     description?: string;
@@ -165,13 +175,13 @@ export type ResponseData =
 export type {
   CompositionCategory,
   CompositionEntry,
-  Timings,
-  LharSessionLine,
-  LharRecord,
   LharJsonWrapper,
-} from './lhar-types.generated.js';
+  LharRecord,
+  LharSessionLine,
+  Timings,
+} from "./lhar-types.generated.js";
 
-import type { CompositionEntry, Timings } from './lhar-types.generated.js';
+import type { CompositionEntry, Timings } from "./lhar-types.generated.js";
 
 export interface RequestMeta {
   httpStatus?: number;
@@ -181,6 +191,49 @@ export interface RequestMeta {
   targetUrl?: string;
   requestHeaders?: Record<string, string>;
   responseHeaders?: Record<string, string>;
+}
+
+// --- API response types ---
+
+export interface ProjectedUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+}
+
+export interface ProjectedEntry {
+  id: number;
+  timestamp: string;
+  contextInfo: ContextInfo;
+  response: ResponseData;
+  contextLimit: number;
+  source: string;
+  conversationId: string | null;
+  agentKey: string | null;
+  agentLabel: string;
+  httpStatus: number | null;
+  timings: Timings | null;
+  requestBytes: number;
+  responseBytes: number;
+  targetUrl: string | null;
+  composition: CompositionEntry[];
+  costUsd: number | null;
+  usage: ProjectedUsage | null;
+  responseModel: string | null;
+  stopReason: string | null;
+}
+
+export interface AgentGroup {
+  key: string;
+  label: string;
+  model: string;
+  entries: ProjectedEntry[];
+}
+
+export interface ConversationGroup extends Conversation {
+  agents: AgentGroup[];
+  entries: ProjectedEntry[];
 }
 
 // --- CLI types ---

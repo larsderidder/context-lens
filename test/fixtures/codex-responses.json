@@ -32,7 +32,7 @@
         "parameters": {
           "type": "object",
           "properties": {
-            "path": {"type": "string"}
+            "path": { "type": "string" }
           }
         }
       }
