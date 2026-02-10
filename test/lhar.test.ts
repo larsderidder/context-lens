@@ -62,6 +62,8 @@ function makeEntry(overrides: Partial<CapturedEntry> = {}): CapturedEntry {
     rawBody: anthropicBasic,
     composition: analyzeComposition(ci, anthropicBasic),
     costUsd: null,
+    healthScore: null,
+    securityAlerts: [],
     ...overrides,
   };
 }
@@ -476,10 +478,26 @@ describe("buildLharRecord", () => {
     assert.equal(record.context_lens.growth.compaction_detected, false);
   });
 
-  it("marks subagent role when agentKey is present", () => {
-    const entry = makeEntry({ agentKey: "sub123" });
-    const record = buildLharRecord(entry, []);
+  it("marks subagent role when agentKey differs from majority", () => {
+    // Main agent entries have agentKey "main-abc", subagent has "sub123"
+    const mainEntry1 = makeEntry({
+      agentKey: "main-abc",
+      conversationId: "conv-1",
+    });
+    const mainEntry2 = makeEntry({
+      agentKey: "main-abc",
+      conversationId: "conv-1",
+    });
+    const subEntry = makeEntry({
+      agentKey: "sub123",
+      conversationId: "conv-1",
+    });
+    const allEntries = [mainEntry1, mainEntry2, subEntry];
+    const record = buildLharRecord(subEntry, allEntries);
     assert.equal(record.source.agent_role, "subagent");
+    // The main entries should be tagged as main
+    const mainRecord = buildLharRecord(mainEntry1, allEntries);
+    assert.equal(mainRecord.source.agent_role, "main");
   });
 
   it("handles null timings", () => {
@@ -738,5 +756,152 @@ describe("buildLharRecord header redaction", () => {
       "100000",
     );
     assert.equal(record.http.response_headers["set-cookie"], undefined);
+  });
+});
+
+// --- Privacy levels ---
+
+describe("buildLharRecord privacy levels", () => {
+  it("standard privacy: null raw bodies, redacted headers", () => {
+    const entry = makeEntry({
+      rawBody: anthropicBasic,
+      requestHeaders: {
+        "content-type": "application/json",
+        authorization: "Bearer secret",
+      },
+    });
+    const record = buildLharRecord(entry, [], "standard");
+    assert.equal(record.raw.request_body, null);
+    assert.equal(record.raw.response_body, null);
+    assert.equal(
+      record.http.request_headers["content-type"],
+      "application/json",
+    );
+    assert.equal(record.http.request_headers.authorization, undefined);
+  });
+
+  it("minimal privacy: null raw bodies, empty headers", () => {
+    const entry = makeEntry({
+      rawBody: anthropicBasic,
+      requestHeaders: {
+        "content-type": "application/json",
+        "anthropic-version": "2023-06-01",
+      },
+      responseHeaders: {
+        "x-ratelimit-limit-tokens": "100000",
+      },
+    });
+    const record = buildLharRecord(entry, [], "minimal");
+    assert.equal(record.raw.request_body, null);
+    assert.equal(record.raw.response_body, null);
+    assert.deepEqual(record.http.request_headers, {});
+    assert.deepEqual(record.http.response_headers, {});
+  });
+
+  it("full privacy: includes raw request body", () => {
+    const entry = makeEntry({ rawBody: anthropicBasic });
+    const record = buildLharRecord(entry, [], "full");
+    assert.ok(record.raw.request_body !== null);
+    assert.deepEqual(record.raw.request_body, anthropicBasic);
+  });
+
+  it("full privacy: includes parsed JSON response body", () => {
+    const responseData = {
+      model: "claude-sonnet-4-20250514",
+      stop_reason: "end_turn",
+      usage: { input_tokens: 1000, output_tokens: 200 },
+      content: [{ type: "text", text: "Hello world" }],
+    };
+    const entry = makeEntry({ response: responseData });
+    const record = buildLharRecord(entry, [], "full");
+    assert.ok(record.raw.response_body !== null);
+    assert.deepEqual(record.raw.response_body, responseData);
+  });
+
+  it("full privacy: includes streaming response as string", () => {
+    const chunks = "event: message_start\ndata: {}\n\ndata: [DONE]\n";
+    const entry = makeEntry({ response: { streaming: true, chunks } });
+    const record = buildLharRecord(entry, [], "full");
+    assert.equal(record.raw.response_body, chunks);
+  });
+
+  it("full privacy: null request body when rawBody is undefined", () => {
+    const entry = makeEntry({ rawBody: undefined });
+    const record = buildLharRecord(entry, [], "full");
+    assert.equal(record.raw.request_body, null);
+  });
+
+  it("full privacy: null response body for marker-only raw response", () => {
+    const entry = makeEntry({ response: { raw: true } });
+    const record = buildLharRecord(entry, [], "full");
+    assert.equal(record.raw.response_body, null);
+  });
+
+  it("full privacy: includes raw string response body", () => {
+    const entry = makeEntry({ response: { raw: "some raw text" } });
+    const record = buildLharRecord(entry, [], "full");
+    assert.equal(record.raw.response_body, "some raw text");
+  });
+
+  it("default privacy (no arg) behaves like standard", () => {
+    const entry = makeEntry({ rawBody: anthropicBasic });
+    const record = buildLharRecord(entry, []);
+    assert.equal(record.raw.request_body, null);
+    assert.equal(record.raw.response_body, null);
+  });
+});
+
+describe("toLharJsonl privacy levels", () => {
+  const convos = new Map<string, Conversation>();
+  convos.set("test-convo-1", {
+    id: "test-convo-1",
+    label: "Test",
+    source: "claude",
+    workingDirectory: "/tmp",
+    firstSeen: "2026-02-08T12:00:00Z",
+  });
+
+  it("full privacy: JSONL entries include raw bodies", () => {
+    const entry = makeEntry({ rawBody: anthropicBasic });
+    const jsonl = toLharJsonl([entry], convos, "full");
+    const lines = jsonl.trim().split("\n");
+    const entryLine = lines.find((l) => JSON.parse(l).type === "entry");
+    assert.ok(entryLine);
+    const parsed = JSON.parse(entryLine!);
+    assert.ok(parsed.raw.request_body !== null);
+  });
+
+  it("standard privacy: JSONL entries have null raw bodies", () => {
+    const entry = makeEntry({ rawBody: anthropicBasic });
+    const jsonl = toLharJsonl([entry], convos, "standard");
+    const lines = jsonl.trim().split("\n");
+    const entryLine = lines.find((l) => JSON.parse(l).type === "entry");
+    assert.ok(entryLine);
+    const parsed = JSON.parse(entryLine!);
+    assert.equal(parsed.raw.request_body, null);
+    assert.equal(parsed.raw.response_body, null);
+  });
+});
+
+describe("toLharJson privacy levels", () => {
+  const convos = new Map<string, Conversation>();
+  convos.set("test-convo-1", {
+    id: "test-convo-1",
+    label: "Test",
+    source: "claude",
+    workingDirectory: "/tmp",
+    firstSeen: "2026-02-08T12:00:00Z",
+  });
+
+  it("full privacy: JSON entries include raw bodies", () => {
+    const entry = makeEntry({ rawBody: anthropicBasic });
+    const result = toLharJson([entry], convos, "full");
+    assert.ok(result.lhar.entries[0].raw.request_body !== null);
+  });
+
+  it("standard privacy: JSON entries have null raw bodies", () => {
+    const entry = makeEntry({ rawBody: anthropicBasic });
+    const result = toLharJson([entry], convos, "standard");
+    assert.equal(result.lhar.entries[0].raw.request_body, null);
   });
 });
