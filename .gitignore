@@ -28,6 +28,7 @@ data/
 # Design stuff
 design-docs/
 _archive
+testdata
 
 # Local tool state
 .claude/
