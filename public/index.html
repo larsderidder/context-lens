@@ -264,6 +264,22 @@ body::after {
 .stat-tint-amber { background: rgba(240, 180, 41, 0.06); }
 .stat-tint-red { background: rgba(240, 96, 96, 0.08); }
 
+/* Health gauge */
+.health-gauge { display: flex; align-items: center; justify-content: center; gap: 10px; }
+.health-gauge svg { flex-shrink: 0; }
+.health-gauge-label { font-size: 10px; color: var(--text-dim); }
+/* Audit bar */
+.audit-bar { display: flex; gap: 14px; padding: 8px 0 12px; border-bottom: 1px solid var(--border-dim); margin-bottom: 8px; flex-wrap: wrap; }
+.audit-item { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-secondary); cursor: default; }
+.audit-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.audit-dot.good { background: #10b981; }
+.audit-dot.needs-work { background: #f59e0b; }
+.audit-dot.poor { background: #ef4444; }
+.audit-score { font-family: var(--font-mono); font-weight: 600; font-size: 11px; }
+.audit-score.good { color: #10b981; }
+.audit-score.needs-work { color: #f59e0b; }
+.audit-score.poor { color: #ef4444; }
+
 /* Treemap */
 .treemap { display: flex; height: 64px; border-radius: 4px; overflow: hidden; gap: 2px; }
 .treemap-block {
@@ -1253,7 +1269,7 @@ body::after {
     html += '<div class="panel"><div class="panel-body"><div class="stat-card ' + utilTint + '"><div class="stat-val ' + utilColor + '">' + utilPct + '%</div><div class="stat-lbl">Context (' + fmtK(ci.totalTokens) + '/' + fmtK(entry.contextLimit) + ')</div></div></div></div>';
     html += '<div class="panel"><div class="panel-body"><div class="stat-card stat-tint-green"><div class="stat-val green">' + fmtCost(turnCost) + '</div><div class="stat-lbl">Turn cost (' + fmtCost(sessionCost) + ' session)</div></div></div></div>';
     html += '<div class="panel"><div class="panel-body"><div class="stat-card"><div class="stat-val white">' + fmtK(outputTok) + '</div><div class="stat-lbl">Output tokens</div></div></div></div>';
-    html += '<div class="panel"><div class="panel-body"><div class="stat-card"><div class="stat-val amber">' + toolCallCount + '</div><div class="stat-lbl">Tool calls</div></div></div></div>';
+    html += '<div class="panel"><div class="panel-body"><div class="stat-card">' + renderHealthGauge(entry) + '</div></div></div>';
     html += '</div>';
 
     // --- Secondary stats line (cache, messages, stop reason) ---
@@ -1290,6 +1306,52 @@ body::after {
   }
 
   // --- Treemap ---
+  function healthColor(rating) {
+    if (rating === 'good') return '#10b981';
+    if (rating === 'needs-work') return '#f59e0b';
+    return '#ef4444';
+  }
+
+  function auditRating(score) {
+    if (score >= 90) return 'good';
+    if (score >= 50) return 'needs-work';
+    return 'poor';
+  }
+
+  function renderHealthGauge(entry) {
+    var hs = entry.healthScore;
+    if (!hs) return '<div class="stat-val white">--</div><div class="stat-lbl">Health</div>';
+
+    var score = hs.overall;
+    var color = healthColor(hs.rating);
+    // SVG circular gauge: 270° arc
+    var size = 52;
+    var cx = size / 2, cy = size / 2, r = 20;
+    var circumference = 2 * Math.PI * r;
+    var arcFrac = 0.75; // 270° / 360°
+    var arcLen = circumference * arcFrac;
+    var filled = arcLen * (score / 100);
+    var gap = arcLen - filled;
+    // Start at 135° (bottom-left), sweep 270° clockwise
+    var rotation = 135;
+
+    var svg = '<svg width="' + size + '" height="' + size + '" viewBox="0 0 ' + size + ' ' + size + '">'
+      + '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="4"'
+      + ' stroke-dasharray="' + arcLen + ' ' + (circumference - arcLen) + '"'
+      + ' stroke-linecap="round"'
+      + ' transform="rotate(' + rotation + ' ' + cx + ' ' + cy + ')"/>'
+      + '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="' + color + '" stroke-width="4"'
+      + ' stroke-dasharray="' + filled + ' ' + (circumference - filled) + '"'
+      + ' stroke-linecap="round"'
+      + ' transform="rotate(' + rotation + ' ' + cx + ' ' + cy + ')"'
+      + ' style="transition: stroke-dasharray 0.5s ease;"/>'
+      + '<text x="' + cx + '" y="' + (cy + 1) + '" text-anchor="middle" dominant-baseline="central"'
+      + ' fill="' + color + '" font-family="var(--font-mono)" font-size="14" font-weight="700">' + score + '</text>'
+      + '</svg>';
+
+    return '<div class="health-gauge">' + svg + '<div class="health-gauge-label">Health</div></div>';
+  }
+
   function renderTreemap(entry) {
     var composition = entry.composition || [];
     if (composition.length === 0) return '';
@@ -2100,24 +2162,64 @@ body::after {
       });
     }
 
-    if (recs.length === 0) return '';
-
-    var html = '<div class="panel">';
-    html += '<div class="panel-header">Findings <span style="font-size:10px;color:var(--text-dim);font-weight:400;">' + recs.length + '</span></div>';
-    html += '<div class="panel-body">';
-
-    recs.forEach(function(r) {
-      html += '<div class="rec-item">';
-      html += '<span class="rec-severity ' + r.severity + '"></span>';
-      html += '<div class="rec-body">';
-      html += '<div class="rec-title">' + esc(r.title) + '</div>';
-      html += '<div class="rec-detail">' + esc(r.detail) + '</div>';
-      html += '</div>';
-      html += '<span class="rec-impact ' + r.severity + '">' + esc(r.impact) + '</span>';
-      html += '</div>';
+    // Security alerts
+    var secAlerts = entry.securityAlerts || [];
+    secAlerts.forEach(function(a) {
+      var sev = a.severity === 'high' ? 'high' : a.severity === 'medium' ? 'med' : 'low';
+      var where = a.toolName ? 'tool result: ' + a.toolName : a.role + ' message';
+      recs.push({
+        severity: sev,
+        title: '\u26A0 ' + a.pattern.replace(/_/g, ' ') + ' in ' + where + ' (msg ' + (a.messageIndex + 1) + ')',
+        detail: a.match,
+        impact: a.severity,
+      });
     });
 
-    html += '</div></div>';
+    var hs = entry.healthScore;
+    if (recs.length === 0 && !hs) return '';
+
+    var html = '<div class="panel">';
+
+    // Panel header with overall score
+    if (hs) {
+      var hColor = healthColor(hs.rating);
+      html += '<div class="panel-header">Findings'
+        + ' <span style="font-size:10px;color:var(--text-dim);font-weight:400;">' + recs.length + '</span>'
+        + '<span style="margin-left:auto;font-family:var(--font-mono);font-size:12px;font-weight:600;color:' + hColor + ';">'
+        + hs.overall + '/100</span>'
+        + '</div>';
+
+      // Audit bar
+      html += '<div class="panel-body" style="padding-bottom:0;"><div class="audit-bar">';
+      hs.audits.forEach(function(a) {
+        var ar = auditRating(a.score);
+        html += '<div class="audit-item" title="' + esc(a.description) + '">'
+          + '<span class="audit-dot ' + ar + '"></span>'
+          + '<span>' + esc(a.name) + '</span>'
+          + '<span class="audit-score ' + ar + '">' + a.score + '</span>'
+          + '</div>';
+      });
+      html += '</div></div>';
+    } else {
+      html += '<div class="panel-header">Findings <span style="font-size:10px;color:var(--text-dim);font-weight:400;">' + recs.length + '</span></div>';
+    }
+
+    if (recs.length > 0) {
+      html += '<div class="panel-body">';
+      recs.forEach(function(r) {
+        html += '<div class="rec-item">';
+        html += '<span class="rec-severity ' + r.severity + '"></span>';
+        html += '<div class="rec-body">';
+        html += '<div class="rec-title">' + esc(r.title) + '</div>';
+        html += '<div class="rec-detail">' + esc(r.detail) + '</div>';
+        html += '</div>';
+        html += '<span class="rec-impact ' + r.severity + '">' + esc(r.impact) + '</span>';
+        html += '</div>';
+      });
+      html += '</div>';
+    }
+
+    html += '</div>';
     return html;
   }
 
