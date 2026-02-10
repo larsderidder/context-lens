@@ -10,7 +10,8 @@
   "scripts": {
     "generate:types": "json2ts schema/lhar.schema.json src/lhar-types.generated.ts --unreachableDefinitions",
     "build": "npm run generate:types && tsc",
-    "build:test": "npm run generate:types && tsc -p tsconfig.test.json",
+    "clean:test": "node -e \"require('node:fs').rmSync('dist-test', { recursive: true, force: true })\"",
+    "build:test": "npm run generate:types && npm run clean:test && tsc -p tsconfig.test.json",
     "start": "node dist/server.js",
     "test": "npm run build:test && node --test 'dist-test/test/**/*.test.js'",
     "dev": "tsc --watch",
