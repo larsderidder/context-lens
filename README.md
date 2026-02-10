@@ -4,7 +4,7 @@
 
 I kept wondering why my Claude Code sessions got so expensive. I couldn't find a tool that showed me what was exactly in the context window. So I built one.
 
-Zero dependencies. Sits between your tool and the API, captures everything, gives you a web UI to explore it. I've tested with Claude, Codex and Aider.
+Zero dependencies. Sits between your tool and the API, captures everything, gives you a web UI to explore it. I've tested with Claude, Codex, Gemini, Kimi and Aider.
 
 ![Context Lens UI](screenshot-overview.png)
 
@@ -13,6 +13,7 @@ Zero dependencies. Sits between your tool and the API, captures everything, give
 ```bash
 npx context-lens claude "your prompt"
 npx context-lens codex "your prompt"
+npx context-lens gemini "your prompt"
 npx context-lens aider --model claude-sonnet-4
 npx context-lens -- python my_agent.py
 ```
@@ -55,6 +56,7 @@ npm start
 
 ANTHROPIC_BASE_URL=http://localhost:4040 claude "your prompt"
 OPENAI_BASE_URL=http://localhost:4040 codex "your prompt"
+GOOGLE_GEMINI_BASE_URL=http://localhost:4040 gemini "your prompt"  # experimental
 ```
 
 ### Source Tagging
