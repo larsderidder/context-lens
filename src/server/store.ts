@@ -5,6 +5,7 @@ import type { CapturedEntry, ContextInfo, Conversation, ContentBlock, RequestMet
 import { getContextLimit, computeAgentKey, computeFingerprint, detectSource, extractConversationLabel, extractSessionId, extractWorkingDirectory, estimateCost } from '../core.js';
 import { analyzeComposition, buildLharRecord, buildSessionLine, parseResponseUsage } from '../lhar.js';
 import { safeFilenamePart } from '../server-utils.js';
+import { projectEntry } from './projection.js';
 
 export class Store {
   private readonly dataDir: string;
@@ -282,11 +283,20 @@ export class Store {
     }
   }
 
+  private compactMessages(messages: ContextInfo['messages']): ContextInfo['messages'] {
+    const msgs = messages.length > this.maxCompactMessages
+      ? messages.slice(-this.maxCompactMessages)
+      : messages;
+    return msgs.map(m => ({
+      role: m.role,
+      content: typeof m.content === 'string' ? m.content.slice(0, 200) : '',
+      tokens: m.tokens,
+      contentBlocks: m.contentBlocks?.map(b => this.compactBlock(b)) ?? null,
+    }));
+  }
+
   // Compact contextInfo — keep metadata and token counts, drop large text payloads
   private compactContextInfo(ci: ContextInfo) {
-    const msgs = ci.messages.length > this.maxCompactMessages
-      ? ci.messages.slice(-this.maxCompactMessages)
-      : ci.messages;
     return {
       provider: ci.provider,
       apiFormat: ci.apiFormat,
@@ -297,12 +307,7 @@ export class Store {
       totalTokens: ci.totalTokens,
       systemPrompts: [],
       tools: [],
-      messages: msgs.map(m => ({
-        role: m.role,
-        content: typeof m.content === 'string' ? m.content.slice(0, 200) : '',
-        tokens: m.tokens,
-        contentBlocks: m.contentBlocks?.map(b => this.compactBlock(b)) ?? null,
-      })),
+      messages: this.compactMessages(ci.messages),
     };
   }
 
@@ -328,47 +333,7 @@ export class Store {
     // Compact contextInfo in-place
     entry.contextInfo.systemPrompts = [];
     entry.contextInfo.tools = [];
-    const msgs = entry.contextInfo.messages.length > this.maxCompactMessages
-      ? entry.contextInfo.messages.slice(-this.maxCompactMessages)
-      : entry.contextInfo.messages;
-    entry.contextInfo.messages = msgs.map(m => ({
-      role: m.role,
-      content: typeof m.content === 'string' ? m.content.slice(0, 200) : '',
-      tokens: m.tokens,
-      contentBlocks: m.contentBlocks?.map(b => this.compactBlock(b)) ?? null,
-    }));
-  }
-
-  // Lightweight projection — strip rawBody, heavy headers; compact contextInfo
-  private projectEntry(e: CapturedEntry) {
-    const resp = e.response as Record<string, any> | undefined;
-    const usage = resp?.usage;
-    return {
-      id: e.id,
-      timestamp: e.timestamp,
-      contextInfo: this.compactContextInfo(e.contextInfo),
-      response: e.response,
-      contextLimit: e.contextLimit,
-      source: e.source,
-      conversationId: e.conversationId,
-      agentKey: e.agentKey,
-      agentLabel: e.agentLabel,
-      httpStatus: e.httpStatus,
-      timings: e.timings,
-      requestBytes: e.requestBytes,
-      responseBytes: e.responseBytes,
-      targetUrl: e.targetUrl,
-      composition: e.composition,
-      costUsd: e.costUsd,
-      usage: usage ? {
-        inputTokens: usage.input_tokens || 0,
-        outputTokens: usage.output_tokens || 0,
-        cacheReadTokens: usage.cache_read_input_tokens || 0,
-        cacheWriteTokens: usage.cache_creation_input_tokens || 0,
-      } : null,
-      responseModel: resp?.model || null,
-      stopReason: resp?.stop_reason || null,
-    };
+    entry.contextInfo.messages = this.compactMessages(entry.contextInfo.messages);
   }
 
   private saveState(): void {
@@ -377,7 +342,7 @@ export class Store {
       lines += JSON.stringify({ type: 'conversation', data: convo }) + '\n';
     }
     for (const entry of this.capturedRequests) {
-      lines += JSON.stringify({ type: 'entry', data: this.projectEntry(entry) }) + '\n';
+      lines += JSON.stringify({ type: 'entry', data: projectEntry(entry, this.compactContextInfo(entry.contextInfo)) }) + '\n';
     }
     try {
       fs.writeFileSync(this.stateFile, lines);
@@ -386,4 +351,3 @@ export class Store {
     }
   }
 }
-

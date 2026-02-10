@@ -7,6 +7,7 @@ import { parseContextInfo } from '../core.js';
 import { toLharJson, toLharJsonl } from '../lhar.js';
 import type { CapturedEntry } from '../types.js';
 import type { Store } from './store.js';
+import { projectEntry } from './projection.js';
 
 export function loadHtmlUI(baseDir: string): string {
   return fs.readFileSync(path.join(baseDir, '..', 'public', 'index.html'), 'utf-8');
@@ -41,37 +42,9 @@ export function createWebUIHandler(store: Store, htmlUI: string): (req: http.Inc
     });
   }
 
-  // Lightweight projection for /api/requests
-  function projectEntry(e: CapturedEntry) {
-    // This mirrors the Store projection; entries already have compacted fields after storeRequest().
-    const resp = e.response as Record<string, any> | undefined;
-    const usage = resp?.usage;
-    return {
-      id: e.id,
-      timestamp: e.timestamp,
-      contextInfo: e.contextInfo,
-      response: e.response,
-      contextLimit: e.contextLimit,
-      source: e.source,
-      conversationId: e.conversationId,
-      agentKey: e.agentKey,
-      agentLabel: e.agentLabel,
-      httpStatus: e.httpStatus,
-      timings: e.timings,
-      requestBytes: e.requestBytes,
-      responseBytes: e.responseBytes,
-      targetUrl: e.targetUrl,
-      composition: e.composition,
-      costUsd: e.costUsd,
-      usage: usage ? {
-        inputTokens: usage.input_tokens || 0,
-        outputTokens: usage.output_tokens || 0,
-        cacheReadTokens: usage.cache_read_input_tokens || 0,
-        cacheWriteTokens: usage.cache_creation_input_tokens || 0,
-      } : null,
-      responseModel: resp?.model || null,
-      stopReason: resp?.stop_reason || null,
-    };
+  function projectEntryForApi(e: CapturedEntry) {
+    // Entries are already compact after Store.storeRequest() and after loadState().
+    return projectEntry(e, e.contextInfo);
   }
 
   return function handleWebUI(req: http.IncomingMessage, res: http.ServerResponse): void {
@@ -130,17 +103,17 @@ export function createWebUIHandler(store: Store, htmlUI: string): (req: http.Inc
             key: ak,
             label: agentEntries[agentEntries.length - 1].agentLabel || 'Unnamed',
             model: agentEntries[0].contextInfo.model,
-            entries: agentEntries.map(projectEntry), // newest-first (inherited from capturedRequests order)
+            entries: agentEntries.map(projectEntryForApi), // newest-first (inherited from capturedRequests order)
           });
         }
         // Sort agents: most recent activity first
         agents.sort((a: any, b: any) => new Date(b.entries[0].timestamp).getTime() - new Date(a.entries[0].timestamp).getTime());
-        convos.push({ ...meta, agents, entries: entries.map(projectEntry) });
+        convos.push({ ...meta, agents, entries: entries.map(projectEntryForApi) });
       }
       // Sort conversations newest-first (by most recent entry)
       convos.sort((a, b) => new Date(b.entries[0].timestamp).getTime() - new Date(a.entries[0].timestamp).getTime());
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ revision: store.getRevision(), conversations: convos, ungrouped: ungrouped.map(projectEntry) }));
+      res.end(JSON.stringify({ revision: store.getRevision(), conversations: convos, ungrouped: ungrouped.map(projectEntryForApi) }));
     } else if (parsedUrl.pathname === '/api/export/lhar') {
       // Export as JSONL (.lhar)
       const convoFilter = parsedUrl.query.conversation as string | undefined;
@@ -175,4 +148,3 @@ export function createWebUIHandler(store: Store, htmlUI: string): (req: http.Inc
     }
   };
 }
-

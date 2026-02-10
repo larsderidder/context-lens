@@ -1,4 +1,4 @@
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -30,6 +30,10 @@ describe('webui handler', () => {
     cleanup = made.cleanup;
   });
 
+  afterEach(() => {
+    if (cleanup) cleanup();
+  });
+
   it('POST /api/ingest stores an entry and GET /api/requests returns it', async () => {
     const handler = createWebUIHandler(store, '<html>ok</html>');
 
@@ -56,8 +60,6 @@ describe('webui handler', () => {
     assert.ok(Array.isArray(data.conversations));
     const totalEntries = (data.conversations || []).reduce((sum: number, c: any) => sum + (c.entries?.length || 0), 0) + (data.ungrouped?.length || 0);
     assert.equal(totalEntries, 1);
-
-    cleanup();
   });
 
   it('GET /api/export/lhar returns JSONL and POST /api/reset clears state', async () => {
@@ -88,8 +90,6 @@ describe('webui handler', () => {
     const data = reqs.bodyJson();
     assert.equal((data.conversations || []).length, 0);
     assert.equal((data.ungrouped || []).length, 0);
-
-    cleanup();
   });
 
   it('DELETE /api/conversations/:id removes a conversation', async () => {
@@ -124,8 +124,6 @@ describe('webui handler', () => {
     const reqs2 = await dispatch(handler, { method: 'GET', url: '/api/requests' });
     const data2 = reqs2.bodyJson();
     assert.equal(data2.conversations.length, 0);
-
-    cleanup();
   });
 });
 

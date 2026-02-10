@@ -15,16 +15,7 @@ export const API_PATH_SEGMENTS = new Set([
  * This is used for routing (choosing which upstream base URL to use) and parsing.
  */
 export function detectProvider(pathname: string, headers: Record<string, string | undefined>): Provider {
-  if (pathname.match(/^\/(api|backend-api)\//)) return 'chatgpt';
-  if (pathname.includes('/v1/messages') || pathname.includes('/v1/complete')) return 'anthropic';
-  if (headers['anthropic-version']) return 'anthropic';
-  // Gemini: must come BEFORE openai catch-all (which matches /models/)
-  if (pathname.includes(':generateContent') || pathname.includes(':streamGenerateContent') || pathname.match(/\/v1(beta|alpha)\/models\//) || pathname.includes('/v1internal:'))
-    return 'gemini';
-  if (headers['x-goog-api-key']) return 'gemini';
-  if (pathname.match(/\/(responses|chat\/completions|models|embeddings)/)) return 'openai';
-  if (headers['authorization']?.startsWith('Bearer sk-')) return 'openai';
-  return 'unknown';
+  return classifyRequest(pathname, headers).provider;
 }
 
 /**
@@ -33,13 +24,38 @@ export function detectProvider(pathname: string, headers: Record<string, string 
  * This is distinct from provider: e.g. OpenAI can be `responses` or `chat-completions`.
  */
 export function detectApiFormat(pathname: string): ApiFormat {
-  if (pathname.includes('/v1/messages')) return 'anthropic-messages';
-  if (pathname.match(/^\/(api|backend-api)\//)) return 'chatgpt-backend';
-  if (pathname.includes(':generateContent') || pathname.includes(':streamGenerateContent') || pathname.match(/\/v1(beta|alpha)\/models\//) || pathname.includes('/v1internal:'))
-    return 'gemini';
-  if (pathname.includes('/responses')) return 'responses';
-  if (pathname.includes('/chat/completions')) return 'chat-completions';
-  return 'unknown';
+  return classifyRequest(pathname, {}).apiFormat;
+}
+
+/**
+ * Classify an incoming request into `{ provider, apiFormat }`.
+ *
+ * Keep all path/format heuristics in one place to avoid drift between
+ * routing decisions and parsing decisions.
+ */
+export function classifyRequest(pathname: string, headers: Record<string, string | undefined>): { provider: Provider; apiFormat: ApiFormat } {
+  // ChatGPT backend traffic (Codex subscription)
+  if (pathname.match(/^\/(api|backend-api)\//)) return { provider: 'chatgpt', apiFormat: 'chatgpt-backend' };
+
+  // Anthropic Messages API
+  if (pathname.includes('/v1/messages')) return { provider: 'anthropic', apiFormat: 'anthropic-messages' };
+  if (pathname.includes('/v1/complete')) return { provider: 'anthropic', apiFormat: 'unknown' };
+  if (headers['anthropic-version']) return { provider: 'anthropic', apiFormat: 'unknown' };
+
+  // Gemini: must come BEFORE openai catch-all (which matches /models/)
+  const isGeminiPath = pathname.includes(':generateContent')
+    || pathname.includes(':streamGenerateContent')
+    || pathname.match(/\/v1(beta|alpha)\/models\//)
+    || pathname.includes('/v1internal:');
+  if (isGeminiPath || headers['x-goog-api-key']) return { provider: 'gemini', apiFormat: 'gemini' };
+
+  // OpenAI
+  if (pathname.includes('/responses')) return { provider: 'openai', apiFormat: 'responses' };
+  if (pathname.includes('/chat/completions')) return { provider: 'openai', apiFormat: 'chat-completions' };
+  if (pathname.match(/\/(models|embeddings)/)) return { provider: 'openai', apiFormat: 'unknown' };
+  if (headers['authorization']?.startsWith('Bearer sk-')) return { provider: 'openai', apiFormat: 'unknown' };
+
+  return { provider: 'unknown', apiFormat: 'unknown' };
 }
 
 /**
@@ -77,7 +93,7 @@ export function extractSource(pathname: string): ExtractSourceResult {
  * @returns `{ targetUrl, provider }`.
  */
 export function resolveTargetUrl(parsedUrl: ParsedUrl, headers: Record<string, string | undefined>, upstreams: Upstreams): ResolveTargetResult {
-  const provider = detectProvider(parsedUrl.pathname, headers);
+  const provider = classifyRequest(parsedUrl.pathname, headers).provider;
   const search = parsedUrl.search || '';
   let targetUrl = headers['x-target-url'];
   if (!targetUrl) {
@@ -96,4 +112,3 @@ export function resolveTargetUrl(parsedUrl: ParsedUrl, headers: Record<string, s
   }
   return { targetUrl, provider };
 }
-

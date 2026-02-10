@@ -1,4 +1,5 @@
 import http from 'node:http';
+export { selectHeaders } from './http/headers.js';
 
 // Keep filenames predictable and prevent traversal or weird platform behavior.
 export function safeFilenamePart(input: string): string {
@@ -29,15 +30,4 @@ export function headersForResolution(
   return h;
 }
 
-// Headers to exclude from capture (auth/sensitive)
-const REDACTED_HEADERS = new Set(['authorization', 'x-api-key', 'cookie', 'set-cookie', 'x-target-url']);
-
-export function selectHeaders(headers: Record<string, any>): Record<string, string> {
-  const result: Record<string, string> = {};
-  for (const [key, val] of Object.entries(headers)) {
-    if (REDACTED_HEADERS.has(key.toLowerCase())) continue;
-    if (typeof val === 'string') result[key] = val;
-  }
-  return result;
-}
-
+// `selectHeaders` is re-exported from `src/http/headers.ts` to keep server-utils small.

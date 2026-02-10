@@ -8,14 +8,11 @@
 export { estimateTokens } from './core/tokens.js';
 
 export {
-  CONTEXT_LIMITS,
   getContextLimit,
-  MODEL_PRICING,
   estimateCost,
 } from './core/models.js';
 
 export {
-  API_PATH_SEGMENTS,
   detectProvider,
   detectApiFormat,
   extractSource,
@@ -35,7 +32,5 @@ export {
 } from './core/conversation.js';
 
 export {
-  HEADER_SIGNATURES,
-  SOURCE_SIGNATURES,
   detectSource,
 } from './core/source.js';

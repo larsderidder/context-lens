@@ -5,28 +5,15 @@ import type {
   LharRecord, LharSessionLine, LharJsonWrapper,
 } from './lhar-types.generated.js';
 import type { CapturedEntry, ContextInfo, Conversation } from './types.js';
+import { redactHeaders, SENSITIVE_HEADERS } from './http/headers.js';
 
 const COLLECTOR_NAME = 'context-lens';
 const COLLECTOR_VERSION = '0.1.0';
 const LHAR_VERSION = '0.1.0';
 
 // --- Header Redaction ---
-
-export const SENSITIVE_HEADERS = new Set([
-  'authorization', 'x-api-key', 'cookie', 'set-cookie',
-  'x-target-url', 'proxy-authorization', 'x-auth-token',
-  'x-forwarded-authorization', 'www-authenticate', 'proxy-authenticate',
-  'x-goog-api-key',
-]);
-
-export function redactHeaders(headers: Record<string, string>): Record<string, string> {
-  const result: Record<string, string> = {};
-  for (const [key, val] of Object.entries(headers)) {
-    if (SENSITIVE_HEADERS.has(key.toLowerCase())) continue;
-    result[key] = val;
-  }
-  return result;
-}
+// Kept as exports for backward compatibility, but implemented in `src/http/headers.ts`.
+export { redactHeaders, SENSITIVE_HEADERS };
 
 // --- Composition Analysis ---
 

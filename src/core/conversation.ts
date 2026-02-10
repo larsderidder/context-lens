@@ -45,7 +45,11 @@ export function extractWorkingDirectory(contextInfo: ContextInfo): string | null
   if (match) return match[1];
   match = allText.match(/<cwd>([^<]+)<\/cwd>/);
   if (match) return match[1];
-  match = allText.match(/working directory(?:(?:is |= ?)|[:\s]+)[`"]?([/~][^\s`"'\n]+)/i);
+  // Generic: "working directory is /path" or "working directory = /path"
+  match = allText.match(/working directory (?:is |= ?)[`"]?([/~][^\s`"'\n]+)/i);
+  if (match) return match[1];
+  // Generic: "working directory: /path" or "working directory /path"
+  match = allText.match(/working directory[:\s]+[`"]?([/~][^\s`"'\n]+)/i);
   if (match) return match[1];
   match = allText.match(/\bcwd[:\s]+[`"]?([/~][^\s`"'\n]+)/);
   if (match) return match[1];
@@ -163,4 +167,3 @@ export function extractConversationLabel(contextInfo: ContextInfo): string {
   }
   return 'Unnamed conversation';
 }
-
