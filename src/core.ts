@@ -1,14 +1,18 @@
-// `src/core.ts` is a stable facade: other modules import from here.
-// Keep this file small by delegating to focused modules.
+/**
+ * Public "core" API for Context Lens.
+ *
+ * This is intentionally a thin facade: other parts of the codebase import from here,
+ * while implementations live in `src/core/*` to keep concerns separated.
+ */
 
-export { estimateTokens } from './tokens.js';
+export { estimateTokens } from './core/tokens.js';
 
 export {
   CONTEXT_LIMITS,
   getContextLimit,
   MODEL_PRICING,
   estimateCost,
-} from './models.js';
+} from './core/models.js';
 
 export {
   API_PATH_SEGMENTS,
@@ -16,9 +20,9 @@ export {
   detectApiFormat,
   extractSource,
   resolveTargetUrl,
-} from './routing.js';
+} from './core/routing.js';
 
-export { parseContextInfo } from './context/parse.js';
+export { parseContextInfo } from './core/parse.js';
 
 export {
   extractReadableText,
@@ -28,11 +32,10 @@ export {
   computeAgentKey,
   computeFingerprint,
   extractConversationLabel,
-} from './conversation.js';
+} from './core/conversation.js';
 
 export {
   HEADER_SIGNATURES,
   SOURCE_SIGNATURES,
   detectSource,
-} from './source.js';
-
+} from './core/source.js';

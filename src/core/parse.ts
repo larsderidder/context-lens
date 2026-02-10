@@ -1,9 +1,12 @@
 import type { ContextInfo, ParsedMessage, ContentBlock } from '../types.js';
-import { estimateTokens } from '../tokens.js';
+import { estimateTokens } from './tokens.js';
 
-// Parse a single item from the OpenAI Responses API `input` array.
-// Maps typed items (function_call, function_call_output, reasoning, output_text, etc.)
-// to normalized ParsedMessage with proper role and contentBlocks.
+/**
+ * Parse a single item from the OpenAI Responses API `input` array.
+ *
+ * Maps typed items (function_call, function_call_output, reasoning, output_text, etc.)
+ * to a normalized `ParsedMessage` with a stable `role` and optional `contentBlocks`.
+ */
 function parseResponsesItem(item: any): { message: ParsedMessage; tokens: number; isSystem: boolean; content: string } {
   const type: string = item.type || '';
 
@@ -72,7 +75,20 @@ function parseResponsesItem(item: any): { message: ParsedMessage; tokens: number
   return { message: { role: item.role || 'user', content, tokens }, tokens, isSystem: false, content };
 }
 
-// Parse request body and extract context info
+/**
+ * Parse a request body and extract normalized context information.
+ *
+ * This is the core "shape-normalizer" for Context Lens. It supports:
+ * - Anthropic Messages API
+ * - OpenAI Responses API and Chat Completions
+ * - ChatGPT backend schema (Codex subscription traffic)
+ * - Gemini (including Code Assist wrappers)
+ *
+ * @param provider - Provider inferred from routing (anthropic/openai/gemini/chatgpt/unknown).
+ * @param body - Parsed JSON request body.
+ * @param apiFormat - API schema family inferred from routing.
+ * @returns A `ContextInfo` with token estimates and normalized messages/blocks.
+ */
 export function parseContextInfo(provider: string, body: Record<string, any>, apiFormat: string): ContextInfo {
   const info: ContextInfo = {
     provider,
@@ -116,7 +132,6 @@ export function parseContextInfo(provider: string, body: Record<string, any>, ap
       info.messagesTokens = info.messages.reduce((sum, m) => sum + m.tokens, 0);
     }
   } else if (apiFormat === 'responses' || provider === 'chatgpt') {
-    // System prompts
     if (body.instructions) {
       info.systemPrompts.push({ content: body.instructions });
       info.systemTokens = estimateTokens(body.instructions);
@@ -131,7 +146,6 @@ export function parseContextInfo(provider: string, body: Record<string, any>, ap
       info.systemTokens += estimateTokens(systemText);
     }
 
-    // Parse input/messages — handle Responses API typed items
     const msgs = body.input || body.messages;
     if (msgs) {
       if (typeof msgs === 'string') {
@@ -187,7 +201,7 @@ export function parseContextInfo(provider: string, body: Record<string, any>, ap
             });
           } else if (part.functionResponse) {
             const resp = part.functionResponse.response;
-            // Gemini CLI wraps tool output in {output: \"...\"} or {error: \"...\"}
+            // Gemini CLI wraps tool output in {output: "..."} or {error: "..."}
             const respText = typeof resp === 'string' ? resp
               : typeof resp?.output === 'string' ? resp.output
               : typeof resp?.error === 'string' ? resp.error

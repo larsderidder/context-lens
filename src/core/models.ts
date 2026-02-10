@@ -1,4 +1,8 @@
-// Model context limits (tokens) — more specific keys first
+/**
+ * Known model context limits (tokens).
+ *
+ * Keys are ordered most-specific-first because `getContextLimit()` does substring matching.
+ */
 export const CONTEXT_LIMITS: Record<string, number> = {
   // Anthropic
   'claude-opus-4': 200000,
@@ -26,7 +30,12 @@ export const CONTEXT_LIMITS: Record<string, number> = {
   'gemini-1.5-flash': 1048576,
 };
 
-// Get context limit for model
+/**
+ * Resolve an approximate context window size for a given model string.
+ *
+ * @param model - Model identifier (often includes version suffixes).
+ * @returns Context limit in tokens.
+ */
 export function getContextLimit(model: string): number {
   for (const [key, limit] of Object.entries(CONTEXT_LIMITS)) {
     if (model.includes(key)) return limit;
@@ -34,8 +43,12 @@ export function getContextLimit(model: string): number {
   return 128000; // default fallback
 }
 
-// Model pricing: [inputPerMTok, outputPerMTok] in USD
-// Keys ordered most-specific-first to avoid substring false matches (e.g. gpt-4o-mini before gpt-4o)
+/**
+ * Model pricing: `[inputPerMTok, outputPerMTok]` in USD.
+ *
+ * Keys ordered most-specific-first to avoid substring false matches
+ * (e.g. `gpt-4o-mini` before `gpt-4o`).
+ */
 export const MODEL_PRICING: Record<string, [number, number]> = {
   'claude-opus-4':   [15, 75],
   'claude-sonnet-4': [3, 15],
@@ -66,6 +79,14 @@ export const MODEL_PRICING: Record<string, [number, number]> = {
   'gemini-1.5-flash': [0.075, 0.30],
 };
 
+/**
+ * Estimate cost in USD for a request/response token pair using `MODEL_PRICING`.
+ *
+ * @param model - Model identifier (substring matched against known keys).
+ * @param inputTokens - Input/prompt tokens.
+ * @param outputTokens - Output/completion tokens.
+ * @returns Cost in USD, rounded to 6 decimals; `null` if the model is unknown.
+ */
 export function estimateCost(model: string, inputTokens: number, outputTokens: number): number | null {
   for (const [key, [inp, out]] of Object.entries(MODEL_PRICING)) {
     if (model.includes(key)) {

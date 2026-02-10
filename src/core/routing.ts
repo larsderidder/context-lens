@@ -1,11 +1,19 @@
-import type { Provider, ApiFormat, ExtractSourceResult, ParsedUrl, Upstreams, ResolveTargetResult } from './types.js';
+import type { Provider, ApiFormat, ExtractSourceResult, ParsedUrl, Upstreams, ResolveTargetResult } from '../types.js';
 
-// Known API path segments — not treated as source prefixes
+/**
+ * URL path segments that represent API resources rather than "source tool" prefixes.
+ *
+ * Example: `/v1/messages` should not treat `v1` as a source tag.
+ */
 export const API_PATH_SEGMENTS = new Set([
   'v1', 'v1beta', 'v1alpha', 'v1internal', 'responses', 'chat', 'models', 'embeddings', 'backend-api', 'api',
 ]);
 
-// Detect provider from request
+/**
+ * Infer provider based on request path + headers.
+ *
+ * This is used for routing (choosing which upstream base URL to use) and parsing.
+ */
 export function detectProvider(pathname: string, headers: Record<string, string | undefined>): Provider {
   if (pathname.match(/^\/(api|backend-api)\//)) return 'chatgpt';
   if (pathname.includes('/v1/messages') || pathname.includes('/v1/complete')) return 'anthropic';
@@ -19,7 +27,11 @@ export function detectProvider(pathname: string, headers: Record<string, string 
   return 'unknown';
 }
 
-// Detect which API format is being used
+/**
+ * Infer the API "format" (schema family) from the request path.
+ *
+ * This is distinct from provider: e.g. OpenAI can be `responses` or `chat-completions`.
+ */
 export function detectApiFormat(pathname: string): ApiFormat {
   if (pathname.includes('/v1/messages')) return 'anthropic-messages';
   if (pathname.match(/^\/(api|backend-api)\//)) return 'chatgpt-backend';
@@ -30,7 +42,13 @@ export function detectApiFormat(pathname: string): ApiFormat {
   return 'unknown';
 }
 
-// Extract source tag from URL path
+/**
+ * Extract a "source tool" tag from a request path.
+ *
+ * Example: `/claude/v1/messages` => `{ source: 'claude', cleanPath: '/v1/messages' }`.
+ *
+ * This tag is used for attribution in the UI/LHAR and for per-tool grouping.
+ */
 export function extractSource(pathname: string): ExtractSourceResult {
   const match = pathname.match(/^\/([^/]+)(\/.*)?$/);
   if (match && match[2] && !API_PATH_SEGMENTS.has(match[1])) {
@@ -50,7 +68,14 @@ export function extractSource(pathname: string): ExtractSourceResult {
   return { source: null, cleanPath: pathname };
 }
 
-// Determine target URL for a request
+/**
+ * Determine the final upstream target URL for a request.
+ *
+ * @param parsedUrl - Path + query extracted from the incoming request.
+ * @param headers - Headers used for detection and optional override.
+ * @param upstreams - Base URLs for each provider.
+ * @returns `{ targetUrl, provider }`.
+ */
 export function resolveTargetUrl(parsedUrl: ParsedUrl, headers: Record<string, string | undefined>, upstreams: Upstreams): ResolveTargetResult {
   const provider = detectProvider(parsedUrl.pathname, headers);
   const search = parsedUrl.search || '';

@@ -1,6 +1,10 @@
-import type { ContextInfo, SourceSignature, HeaderSignature } from './types.js';
+import type { ContextInfo, SourceSignature, HeaderSignature } from '../types.js';
 
-// Auto-detect source tool from request headers (primary)
+/**
+ * Header signatures used to infer which CLI/tool produced a request.
+ *
+ * This is best-effort: many tools do not have stable identifiers.
+ */
 export const HEADER_SIGNATURES: HeaderSignature[] = [
   { header: 'user-agent', pattern: /^claude-cli\//, source: 'claude' },
   { header: 'user-agent', pattern: /aider/i, source: 'aider' },
@@ -8,14 +12,24 @@ export const HEADER_SIGNATURES: HeaderSignature[] = [
   { header: 'user-agent', pattern: /^GeminiCLI\//, source: 'gemini' },
 ];
 
-// Auto-detect source tool from system prompt (fallback)
+/**
+ * System-prompt signatures used as a fallback when headers are missing/ambiguous.
+ */
 export const SOURCE_SIGNATURES: SourceSignature[] = [
   { pattern: 'Act as an expert software developer', source: 'aider' },
   { pattern: 'You are Claude Code', source: 'claude' },
   { pattern: 'You are Kimi Code CLI', source: 'kimi' },
 ];
 
-// Auto-detect source tool from headers (primary) and system prompt (fallback)
+/**
+ * Infer a human-friendly "source tool" label (claude/codex/gemini/aider/...) for attribution.
+ *
+ * Priority:
+ * 1. explicit source tag if provided and not `"unknown"`
+ * 2. request header signatures
+ * 3. system prompt signatures
+ * 4. fallback to `"unknown"`
+ */
 export function detectSource(contextInfo: ContextInfo, source: string | null, headers?: Record<string, string>): string {
   if (source && source !== 'unknown') return source;
 
