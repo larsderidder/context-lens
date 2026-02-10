@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
+import { parseContextInfo } from "../src/core.js";
+import type { StoreChangeEvent } from "../src/server/store.js";
 import { Store } from "../src/server/store.js";
 import { createWebUIHandler } from "../src/server/webui.js";
 import { dispatch } from "./helpers/http-mock.js";
@@ -174,5 +176,107 @@ describe("webui handler", () => {
     });
     const data2 = reqs2.bodyJson();
     assert.equal(data2.conversations.length, 0);
+  });
+});
+
+describe("Store change events", () => {
+  let store: Store;
+  let cleanup: () => void;
+
+  beforeEach(() => {
+    const dir = mkdtempSync(path.join(tmpdir(), "context-lens-test-"));
+    store = new Store({
+      dataDir: path.join(dir, "data"),
+      stateFile: path.join(dir, "data", "state.jsonl"),
+      maxSessions: 10,
+      maxCompactMessages: 60,
+    });
+    cleanup = () => {
+      try {
+        rmSync(dir, { recursive: true, force: true });
+      } catch {}
+    };
+  });
+
+  afterEach(() => {
+    if (cleanup) cleanup();
+  });
+
+  it("emits entry-added on storeRequest", () => {
+    const events: StoreChangeEvent[] = [];
+    store.on("change", (e) => events.push(e));
+
+    const ci = parseContextInfo(
+      "anthropic",
+      {
+        model: "claude-sonnet-4-20250514",
+        messages: [{ role: "user", content: "test" }],
+      },
+      "anthropic-messages",
+    );
+    store.storeRequest(ci, { raw: true }, "test");
+
+    assert.equal(events.length, 1);
+    assert.equal(events[0].type, "entry-added");
+    assert.equal(events[0].revision, 1);
+  });
+
+  it("emits conversation-deleted on deleteConversation", () => {
+    const ci = parseContextInfo(
+      "anthropic",
+      {
+        model: "claude-sonnet-4-20250514",
+        metadata: { user_id: "session_del-test" },
+        messages: [{ role: "user", content: "hi" }],
+      },
+      "anthropic-messages",
+    );
+    store.storeRequest(
+      ci,
+      {
+        model: "claude-sonnet-4-20250514",
+        stop_reason: "end_turn",
+        usage: { input_tokens: 1, output_tokens: 2 },
+      },
+      "test",
+      {
+        model: "claude-sonnet-4-20250514",
+        metadata: { user_id: "session_del-test" },
+        messages: [{ role: "user", content: "hi" }],
+      },
+    );
+
+    const convos = Array.from(store.getConversations().keys());
+    assert.equal(convos.length, 1);
+    const convoId = convos[0];
+
+    const events: StoreChangeEvent[] = [];
+    store.on("change", (e) => events.push(e));
+    store.deleteConversation(convoId);
+
+    assert.equal(events.length, 1);
+    assert.equal(events[0].type, "conversation-deleted");
+    assert.equal(events[0].conversationId, convoId);
+  });
+
+  it("emits reset on resetAll", () => {
+    const events: StoreChangeEvent[] = [];
+    store.on("change", (e) => events.push(e));
+    store.resetAll();
+
+    assert.equal(events.length, 1);
+    assert.equal(events[0].type, "reset");
+  });
+
+  it("off() removes a listener", () => {
+    const events: StoreChangeEvent[] = [];
+    const listener = (e: StoreChangeEvent) => events.push(e);
+    store.on("change", listener);
+    store.resetAll();
+    assert.equal(events.length, 1);
+
+    store.off("change", listener);
+    store.resetAll();
+    assert.equal(events.length, 1); // no new event
   });
 });

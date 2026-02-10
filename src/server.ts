@@ -32,7 +32,7 @@ const proxyServer = http.createServer(
 );
 
 const htmlUI = loadHtmlUI(__dirname);
-const webUIServer = http.createServer(createWebUIHandler(store, htmlUI));
+const webUIServer = http.createServer(createWebUIHandler(store, htmlUI, __dirname));
 
 proxyServer.listen(4040, config.bindHost, () => {
   console.log(
