@@ -255,17 +255,71 @@
               },
               "required": ["tokens_added_this_turn", "cumulative_tokens", "compaction_detected"],
               "additionalProperties": false
+            },
+            "security": {
+              "type": "object",
+              "properties": {
+                "alerts": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "message_index": { "type": "number" },
+                      "role": { "type": "string" },
+                      "tool_name": {
+                        "oneOf": [
+                          { "type": "string" },
+                          { "type": "null" }
+                        ]
+                      },
+                      "severity": {
+                        "type": "string",
+                        "enum": ["high", "medium", "info"]
+                      },
+                      "pattern": { "type": "string" },
+                      "match": { "type": "string" },
+                      "offset": { "type": "number" },
+                      "length": { "type": "number" }
+                    },
+                    "required": ["message_index", "role", "tool_name", "severity", "pattern", "match", "offset", "length"],
+                    "additionalProperties": false
+                  }
+                },
+                "summary": {
+                  "type": "object",
+                  "properties": {
+                    "high": { "type": "number" },
+                    "medium": { "type": "number" },
+                    "info": { "type": "number" }
+                  },
+                  "required": ["high", "medium", "info"],
+                  "additionalProperties": false
+                }
+              },
+              "required": ["alerts", "summary"],
+              "additionalProperties": false
             }
           },
-          "required": ["window_size", "utilization", "system_tokens", "tools_tokens", "messages_tokens", "composition", "growth"],
+          "required": ["window_size", "utilization", "system_tokens", "tools_tokens", "messages_tokens", "composition", "growth", "security"],
           "additionalProperties": false
         },
 
         "raw": {
           "type": "object",
           "properties": {
-            "request_body": { "type": "null" },
-            "response_body": { "type": "null" }
+            "request_body": {
+              "oneOf": [
+                { "type": "object" },
+                { "type": "null" }
+              ]
+            },
+            "response_body": {
+              "oneOf": [
+                { "type": "object" },
+                { "type": "string" },
+                { "type": "null" }
+              ]
+            }
           },
           "required": ["request_body", "response_body"],
           "additionalProperties": false

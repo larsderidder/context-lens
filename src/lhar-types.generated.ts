@@ -134,10 +134,34 @@ export interface LharRecord {
       cumulative_tokens: number;
       compaction_detected: boolean;
     };
+    security: {
+      alerts: {
+        message_index: number;
+        role: string;
+        tool_name: string | null;
+        severity: "high" | "medium" | "info";
+        pattern: string;
+        match: string;
+        offset: number;
+        length: number;
+      }[];
+      summary: {
+        high: number;
+        medium: number;
+        info: number;
+      };
+    };
   };
   raw: {
-    request_body: null;
-    response_body: null;
+    request_body: {
+      [k: string]: unknown;
+    } | null;
+    response_body:
+      | {
+          [k: string]: unknown;
+        }
+      | string
+      | null;
   };
 }
 /**
