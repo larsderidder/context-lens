@@ -4,9 +4,9 @@
 [![CI](https://github.com/larsderidder/context-lens/actions/workflows/ci.yml/badge.svg)](https://github.com/larsderidder/context-lens/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/context-lens)](https://www.npmjs.com/package/context-lens)
 
-Context window visualizer for LLM coding tools. Sits between your tool and the API as a proxy, captures every request, and gives you a web UI to explore what's actually in the context window: composition treemaps, turn-by-turn diffs, cost tracking, and automatic findings.
+See what's actually filling your context window. Context Lens is a local proxy that captures LLM API calls from your coding tools and shows you a composition breakdown: what percentage is system prompts, tool definitions, conversation history, tool results, thinking blocks. It answers the question every developer asks: "why is this session so expensive?"
 
-Zero dependencies. Works with Claude Code, Codex, Gemini CLI, Aider, Kimi, Pi, and anything else that talks to OpenAI/Anthropic/Google APIs.
+Works with Claude Code, Codex, Gemini CLI, Aider, Pi, and anything else that talks to OpenAI/Anthropic/Google APIs. No code changes needed.
 
 ![Context Lens UI](screenshot-overview.png)
 

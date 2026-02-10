@@ -33,6 +33,9 @@ design-docs/
 _archive
 testdata
 
+# Reference repos (cloned for study, not shipped)
+reference/
+
 # Local tool state
 .claude/
 .aider*
