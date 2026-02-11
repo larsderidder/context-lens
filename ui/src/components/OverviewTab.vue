@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { hierarchy, treemap as d3Treemap } from 'd3-hierarchy'
 import { useSessionStore } from '@/stores/session'
 import { useExpandable } from '@/composables/useExpandable'
 import { fmtTokens, fmtCost, fmtPct, fmtDuration, healthColor, shortModel, modelColorClass } from '@/utils/format'
-import { classifyEntries, extractCallSummary, CATEGORY_META, SIMPLE_GROUPS, SIMPLE_META } from '@/utils/messages'
+import { classifyEntries, classifyMessageRole, extractCallSummary, CATEGORY_META, SIMPLE_GROUPS, SIMPLE_META, buildToolNameMap } from '@/utils/messages'
 import { computeRecommendations } from '@/utils/recommendations'
 import type { ProjectedEntry } from '@/api-types'
 
@@ -13,6 +14,7 @@ const { isExpanded, toggle } = useExpandable()
 const entry = computed(() => store.selectedEntry)
 const session = computed(() => store.selectedSession)
 const treemapMode = ref<'detailed' | 'simple'>('detailed')
+const treemapDrillKey = ref<string | null>(null)
 
 const utilization = computed(() => {
   const e = entry.value
@@ -149,6 +151,121 @@ const simpleComposition = computed((): { key: string; label: string; color: stri
   return result
 })
 
+interface TreemapNode {
+  key: string
+  label: string
+  color: string
+  tokens: number
+  category?: string
+  toolName?: string
+}
+
+interface TreemapLayoutNode extends TreemapNode {
+  x: number
+  y: number
+  w: number
+  h: number
+  pct: number
+}
+
+interface TreemapHierarchyDatum extends TreemapNode {
+  children?: TreemapHierarchyDatum[]
+}
+
+const topLevelTreemapNodes = computed((): TreemapNode[] => {
+  const e = entry.value
+  if (!e) return []
+  return e.composition
+    .filter((item) => item.tokens > 0)
+    .map((item) => ({
+      key: item.category,
+      label: CATEGORY_META[item.category]?.label ?? item.category,
+      color: CATEGORY_META[item.category]?.color ?? '#4b5563',
+      tokens: item.tokens,
+      category: item.category,
+    }))
+})
+
+function toolResultColor(index: number): string {
+  const palette = ['#10b981', '#34d399', '#14b8a6', '#2dd4bf', '#059669', '#06b6d4', '#0ea5e9']
+  return palette[index % palette.length]
+}
+
+const toolResultTreemapNodes = computed((): TreemapNode[] => {
+  const e = entry.value
+  if (!e) return []
+  const msgs = e.contextInfo.messages || []
+  const toolNameMap = buildToolNameMap(msgs)
+  const toolTokens = new Map<string, number>()
+
+  for (const msg of msgs) {
+    if (classifyMessageRole(msg) !== 'tool_results') continue
+    const blocks = (msg.contentBlocks || []).filter((block) => block.type === 'tool_result')
+    if (blocks.length === 0) continue
+    const split = (msg.tokens || 0) / blocks.length
+    for (const block of blocks) {
+      const toolId = block.tool_use_id || 'unknown'
+      const toolName = toolNameMap[toolId] || `tool:${toolId.slice(0, 8)}`
+      toolTokens.set(toolName, (toolTokens.get(toolName) || 0) + split)
+    }
+  }
+
+  return Array.from(toolTokens.entries())
+    .sort((a, b) => b[1] - a[1])
+    .map(([tool, tokens], index) => ({
+      key: `tool-${tool}-${index}`,
+      label: tool,
+      color: toolResultColor(index),
+      tokens: Math.max(1, Math.round(tokens)),
+      category: 'tool_results',
+      toolName: tool,
+    }))
+})
+
+const activeDetailedTreemapNodes = computed((): TreemapNode[] => {
+  if (treemapDrillKey.value === 'tool_results' && toolResultTreemapNodes.value.length > 0) {
+    return toolResultTreemapNodes.value
+  }
+  return topLevelTreemapNodes.value
+})
+
+const detailedLegendNodes = computed(() => activeDetailedTreemapNodes.value.slice(0, 8))
+
+function buildTreemapLayout(nodes: TreemapNode[]): TreemapLayoutNode[] {
+  if (nodes.length === 0) return []
+  const total = nodes.reduce((sum, node) => sum + node.tokens, 0)
+  const root = hierarchy<TreemapHierarchyDatum>({
+    key: 'root',
+    label: 'root',
+    color: '#000000',
+    tokens: 0,
+    children: nodes,
+  }).sum((node) => (node.children && node.children.length > 0 ? 0 : Math.max(0, node.tokens || 0)))
+
+  const laidOut = d3Treemap<TreemapHierarchyDatum>()
+    .size([100, 100])
+    .paddingInner(1)
+    .round(true)(root)
+
+  return laidOut.leaves().map((leaf) => {
+    const node = leaf.data
+    return {
+      key: node.key,
+      label: node.label,
+      color: node.color,
+      tokens: node.tokens,
+      category: node.category,
+      x: leaf.x0,
+      y: leaf.y0,
+      w: leaf.x1 - leaf.x0,
+      h: leaf.y1 - leaf.y0,
+      pct: total > 0 ? (node.tokens / total) * 100 : 0,
+    }
+  })
+}
+
+const detailedTreemapLayout = computed(() => buildTreemapLayout(activeDetailedTreemapNodes.value))
+
 const recommendations = computed(() => {
   const e = entry.value
   if (!e || !session.value) return []
@@ -227,6 +344,58 @@ function openNarrativeTarget(target: 'messages' | 'timeline') {
   store.setInspectorTab(target)
 }
 
+function jumpToMessagesCategory(category: string) {
+  store.setInspectorTab('messages')
+  store.focusMessageCategory(category)
+}
+
+function jumpToMessagesTool(toolName: string) {
+  store.setInspectorTab('messages')
+  store.focusMessageTool('tool_results', toolName)
+}
+
+function handleDetailedTreemapItemClick(item: TreemapLayoutNode) {
+  if (treemapDrillKey.value === null && item.category === 'tool_results' && toolResultTreemapNodes.value.length > 1) {
+    treemapDrillKey.value = 'tool_results'
+    return
+  }
+  if (treemapDrillKey.value === 'tool_results' && item.toolName) {
+    jumpToMessagesTool(item.toolName)
+    return
+  }
+  jumpToMessagesCategory(item.category || 'tool_results')
+}
+
+function onSimpleTreemapClick(groupKey: string) {
+  const e = entry.value
+  if (!e) return
+  const cats = SIMPLE_GROUPS[groupKey] || []
+  if (cats.length === 0) return
+
+  let target = cats[0]
+  let maxTokens = -1
+  for (const cat of cats) {
+    const found = e.composition.find((item) => item.category === cat)
+    const tok = found?.tokens ?? 0
+    if (tok > maxTokens) {
+      maxTokens = tok
+      target = cat
+    }
+  }
+  jumpToMessagesCategory(target)
+}
+
+function resetTreemapDrill() {
+  treemapDrillKey.value = null
+}
+
+watch(
+  () => entry.value?.id,
+  () => {
+    treemapDrillKey.value = null
+  },
+)
+
 function modelBarColor(model: string): string {
   if (/opus/i.test(model)) return '#fb923c'
   if (/sonnet/i.test(model)) return '#60a5fa'
@@ -239,6 +408,24 @@ function barPct(tokens: number): number {
   return agentBreakdown.value.totalTok > 0
     ? Math.round(tokens / agentBreakdown.value.totalTok * 100)
     : 0
+}
+
+function auditTooltip(audit: { id: string; name: string; description: string }): string {
+  const isGrowthAudit = /growth/i.test(audit.id) || /growth/i.test(audit.name)
+  if (!isGrowthAudit) return audit.description
+
+  const desc = audit.description || ''
+  if (!/first turn/i.test(desc) || turnNum.value <= 1) return desc
+
+  const curr = entry.value
+  const prev = previousMainEntry.value
+  if (!curr || !prev || !curr.contextLimit) return desc
+
+  const delta = curr.contextInfo.totalTokens - prev.contextInfo.totalTokens
+  const abs = Math.abs(delta)
+  const pctOfLimit = (abs / curr.contextLimit) * 100
+  const direction = delta >= 0 ? 'grew' : 'shrunk'
+  return `Compared with previous main turn, context ${direction} by ${fmtTokens(abs)} (${pctOfLimit.toFixed(1)}% of limit).`
 }
 </script>
 
@@ -328,6 +515,13 @@ function barPct(tokens: number): number {
       <div class="panel-head">
         <span class="panel-title">Composition</span>
         <span class="panel-sub">Turn {{ turnNum }} · {{ fmtTokens(entry.composition.reduce((s, c) => s + c.tokens, 0)) }}</span>
+        <button
+          v-if="treemapMode === 'detailed' && treemapDrillKey"
+          class="treemap-back"
+          @click="resetTreemapDrill"
+        >
+          Back to categories
+        </button>
         <div class="mode-toggle">
           <button :class="{ on: treemapMode === 'detailed' }" @click="treemapMode = 'detailed'">Detail</button>
           <button :class="{ on: treemapMode === 'simple' }" @click="treemapMode = 'simple'">Simple</button>
@@ -336,16 +530,25 @@ function barPct(tokens: number): number {
       <div class="panel-body">
         <!-- Detailed -->
         <div v-if="treemapMode === 'detailed'" class="treemap">
-          <div
-            v-for="c in entry.composition" :key="c.category"
-            class="tm-block" :class="`cat-${c.category}`" :style="{ flex: c.tokens }"
-            v-tooltip="`${(CATEGORY_META[c.category] || { label: c.category }).label}: ${c.tokens.toLocaleString()} (${c.pct.toFixed(1)}%)`"
+          <button
+            v-for="item in detailedTreemapLayout"
+            :key="item.key"
+            class="tm-block tm-block-2d"
+            :style="{
+              left: item.x + '%',
+              top: item.y + '%',
+              width: item.w + '%',
+              height: item.h + '%',
+              background: item.color,
+            }"
+            v-tooltip="`${item.label}: ${item.tokens.toLocaleString()} (${item.pct.toFixed(1)}%)`"
+            @click="handleDetailedTreemapItemClick(item)"
           >
-            <template v-if="c.pct >= 4">
-              <span class="tm-label">{{ (CATEGORY_META[c.category] || { label: c.category }).label }}</span>
-              <span class="tm-val">{{ fmtTokens(c.tokens) }}</span>
+            <template v-if="item.w >= 14 && item.h >= 12">
+              <span class="tm-label">{{ item.label }}</span>
+              <span class="tm-val">{{ fmtTokens(item.tokens) }}</span>
             </template>
-          </div>
+          </button>
         </div>
         <!-- Simple -->
         <div v-else class="treemap">
@@ -353,6 +556,7 @@ function barPct(tokens: number): number {
             v-for="g in simpleComposition" :key="g.key"
             class="tm-block" :style="{ flex: g.tokens, background: g.color }"
             v-tooltip="`${g.label}: ${g.tokens.toLocaleString()}`"
+            @click="onSimpleTreemapClick(g.key)"
           >
             <span class="tm-label">{{ g.label }}</span>
             <span class="tm-val">{{ fmtTokens(g.tokens) }}</span>
@@ -361,9 +565,15 @@ function barPct(tokens: number): number {
         <!-- Legend -->
         <div class="legend">
           <template v-if="treemapMode === 'detailed'">
-            <span v-for="c in entry.composition" :key="c.category" class="legend-item">
-              <span class="legend-dot" :class="`cat-${c.category}`" />
-              {{ (CATEGORY_META[c.category] || { label: c.category }).label }}
+            <span v-for="item in detailedLegendNodes" :key="`legend-${item.key}`" class="legend-item">
+              <span class="legend-dot" :style="{ background: item.color }" />
+              {{ item.label }}
+            </span>
+            <span
+              v-if="activeDetailedTreemapNodes.length > detailedLegendNodes.length"
+              class="legend-item"
+            >
+              +{{ activeDetailedTreemapNodes.length - detailedLegendNodes.length }} more
             </span>
           </template>
           <template v-else>
@@ -478,7 +688,7 @@ function barPct(tokens: number): number {
       <div v-if="entry.healthScore" class="audit-row">
         <span v-for="audit in entry.healthScore.audits" :key="audit.id" class="audit-chip"
           :class="audit.score >= 90 ? 'audit-good' : audit.score >= 50 ? 'audit-warn' : 'audit-bad'"
-          v-tooltip="audit.description">
+          v-tooltip="auditTooltip(audit)">
           {{ audit.name }} <b>{{ audit.score }}</b>
         </span>
       </div>
@@ -685,12 +895,33 @@ function barPct(tokens: number): number {
   }
 }
 
+.treemap-back {
+  font-size: var(--text-xs);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-dim);
+  color: var(--text-secondary);
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+
+  &:hover {
+    border-color: var(--border-mid);
+    color: var(--text-primary);
+    background: var(--bg-hover);
+  }
+}
+
 // ═══ Treemap ═══
 .treemap {
-  display: flex;
-  height: 56px;
+  height: 78px;
   border-radius: var(--radius-sm);
   overflow: hidden;
+  position: relative;
+  background: var(--bg-raised);
+}
+
+.treemap:not(.treemap-2d) {
+  display: flex;
   gap: 1px;
 }
 
@@ -704,6 +935,16 @@ function barPct(tokens: number): number {
   min-width: 0;
 
   &:hover { filter: brightness(1.25); }
+}
+
+.tm-block-2d {
+  position: absolute;
+  border: none;
+  padding: 2px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
 }
 
 .tm-label {

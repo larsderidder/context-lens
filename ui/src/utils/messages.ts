@@ -141,13 +141,15 @@ export function groupMessagesByCategory(msgs: ParsedMessage[]): {
 }[] {
   const categories = new Map<string, { items: { msg: ParsedMessage; origIdx: number }[]; tokens: number }>()
 
-  msgs.forEach((msg, i) => {
+  // Newest-first within each category for faster access to recent activity.
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const msg = msgs[i]
     const cat = classifyMessageRole(msg)
     if (!categories.has(cat)) categories.set(cat, { items: [], tokens: 0 })
     const group = categories.get(cat)!
     group.items.push({ msg, origIdx: i })
     group.tokens += msg.tokens || 0
-  })
+  }
 
   // Build ordered list
   const order = [...CATEGORY_ORDER]

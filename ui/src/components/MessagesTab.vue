@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Splitpanes, Pane } from 'splitpanes'
 import { useSessionStore } from '@/stores/session'
 import { useExpandable } from '@/composables/useExpandable'
 import { fmtTokens } from '@/utils/format'
-import { groupMessagesByCategory, buildToolNameMap, extractPreview, CATEGORY_META } from '@/utils/messages'
+import { groupMessagesByCategory, buildToolNameMap, extractPreview, CATEGORY_META, classifyMessageRole } from '@/utils/messages'
 import type { ParsedMessage } from '@/api-types'
 import DetailPane from '@/components/DetailPane.vue'
 
@@ -12,11 +12,13 @@ const messageScrollByKey = new Map<string, number>()
 
 const store = useSessionStore()
 const entry = computed(() => store.selectedEntry)
-const { isExpanded, toggle } = useExpandable()
+const { isExpanded, toggle, expand } = useExpandable()
 const msgListEl = ref<HTMLElement | null>(null)
 
 const detailOpen = ref(false)
 const detailIndex = ref(0)
+const selectedMsgKey = ref<string | null>(null)
+const selectedMsgOrdinal = ref(1)
 
 const toolNameMap = computed(() => {
   if (!entry.value) return {}
@@ -60,14 +62,89 @@ const heaviestMessages = computed(() => {
 })
 
 const messageScrollKey = computed(() => `${store.selectedSessionId || '__no_session__'}:messages`)
+const focusedToolName = computed(() => store.messageFocusTool)
+const focusedCategory = computed(() => store.messageFocusCategory)
+
+const focusCategory = computed(() => {
+  const requested = store.messageFocusCategory
+  if (!requested) return null
+
+  const present = new Set(categorized.value.map((g) => g.category))
+  if (present.has(requested)) return requested
+
+  const fallbackOrder: Record<string, string[]> = {
+    assistant_text: ['tool_calls', 'thinking', 'assistant_text', 'user_text'],
+    tool_definitions: ['tool_calls', 'tool_results', 'system_injections'],
+    system_prompt: ['system_injections', 'assistant_text', 'user_text'],
+    images: ['user_text', 'assistant_text', 'tool_results'],
+    cache_markers: ['tool_results', 'assistant_text', 'user_text'],
+    other: ['assistant_text', 'user_text', 'tool_results'],
+  }
+
+  for (const candidate of fallbackOrder[requested] || []) {
+    if (present.has(candidate)) return candidate
+  }
+  return categorized.value[0]?.category ?? null
+})
+
+const hasCategoryFallback = computed(() => {
+  return !!focusedCategory.value && !!focusCategory.value && focusedCategory.value !== focusCategory.value
+})
 
 function openDetail(flatIdx: number) {
   detailIndex.value = flatIdx
+  syncSelectionSignature(flatIdx)
   detailOpen.value = true
 }
 
 function closeDetail() {
   detailOpen.value = false
+}
+
+function messageKey(msg: ParsedMessage): string {
+  const first = (msg.contentBlocks || [])[0]
+  if (!first) return `${msg.role}|${msg.tokens || 0}|${msg.content?.slice(0, 160) || ''}`
+  if (first.type === 'tool_result') {
+    const content = typeof first.content === 'string' ? first.content : JSON.stringify(first.content || '')
+    return `${msg.role}|${msg.tokens || 0}|tool_result|${first.tool_use_id || ''}|${content.slice(0, 160)}`
+  }
+  if (first.type === 'tool_use') {
+    return `${msg.role}|${msg.tokens || 0}|tool_use|${first.id || ''}|${first.name || ''}|${JSON.stringify(first.input || {}).slice(0, 120)}`
+  }
+  const anyFirst = first as unknown as Record<string, unknown>
+  const text = String((anyFirst.text as string) || (anyFirst.thinking as string) || '').slice(0, 160)
+  return `${msg.role}|${msg.tokens || 0}|${String(anyFirst.type || 'other')}|${text}`
+}
+
+function syncSelectionSignature(index: number) {
+  const item = flatMessages.value[index]
+  if (!item) return
+  const key = messageKey(item.msg)
+  selectedMsgKey.value = key
+
+  let ordinal = 0
+  for (let i = 0; i <= index; i++) {
+    if (messageKey(flatMessages.value[i].msg) === key) ordinal += 1
+  }
+  selectedMsgOrdinal.value = Math.max(1, ordinal)
+}
+
+function findIndexBySelectionSignature(): number {
+  const key = selectedMsgKey.value
+  if (!key) return -1
+  let seen = 0
+  for (let i = 0; i < flatMessages.value.length; i++) {
+    if (messageKey(flatMessages.value[i].msg) === key) {
+      seen += 1
+      if (seen === selectedMsgOrdinal.value) return i
+    }
+  }
+  return -1
+}
+
+function onDetailNavigate(idx: number) {
+  detailIndex.value = idx
+  syncSelectionSignature(idx)
 }
 
 function flatIndexOf(catIdx: number, itemIdx: number): number {
@@ -82,6 +159,62 @@ function flatIndexOf(catIdx: number, itemIdx: number): number {
 function openDetailByOrigIndex(origIdx: number) {
   const flatIdx = flatMessages.value.findIndex((item) => item.origIdx === origIdx)
   if (flatIdx >= 0) openDetail(flatIdx)
+}
+
+function toolResultName(msg: ParsedMessage): string | null {
+  if (classifyMessageRole(msg) !== 'tool_results') return null
+  for (const block of msg.contentBlocks || []) {
+    if (block.type === 'tool_result') {
+      return (block.tool_use_id && toolNameMap.value[block.tool_use_id]) || null
+    }
+  }
+  return null
+}
+
+function rowClassForToolFocus(msg: ParsedMessage): Record<string, boolean> {
+  const focused = focusedToolName.value
+  if (!focused) return {}
+  const tname = toolResultName(msg)
+  if (!tname) return { 'tool-muted': true }
+  const left = tname.trim().toLowerCase()
+  const right = focused.trim().toLowerCase()
+  return {
+    'tool-focused': left === right,
+    'tool-muted': left !== right,
+  }
+}
+
+async function applyMessageFocus() {
+  const category = focusCategory.value
+  if (!category) return
+
+  let root: HTMLElement | null = null
+  for (let attempt = 0; attempt < 4; attempt++) {
+    await nextTick()
+    root = msgListEl.value
+    if (!root) continue
+
+    expand(category)
+    await nextTick()
+    const groupEl = root.querySelector(`[data-category="${category}"]`) as HTMLElement | null
+    if (groupEl) {
+      groupEl.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      break
+    }
+  }
+  if (!root) return
+
+  const focusTool = store.messageFocusTool
+  if (focusTool) {
+    const rows = Array.from(root.querySelectorAll('.msg-row')) as HTMLElement[]
+    const target = focusTool.trim().toLowerCase()
+    const firstMatch = rows.find((row) => (row.getAttribute('data-tool-name') || '').trim().toLowerCase() === target)
+    if (firstMatch) firstMatch.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  }
+}
+
+function clearToolFilter() {
+  store.focusMessageCategory(focusCategory.value || store.messageFocusCategory || 'tool_results')
 }
 
 function handleMsgListScroll() {
@@ -111,6 +244,50 @@ onBeforeUnmount(() => {
   if (!msgListEl.value) return
   messageScrollByKey.set(messageScrollKey.value, msgListEl.value.scrollTop)
 })
+
+watch(
+  () => store.messageFocusToken,
+  async () => { await applyMessageFocus() },
+  { immediate: true },
+)
+
+watch(
+  () => store.inspectorTab,
+  async (tab) => {
+    if (tab === 'messages') await applyMessageFocus()
+  },
+)
+
+watch(
+  () => categorized.value.length,
+  async () => {
+    if (store.inspectorTab === 'messages' && store.messageFocusCategory) {
+      await applyMessageFocus()
+    }
+  },
+)
+
+onMounted(async () => {
+  if (store.inspectorTab === 'messages' && store.messageFocusCategory) {
+    await applyMessageFocus()
+  }
+})
+
+watch(
+  flatMessages,
+  () => {
+    if (!detailOpen.value) return
+    const idx = findIndexBySelectionSignature()
+    if (idx >= 0 && idx !== detailIndex.value) {
+      detailIndex.value = idx
+      return
+    }
+    if (detailIndex.value >= flatMessages.value.length) {
+      detailIndex.value = Math.max(0, flatMessages.value.length - 1)
+      syncSelectionSignature(detailIndex.value)
+    }
+  },
+)
 </script>
 
 <template>
@@ -135,10 +312,30 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <div v-for="(group, catIdx) in categorized" :key="group.category" class="msg-group">
+          <div v-if="focusedToolName || hasCategoryFallback" class="focus-strip">
+            <span v-if="focusedToolName">
+              Filtered tool: <b>{{ focusedToolName }}</b>
+            </span>
+            <span v-if="hasCategoryFallback">
+              Showing <b>{{ (CATEGORY_META[focusCategory || ''] || { label: focusCategory }).label }}</b>
+              for <b>{{ (CATEGORY_META[focusedCategory || ''] || { label: focusedCategory }).label }}</b>.
+            </span>
+            <button v-if="focusedToolName" class="focus-clear" @click.stop="clearToolFilter">Show all</button>
+          </div>
+
+          <div class="scope-note">
+            Showing messages from the selected call context (newest first).
+          </div>
+
+          <div
+            v-for="(group, catIdx) in categorized"
+            :key="group.category"
+            class="msg-group"
+            :data-category="group.category"
+          >
             <!-- Group header -->
             <div class="group-head" @click="toggle(group.category)">
-              <span class="group-arrow">{{ isExpanded(group.category) ? '▾' : '▸' }}</span>
+              <span class="group-arrow">{{ (isExpanded(group.category) || focusCategory === group.category) ? '▾' : '▸' }}</span>
               <span class="group-dot" :style="{ background: (CATEGORY_META[group.category] || { color: '#4b5563' }).color }" />
               <span class="group-name">{{ (CATEGORY_META[group.category] || { label: group.category }).label }}</span>
               <span class="group-stats">
@@ -160,12 +357,13 @@ onBeforeUnmount(() => {
             </div>
 
             <!-- Messages -->
-            <div class="group-items" :class="{ open: isExpanded(group.category) }">
+            <div class="group-items" :class="{ open: isExpanded(group.category) || focusCategory === group.category }">
               <div
                 v-for="(item, itemIdx) in group.items"
                 :key="item.origIdx"
                 class="msg-row"
-                :class="{ selected: detailOpen && flatMessages[detailIndex]?.origIdx === item.origIdx }"
+                :class="[rowClassForToolFocus(item.msg), { selected: detailOpen && flatMessages[detailIndex]?.origIdx === item.origIdx }]"
+                :data-tool-name="toolResultName(item.msg) || ''"
                 @click="openDetail(flatIndexOf(catIdx, itemIdx))"
               >
                 <span class="msg-role">{{ item.msg.role === 'user' ? '›' : item.msg.role === 'assistant' ? '‹' : '·' }}</span>
@@ -182,7 +380,7 @@ onBeforeUnmount(() => {
           :messages="flatMessages"
           :selected-index="detailIndex"
           @close="closeDetail"
-          @navigate="(idx: number) => detailIndex = idx"
+          @navigate="onDetailNavigate"
         />
       </Pane>
     </Splitpanes>
@@ -225,6 +423,47 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+}
+
+.focus-strip {
+  margin: 0 var(--space-4) var(--space-2);
+  padding: 6px 8px;
+  border: 1px solid var(--border-mid);
+  border-radius: var(--radius-sm);
+  background: rgba(22, 34, 56, 0.72);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-dim);
+  font-size: var(--text-sm);
+
+  b {
+    color: var(--text-secondary);
+    font-weight: 600;
+  }
+}
+
+.focus-clear {
+  margin-left: auto;
+  border: 1px solid var(--border-dim);
+  background: var(--bg-raised);
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  padding: 3px 8px;
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+
+  &:hover {
+    border-color: var(--border-mid);
+    background: var(--bg-hover);
+  }
+}
+
+.scope-note {
+  margin: 0 var(--space-4) var(--space-2);
+  color: var(--text-ghost);
+  font-size: var(--text-xs);
 }
 
 .heavy-action {
@@ -352,6 +591,15 @@ onBeforeUnmount(() => {
   border-bottom: 1px solid rgba(28, 37, 53, 0.3);
 
   &:last-child { border-bottom: none; }
+
+  &.tool-focused {
+    background: rgba(52, 211, 153, 0.16);
+    border-color: rgba(52, 211, 153, 0.36);
+  }
+
+  &.tool-muted {
+    opacity: 0.28;
+  }
 }
 
 .msg-role {

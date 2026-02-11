@@ -39,6 +39,9 @@ export const useSessionStore = defineStore('session', () => {
   const selectedTurnIndex = ref<number>(-1) // -1 = latest
   const sourceFilter = ref<string>('') // '' = all sources
   const density = ref<DensityMode>('comfortable')
+  const messageFocusCategory = ref<string | null>(null)
+  const messageFocusToken = ref(0)
+  const messageFocusTool = ref<string | null>(null)
 
   // --- Backwards-compatible computed ---
   // Components that use `store.conversations` get summaries cast as ConversationGroups
@@ -212,6 +215,18 @@ export const useSessionStore = defineStore('session', () => {
     sourceFilter.value = source
   }
 
+  function focusMessageCategory(category: string) {
+    messageFocusCategory.value = category
+    messageFocusTool.value = null
+    messageFocusToken.value += 1
+  }
+
+  function focusMessageTool(category: string, toolName: string) {
+    messageFocusCategory.value = category
+    messageFocusTool.value = toolName
+    messageFocusToken.value += 1
+  }
+
   async function deleteSession(id: string) {
     try {
       await apiDeleteConversation(id)
@@ -286,6 +301,9 @@ export const useSessionStore = defineStore('session', () => {
     selectedTurnIndex,
     sourceFilter,
     density,
+    messageFocusCategory,
+    messageFocusToken,
+    messageFocusTool,
 
     // Computed
     filteredConversations,
@@ -305,6 +323,8 @@ export const useSessionStore = defineStore('session', () => {
     setView,
     setInspectorTab,
     setSourceFilter,
+    focusMessageCategory,
+    focusMessageTool,
     initializeDensity,
     setDensity,
     deleteSession,
