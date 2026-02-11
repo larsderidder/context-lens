@@ -177,7 +177,7 @@ function classifyBlock(
     return;
   }
   if (type === "image" || type === "image_url") {
-    add("images", estimateTokens(block));
+    add("images", estimateTokens(block));  // estimateTokens handles image blocks with fixed estimate
     return;
   }
 
