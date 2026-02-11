@@ -33,6 +33,10 @@ design-docs/
 _archive
 testdata
 
+# UI build output and deps
+ui/dist/
+ui/node_modules/
+
 # Reference repos (cloned for study, not shipped)
 reference/
 
@@ -40,3 +44,4 @@ reference/
 .claude/
 .aider*
 .idea/
+.pi/

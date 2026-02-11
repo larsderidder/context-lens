@@ -10,14 +10,16 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
+          cache: pnpm
           registry-url: https://registry.npmjs.org
-      - run: npm install -g npm@latest
-      - run: npm ci
-      - run: npm run build
-      - run: npx biome check .
-      - run: npm test
-      - run: npm publish --provenance --access public
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm exec biome check .
+      - run: pnpm test
+      - run: pnpm publish --provenance --access public --no-git-checks

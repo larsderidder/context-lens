@@ -233,7 +233,7 @@ The machine-readable source of truth is `schema/lhar.schema.json` (JSON Schema d
 
 ```bash
 # TypeScript
-npm install -g json-schema-to-typescript
+pnpm add -g json-schema-to-typescript
 json-schema-to-typescript schema/lhar.schema.json -o lhar-types.ts
 
 # Python (with dataclasses)

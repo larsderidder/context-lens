@@ -3,12 +3,12 @@
 ## Setup
 
 ```bash
-npm install
-npm run build
-npm test
+pnpm install
+pnpm build
+pnpm test
 ```
 
-`npm run dev` starts the TypeScript compiler in watch mode.
+`pnpm dev` starts the TypeScript compiler in watch mode.
 
 ## Architecture
 
@@ -29,8 +29,8 @@ Add tests in `test/` for any new detection logic.
 ## Testing
 
 ```bash
-npm test              # build + run all tests (node:test)
-npm run build:test    # build tests only
+pnpm test              # build + run all tests (node:test)
+pnpm build:test        # build tests only
 ```
 
-For manual testing, `npm start` launches the proxy and web UI, then point your tool at `http://localhost:4040`.
+For manual testing, `pnpm start` launches the proxy and web UI, then point your tool at `http://localhost:4040`.

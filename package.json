@@ -10,16 +10,16 @@
   "scripts": {
     "generate:types": "json2ts schema/lhar.schema.json src/lhar-types.generated.ts --unreachableDefinitions",
     "generate:version": "node -e \"const v=JSON.parse(require('node:fs').readFileSync('package.json','utf8')).version;require('node:fs').writeFileSync('src/version.generated.ts','export const VERSION = '+JSON.stringify(v)+';\\n')\"",
-    "build": "npm run generate:version && npm run generate:types && tsc",
+    "build": "pnpm run generate:version && pnpm run generate:types && tsc",
     "clean:test": "node -e \"require('node:fs').rmSync('dist-test', { recursive: true, force: true })\"",
-    "build:test": "npm run generate:version && npm run generate:types && npm run clean:test && tsc -p tsconfig.test.json",
+    "build:test": "pnpm run generate:version && pnpm run generate:types && pnpm run clean:test && tsc -p tsconfig.test.json",
     "start": "node dist/server.js",
-    "test": "npm run build:test && node --test --experimental-test-isolation=none 'dist-test/test/**/*.test.js'",
+    "test": "pnpm run build:test && node --test --experimental-test-isolation=none 'dist-test/test/**/*.test.js'",
     "dev": "tsc --watch",
     "postbuild": "chmod +x dist/cli.js",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "pnpm run build"
   },
   "files": [
     "dist/",

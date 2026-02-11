@@ -13,6 +13,12 @@ Works with Claude Code, Codex, Gemini CLI, Aider, Pi, and anything else that tal
 ## Installation
 
 ```bash
+pnpm add -g context-lens
+```
+
+Or with npm:
+
+```bash
 npm install -g context-lens
 ```
 
@@ -75,7 +81,7 @@ This starts the proxy (port 4040), opens the web UI (http://localhost:4041), set
 ## Manual Mode
 
 ```bash
-npm start
+pnpm start
 # Port 4040 = proxy, port 4041 = web UI
 
 ANTHROPIC_BASE_URL=http://localhost:4040 claude "your prompt"
@@ -107,7 +113,7 @@ Pi ignores standard base-URL environment variables, so the CLI wrapper can't red
 }
 ```
 
-Start the proxy (`npm start`), then run Pi normally. No CLI wrapper needed. The config hot-reloads when you switch models via `/model`, but adding new provider overrides requires restarting Pi.
+Start the proxy (`pnpm start`), then run Pi normally. No CLI wrapper needed. The config hot-reloads when you switch models via `/model`, but adding new provider overrides requires restarting Pi.
 
 Tested with: Claude Opus 4.6, Gemini 2.5 Flash (via Gemini CLI subscription), GPT-OSS 120B (via Antigravity). The `openai-codex` provider (ChatGPT subscription) has the same Cloudflare limitation as Codex and is not supported through the reverse proxy.
 
