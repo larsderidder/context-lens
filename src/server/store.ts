@@ -6,6 +6,7 @@ import {
   computeHealthScore,
   detectSource,
   estimateCost,
+  estimateTokens,
   extractConversationLabel,
   extractSessionId,
   extractWorkingDirectory,
@@ -165,6 +166,10 @@ export class Store {
       // Loaded entries are already compact (projectEntry strips heavy data before saving).
       // Do NOT call compactEntry here. It would destroy the preserved response usage data.
       this.backfillHealthScores();
+      const migrated = this.migrateImageTokenCounts();
+      if (migrated > 0) {
+        this.saveState();
+      }
       console.log(
         `Restored ${loadedEntries} entries from ${this.conversations.size} conversations`,
       );
@@ -427,6 +432,66 @@ export class Store {
         turnCount,
       );
     }
+  }
+
+  /**
+   * Recalculate token counts for messages that contain image blocks.
+   *
+   * Before the image token fix, estimateTokens() would stringify base64 image
+   * data, producing millions of phantom tokens. Persisted entries still have
+   * those inflated counts. This migration recalculates from the compacted
+   * contentBlocks (which have no base64 data) using the fixed estimateTokens().
+   */
+  private migrateImageTokenCounts(): number {
+    let migrated = 0;
+    for (const entry of this.capturedRequests) {
+      const ci = entry.contextInfo;
+      let messagesTokens = 0;
+      let changed = false;
+      for (const msg of ci.messages) {
+        if (!msg.contentBlocks || msg.contentBlocks.length === 0) {
+          messagesTokens += msg.tokens;
+          continue;
+        }
+        // Check if any block (or nested content in tool_result) is an image
+        const hasImage = msg.contentBlocks.some((b) => {
+          if (b.type === "image") return true;
+          if (b.type === "tool_result" && Array.isArray(b.content)) {
+            return (b.content as any[]).some(
+              (inner: any) => inner?.type === "image",
+            );
+          }
+          return false;
+        });
+        if (!hasImage) {
+          messagesTokens += msg.tokens;
+          continue;
+        }
+        // Recalculate from compacted contentBlocks (no base64 data)
+        const newTokens = estimateTokens(msg.contentBlocks);
+        if (newTokens < msg.tokens) {
+          msg.tokens = newTokens;
+          changed = true;
+        }
+        messagesTokens += msg.tokens;
+      }
+      if (changed) {
+        ci.messagesTokens = messagesTokens;
+        ci.totalTokens = ci.systemTokens + ci.toolsTokens + ci.messagesTokens;
+        migrated++;
+      } else if (ci.messagesTokens !== messagesTokens) {
+        // Messages with images may have been truncated during compaction,
+        // leaving messagesTokens inflated even though no image blocks remain.
+        // Fix by recalculating from the actual per-message token counts.
+        ci.messagesTokens = messagesTokens;
+        ci.totalTokens = ci.systemTokens + ci.toolsTokens + ci.messagesTokens;
+        migrated++;
+      }
+    }
+    if (migrated > 0) {
+      console.log(`Migrated ${migrated} entries with inflated image token counts`);
+    }
+    return migrated;
   }
 
   private logToDisk(entry: CapturedEntry): void {
