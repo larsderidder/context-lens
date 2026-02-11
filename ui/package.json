@@ -1,0 +1,47 @@
+{
+  "name": "context-lens-ui",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc -b && vite build",
+    "type-check": "vue-tsc --noEmit"
+  },
+  "dependencies": {
+    "vue": "^3.5.13",
+    "pinia": "^2.3.1",
+    "@vueuse/core": "^12.5.0",
+    "splitpanes": "^3.1.5",
+    "floating-vue": "^5.2.2",
+    "markdown-it": "^14.1.0",
+    "shiki": "^3.1.0",
+    "d3-array": "^3.2.4",
+    "d3-hierarchy": "^3.1.2",
+    "d3-scale": "^4.0.2",
+    "d3-shape": "^3.2.0"
+  },
+  "devDependencies": {
+    "vite": "^6.1.0",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "typescript": "^5.7.3",
+    "vue-tsc": "^2.2.0",
+    "sass": "^1.83.4",
+    "unocss": "^66.0.0",
+    "@unocss/preset-icons": "^66.0.0",
+    "@unocss/preset-wind": "^66.0.0",
+    "@iconify-json/carbon": "^1.2.8",
+    "@types/markdown-it": "^14.1.2",
+    "@types/d3-array": "^3.2.1",
+    "@types/d3-hierarchy": "^3.1.7",
+    "@types/d3-scale": "^4.0.8",
+    "@types/d3-shape": "^3.1.6"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@parcel/watcher",
+      "esbuild",
+      "vue-demi"
+    ]
+  }
+}

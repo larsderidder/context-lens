@@ -53,7 +53,7 @@ export function loadServerConfig(baseDir: string): ServerConfig {
     allowTargetOverride,
     dataDir,
     stateFile: path.join(dataDir, "state.jsonl"),
-    maxSessions: 10,
+    maxSessions: 100,
     maxCompactMessages: 60,
     privacy,
   };

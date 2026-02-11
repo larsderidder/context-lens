@@ -1,0 +1,99 @@
+// Design tokens — Context Lens dark theme
+//
+// Typography: System fonts. No external font loading = instant render,
+// no FOUT, works offline. Developers already have good mono fonts.
+// The UI should feel native to the environment, like Langfuse/DevTools.
+
+:root {
+  // ── Typography ──
+  // Sans: system UI stack (same approach as GitHub, Vercel, Langfuse)
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  // Mono: system mono stack — SF Mono on Mac, Cascadia on Windows, etc.
+  --font-mono: 'SF Mono', 'Cascadia Code', 'Fira Code', 'JetBrains Mono', Consolas, 'Liberation Mono', monospace;
+
+  // Type scale (minor third — 1.2)
+  --text-xs: 10px;
+  --text-sm: 11px;
+  --text-base: 13px;
+  --text-md: 15px;
+  --text-lg: 18px;
+  --text-xl: 22px;
+
+  // ── Backgrounds ──
+  // Dark navy-blue. Slightly warmer than pure black.
+  --bg-deep: #0c1017;
+  --bg-field: #101520;
+  --bg-surface: #151b26;
+  --bg-raised: #1c2330;
+  --bg-hover: #212a38;
+  --bg-active: #283344;
+
+  // ── Borders ──
+  --border-dim: #1e2838;
+  --border-mid: #2a3648;
+  --border-bright: #38485e;
+  --border-focus: rgba(91, 156, 245, 0.4);
+
+  // ── Text ──
+  --text-primary: #e2e8f0;
+  --text-secondary: #94a3b8;
+  --text-dim: #64748b;
+  --text-muted: #475569;
+  --text-ghost: #334155;
+
+  // ── Accent colors ──
+  --accent-blue: #5b9cf5;
+  --accent-blue-dim: rgba(91, 156, 245, 0.10);
+  --accent-blue-glow: rgba(91, 156, 245, 0.20);
+
+  --accent-green: #34d399;
+  --accent-green-dim: rgba(52, 211, 153, 0.10);
+
+  --accent-amber: #fbbf24;
+  --accent-amber-dim: rgba(251, 191, 36, 0.10);
+
+  --accent-red: #f87171;
+  --accent-red-dim: rgba(248, 113, 113, 0.10);
+
+  --accent-purple: #a78bfa;
+  --accent-purple-dim: rgba(167, 139, 250, 0.10);
+
+  --accent-pink: #f472b6;
+  --accent-cyan: #22d3ee;
+
+  // ── Shadows ──
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.45);
+
+  // ── Radii ──
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-full: 9999px;
+
+  // ── Spacing ──
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+}
+
+// ── SCSS compile-time vars ──
+$z-sidebar: 10;
+$z-toolbar: 20;
+$z-dropdown: 30;
+$z-overlay: 40;
+$z-detail-panel: 50;
+$z-tooltip: 60;
+
+$bp-sm: 640px;
+$bp-md: 1024px;
+$bp-lg: 1440px;
+
+$transition-fast: 0.12s ease;
+$transition-base: 0.2s ease;
+$transition-slow: 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94);

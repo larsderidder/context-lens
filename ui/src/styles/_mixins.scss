@@ -1,0 +1,80 @@
+// Shared SCSS mixins
+
+@mixin mono-text {
+  font-family: var(--font-mono);
+}
+
+// Explicit sans — body default is sans, but this documents intent
+@mixin sans-text {
+  font-family: var(--font-sans);
+}
+
+@mixin truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@mixin scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-mid) transparent;
+
+  &::-webkit-scrollbar { width: 5px; height: 5px; }
+  &::-webkit-scrollbar-track { background: transparent; }
+  &::-webkit-scrollbar-thumb {
+    background: var(--border-mid);
+    border-radius: 3px;
+    &:hover { background: var(--border-bright); }
+  }
+}
+
+@mixin panel {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+@mixin badge($bg, $color) {
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background: $bg;
+  color: $color;
+  line-height: 1.4;
+}
+
+@mixin focus-ring {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 1px;
+}
+
+// Section heading — sans-serif, small caps feel
+@mixin section-label {
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+
+// Mono readout for stat numbers
+@mixin readout {
+  @include mono-text;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+// Data row hover/active
+@mixin data-row {
+  transition: background 0.1s ease;
+  cursor: pointer;
+
+  &:hover { background: var(--bg-hover); }
+  &.active, &.selected { background: var(--accent-blue-dim); }
+}

@@ -56,14 +56,15 @@ function handleIngest(
   });
 }
 
-function handleRequests(
-  store: Store,
-  _req: http.IncomingMessage,
-  res: http.ServerResponse,
-): void {
+/**
+ * Group captured requests into conversations with agents.
+ * Shared by both full and summary endpoints.
+ */
+function buildConversationGroups(store: Store): {
+  grouped: Map<string, CapturedEntry[]>;
+  ungrouped: CapturedEntry[];
+} {
   const capturedRequests = store.getCapturedRequests();
-  const conversations = store.getConversations();
-
   const grouped = new Map<string, CapturedEntry[]>();
   const ungrouped: CapturedEntry[] = [];
   for (const entry of capturedRequests) {
@@ -75,40 +76,105 @@ function handleRequests(
       ungrouped.push(entry);
     }
   }
-  const convos: ConversationGroup[] = [];
-  for (const [id, entries] of grouped) {
-    const meta = conversations.get(id) || {
-      id,
-      label: "Unknown",
-      source: "unknown",
-      workingDirectory: null,
-      firstSeen: entries[entries.length - 1].timestamp,
-    };
-    const agentMap = new Map<string, CapturedEntry[]>();
-    for (const e of entries) {
-      const ak = e.agentKey || "_default";
-      if (!agentMap.has(ak)) agentMap.set(ak, []);
-      agentMap.get(ak)?.push(e);
-    }
-    const agents: AgentGroup[] = [];
-    for (const [_ak, agentEntries] of agentMap) {
-      agents.push({
-        key: _ak,
-        label: agentEntries[agentEntries.length - 1].agentLabel || "Unnamed",
-        model: agentEntries[0].contextInfo.model,
-        entries: agentEntries.map(projectEntryForApi),
+  return { grouped, ungrouped };
+}
+
+function buildFullConversation(
+  id: string,
+  entries: CapturedEntry[],
+  conversations: Map<string, any>,
+): ConversationGroup {
+  const meta = conversations.get(id) || {
+    id,
+    label: "Unknown",
+    source: "unknown",
+    workingDirectory: null,
+    firstSeen: entries[entries.length - 1].timestamp,
+  };
+  const agentMap = new Map<string, CapturedEntry[]>();
+  for (const e of entries) {
+    const ak = e.agentKey || "_default";
+    if (!agentMap.has(ak)) agentMap.set(ak, []);
+    agentMap.get(ak)?.push(e);
+  }
+  const agents: AgentGroup[] = [];
+  for (const [_ak, agentEntries] of agentMap) {
+    agents.push({
+      key: _ak,
+      label: agentEntries[agentEntries.length - 1].agentLabel || "Unnamed",
+      model: agentEntries[0].contextInfo.model,
+      entries: agentEntries.map(projectEntryForApi),
+    });
+  }
+  agents.sort(
+    (a, b) =>
+      new Date(b.entries[0].timestamp).getTime() -
+      new Date(a.entries[0].timestamp).getTime(),
+  );
+  return {
+    ...meta,
+    agents,
+    entries: entries.map(projectEntryForApi),
+  };
+}
+
+function handleRequests(
+  store: Store,
+  _req: http.IncomingMessage,
+  res: http.ServerResponse,
+  parsedUrl: url.UrlWithParsedQuery,
+): void {
+  const isSummary = parsedUrl.query.summary === "true";
+  const { grouped, ungrouped } = buildConversationGroups(store);
+  const conversations = store.getConversations();
+
+  if (isSummary) {
+    // Lightweight: conversation metadata + summary stats, no entries
+    const summaries = [];
+    for (const [id, entries] of grouped) {
+      const meta = conversations.get(id) || {
+        id,
+        label: "Unknown",
+        source: "unknown",
+        workingDirectory: null,
+        firstSeen: entries[entries.length - 1].timestamp,
+      };
+      const latest = entries[0];
+      const totalCost = entries.reduce(
+        (sum, e) => sum + (e.costUsd ?? 0),
+        0,
+      );
+      summaries.push({
+        ...meta,
+        entryCount: entries.length,
+        latestTimestamp: latest.timestamp,
+        latestModel: latest.contextInfo.model,
+        latestTotalTokens: latest.contextInfo.totalTokens,
+        contextLimit: latest.contextLimit,
+        totalCost,
+        healthScore: latest.healthScore,
       });
     }
-    agents.sort(
+    summaries.sort(
       (a, b) =>
-        new Date(b.entries[0].timestamp).getTime() -
-        new Date(a.entries[0].timestamp).getTime(),
+        new Date(b.latestTimestamp).getTime() -
+        new Date(a.latestTimestamp).getTime(),
     );
-    convos.push({
-      ...meta,
-      agents,
-      entries: entries.map(projectEntryForApi),
-    });
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({
+        revision: store.getRevision(),
+        conversations: summaries,
+        ungroupedCount: ungrouped.length,
+      }),
+    );
+    return;
+  }
+
+  // Full response (backwards compatible)
+  const convos: ConversationGroup[] = [];
+  for (const [id, entries] of grouped) {
+    convos.push(buildFullConversation(id, entries, conversations));
   }
   convos.sort(
     (a, b) =>
@@ -123,6 +189,26 @@ function handleRequests(
       ungrouped: ungrouped.map(projectEntryForApi),
     }),
   );
+}
+
+function handleConversationDetail(
+  store: Store,
+  convoId: string,
+  res: http.ServerResponse,
+): void {
+  const { grouped } = buildConversationGroups(store);
+  const conversations = store.getConversations();
+  const entries = grouped.get(convoId);
+
+  if (!entries || entries.length === 0) {
+    res.writeHead(404, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Conversation not found" }));
+    return;
+  }
+
+  const convo = buildFullConversation(convoId, entries, conversations);
+  res.writeHead(200, { "Content-Type": "application/json" });
+  res.end(JSON.stringify(convo));
 }
 
 function handleEvents(
@@ -221,14 +307,19 @@ export function createApiHandler(
       return true;
     }
 
-    const convoDeleteMatch = pathname?.match(
+    const convoMatch = pathname?.match(
       /^\/api\/conversations\/(.+)$/,
     );
-    if (convoDeleteMatch && req.method === "DELETE") {
-      const convoId = decodeURIComponent(convoDeleteMatch[1]);
+    if (convoMatch && req.method === "DELETE") {
+      const convoId = decodeURIComponent(convoMatch[1]);
       store.deleteConversation(convoId);
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: true }));
+      return true;
+    }
+    if (convoMatch && req.method === "GET") {
+      const convoId = decodeURIComponent(convoMatch[1]);
+      handleConversationDetail(store, convoId, res);
       return true;
     }
 
@@ -240,7 +331,7 @@ export function createApiHandler(
     }
 
     if (pathname === "/api/requests") {
-      handleRequests(store, req, res);
+      handleRequests(store, req, res, parsedUrl);
       return true;
     }
 

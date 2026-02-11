@@ -1,0 +1,158 @@
+@use 'tokens';
+
+// ── Global resets ──
+*,
+*::before,
+*::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  text-size-adjust: 100%;
+}
+
+:root[data-density='comfortable'] {
+  --text-xs: 13px;
+  --text-sm: 14px;
+  --text-base: 16px;
+  --text-md: 17px;
+  --text-lg: 21px;
+  --text-xl: 25px;
+  --space-1: 5px;
+  --space-2: 10px;
+  --space-3: 14px;
+  --space-4: 18px;
+  --space-5: 22px;
+  --space-6: 26px;
+}
+
+:root[data-density='compact'] {
+  --text-xs: 10px;
+  --text-sm: 11px;
+  --text-base: 13px;
+  --text-md: 15px;
+  --text-lg: 18px;
+  --text-xl: 22px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--bg-deep);
+  color: var(--text-primary);
+  font-size: var(--text-base);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+// ── Links ──
+a {
+  color: var(--accent-blue);
+  text-decoration: none;
+  &:hover { text-decoration: underline; }
+}
+
+// ── Selection ──
+::selection {
+  background: rgba(94, 159, 248, 0.25);
+  color: var(--text-primary);
+}
+
+// ══════════════════════════════════════════════════
+// ── Splitpanes overrides ──
+// The default-theme sets white backgrounds on panes and splitters.
+// We need to override ALL of them to match our dark theme.
+// ══════════════════════════════════════════════════
+
+// Kill the white pane background
+.splitpanes.default-theme .splitpanes__pane {
+  background-color: transparent;
+}
+
+// Kill the white splitter + its decorative pseudo-elements
+.splitpanes.default-theme .splitpanes__splitter {
+  background-color: var(--border-dim) !important;
+  border: none !important;
+}
+
+.splitpanes.default-theme .splitpanes__splitter::before,
+.splitpanes.default-theme .splitpanes__splitter::after {
+  display: none !important;
+}
+
+// Vertical splitter styling
+.default-theme.splitpanes--vertical > .splitpanes__splitter,
+.default-theme .splitpanes--vertical > .splitpanes__splitter {
+  width: 1px !important;
+  border: none !important;
+  margin-left: 0 !important;
+  background-color: var(--border-dim) !important;
+  position: relative;
+  transition: background-color 0.2s ease;
+
+  // Wider hit area
+  &::before {
+    content: '' !important;
+    display: block !important;
+    position: absolute !important;
+    inset: 0 -3px !important;
+    top: 0 !important;
+    left: -3px !important;
+    right: -3px !important;
+    width: auto !important;
+    height: 100% !important;
+    margin: 0 !important;
+    background: transparent !important;
+    transform: none !important;
+    z-index: 1;
+  }
+
+  &::after {
+    display: none !important;
+  }
+
+  &:hover {
+    background-color: var(--accent-blue) !important;
+  }
+}
+
+// Horizontal splitter (in case we use it)
+.default-theme.splitpanes--horizontal > .splitpanes__splitter,
+.default-theme .splitpanes--horizontal > .splitpanes__splitter {
+  height: 1px !important;
+  border: none !important;
+  margin-top: 0 !important;
+  background-color: var(--border-dim) !important;
+
+  &::before,
+  &::after {
+    display: none !important;
+  }
+
+  &:hover {
+    background-color: var(--accent-blue) !important;
+  }
+}
+
+// ── Transitions ──
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+// ── Fonts ──
+// System-native sans (Inter) + monospace (system mono stack).
+// We don't load external fonts — use the system stack for speed and
+// to avoid FOUT. Inter is widely installed; if not, system sans is fine.
+// JetBrains Mono is nice but not worth the loading penalty for a dev tool.
