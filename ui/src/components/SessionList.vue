@@ -238,10 +238,15 @@ function callSummary(e: ProjectedEntry): string {
   return ''
 }
 
-function displayEntries(entries: ProjectedEntry[]): { entry: ProjectedEntry; isMain: boolean; originalIndex: number }[] {
-  return classifyEntries(entries)
-    .map((item, index) => ({ ...item, originalIndex: index }))
-    .reverse()
+function displayEntries(entries: ProjectedEntry[]): { entry: ProjectedEntry; isMain: boolean; originalIndex: number; turnNumber: number }[] {
+  const classified = classifyEntries(entries)
+  // entries are newest-first; assign turn numbers oldest-first (Turn 1 = oldest)
+  const totalMain = classified.filter(x => x.isMain).length
+  let mainSeen = 0
+  return classified.map((item, index) => {
+    if (item.isMain) mainSeen++
+    return { ...item, originalIndex: index, turnNumber: item.isMain ? totalMain - mainSeen + 1 : 0 }
+  })
 }
 
 function compactWorkingDir(path: string | null | undefined): string {
@@ -403,12 +408,12 @@ watch(
               :class="{ active: c.id === store.selectedSessionId && store.selectedTurnIndex === item.originalIndex }"
               @click="handleTurnClick($event, c.id, item.originalIndex)"
             >
-              <span class="tg-num">{{ classifyEntries(c.entries).filter((x, i) => x.isMain && i <= item.originalIndex).length }}</span>
+              <span class="tg-num">{{ item.turnNumber }}</span>
               <span class="tg-model" :class="modelColorClass(item.entry.contextInfo.model)">
                 {{ shortModel(item.entry.contextInfo.model) }}
               </span>
               <span class="tg-desc">
-                {{ callSummary(item.entry) || `Turn ${item.originalIndex + 1}` }}
+                {{ callSummary(item.entry) || `Turn ${item.turnNumber}` }}
               </span>
               <span class="tg-tokens">{{ fmtTokens(item.entry.contextInfo.totalTokens) }}</span>
             </div>
@@ -694,13 +699,13 @@ watch(
   border-left: 1px solid var(--border-dim);
   max-height: 0;
   overflow: hidden;
-  transition: max-height 0.25s ease-out;
+  transition: max-height 0.125s ease-out;
 
   &.expanded {
     max-height: 300px;
     overflow-y: auto;
     @include scrollbar-thin;
-    transition: max-height 0.3s ease-in;
+    transition: max-height 0.15s ease-in;
   }
 }
 
@@ -724,9 +729,10 @@ watch(
 .tg-num {
   @include mono-text;
   color: var(--text-ghost);
-  width: 14px;
+  width: 28px;
   text-align: right;
   font-size: var(--text-xs);
+  flex-shrink: 0;
 }
 
 .tg-model {

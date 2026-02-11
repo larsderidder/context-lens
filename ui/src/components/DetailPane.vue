@@ -158,18 +158,14 @@ const metaPairs = computed((): [string, string][] => {
     <!-- ── Header ── -->
     <div class="detail-header">
       <div class="header-top">
-        <button class="close-btn" @click="$emit('close')" v-tooltip="'Close (Esc)'">
-          <i class="i-carbon-close" />
-        </button>
         <span class="detail-title" :style="{ color: titleColor }">{{ titleText }}</span>
-        <button class="copy-btn" :class="{ copied: copyLabel === 'Copied!' }" @click="handleCopy">
-          <i class="i-carbon-copy" />
-          {{ copyLabel }}
-        </button>
         <div class="nav-btns">
           <button :disabled="!canPrev" @click="navigate(-1)" v-tooltip="'↑ Previous'">↑</button>
           <button :disabled="!canNext" @click="navigate(1)" v-tooltip="'↓ Next'">↓</button>
         </div>
+        <button class="close-btn" @click="$emit('close')" v-tooltip="'Close (Esc)'">
+          <i class="i-carbon-close" />
+        </button>
       </div>
       <div class="header-meta" v-if="msg">
         <span><b>{{ msg.role }}</b></span>
@@ -198,6 +194,12 @@ const metaPairs = computed((): [string, string][] => {
         </template>
       </template>
       <template v-else-if="tab === 'raw' && msg">
+        <div class="raw-header">
+          <button class="copy-btn" :class="{ copied: copyLabel === 'Copied!' }" @click="handleCopy">
+            <i class="i-carbon-copy" />
+            {{ copyLabel }}
+          </button>
+        </div>
         <pre class="block-content">{{ JSON.stringify(msgToRawObject(msg), null, 2) }}</pre>
       </template>
     </div>
@@ -250,6 +252,7 @@ const metaPairs = computed((): [string, string][] => {
   align-items: center;
   transition: color 0.1s, background 0.1s;
   flex-shrink: 0;
+  margin-left: auto;
 
   &:hover { color: var(--text-primary); background: var(--bg-hover); }
 }
@@ -343,6 +346,13 @@ const metaPairs = computed((): [string, string][] => {
   @include scrollbar-thin;
 }
 
+.raw-header {
+  display: flex;
+  justify-content: flex-end;
+  padding: var(--space-2) var(--space-4) 0;
+  flex-shrink: 0;
+}
+
 .block-sep {
   border: none;
   border-top: 1px solid var(--border-dim);
@@ -399,10 +409,10 @@ const metaPairs = computed((): [string, string][] => {
   grid-template-columns: auto 1fr;
   gap: 3px var(--space-4);
   @include mono-text;
-  font-size: 9px;
+  font-size: 12px;
 }
 
-.meta-key { color: var(--text-ghost); }
+.meta-key { color: var(--text-dim); }
 .meta-val {
   @include truncate;
   color: var(--text-dim);
