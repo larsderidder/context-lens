@@ -684,7 +684,6 @@ watch(
     flex: 1;
     width: auto;
     min-width: 6px;
-    max-width: 24px;
   }
 }
 
@@ -727,7 +726,6 @@ watch(
     flex: 1;
     width: auto;
     min-width: 6px;
-    max-width: 24px;
   }
 }
 
@@ -741,7 +739,6 @@ watch(
     flex: 1;
     width: auto;
     min-width: 6px;
-    max-width: 24px;
   }
 }
 
@@ -863,8 +860,8 @@ watch(
 // ── Cache hit rate line overlay ──
 .cache-line-svg {
   position: absolute;
-  left: 0;
-  top: 0;
+  inset: 0;
+  width: 100%;
   height: 100%;
   pointer-events: none;
   z-index: 2;
