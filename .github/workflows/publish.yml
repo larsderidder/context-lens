@@ -16,10 +16,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+          registry-url: https://registry.npmjs.org
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm exec biome check .
       - run: pnpm test
-      - run: |
-          echo "registry=https://registry.npmjs.org/" > ~/.npmrc
-          npm publish --access public
+      - name: Debug OIDC
+        run: |
+          echo "OIDC URL set: ${{ env.ACTIONS_ID_TOKEN_REQUEST_URL != '' }}"
+          echo "npm version: $(npm -v)"
+          cat ~/.npmrc || true
+          cat .npmrc || true
+      - run: npm publish --access public
