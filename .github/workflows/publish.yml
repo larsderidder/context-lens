@@ -21,4 +21,9 @@ jobs:
       - run: pnpm build
       - run: pnpm exec biome check .
       - run: pnpm test
-      - run: npm publish --access public
+      - name: Publish
+        run: |
+          echo "ACTIONS_ID_TOKEN_REQUEST_URL is set: ${ACTIONS_ID_TOKEN_REQUEST_URL:+yes}"
+          echo "npm version: $(npm -v)"
+          npm config list
+          npm publish --access public --loglevel verbose
