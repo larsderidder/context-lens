@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useSessionStore } from '@/stores/session'
-import { fmtTokens, fmtCost, shortModel } from '@/utils/format'
+import { fmtCost, fmtTokens, shortModel } from '@/utils/format'
 import { classifyEntries, SIMPLE_META } from '@/utils/messages'
 import type { ProjectedEntry } from '@/api-types'
+import ContextDiffPanel from './ContextDiffPanel.vue'
 import {
   type GroupSegment,
   type TimelineEvent,
@@ -23,15 +24,20 @@ import {
   stackSegments,
   visibleTokens,
   groupedSegmentsForEntry,
+  cacheHitRate,
+  projectTurnsRemaining,
 } from '@/utils/timeline'
 
 const store = useSessionStore()
 
-type TimelineMode = 'all' | 'main' | 'cost'
-const mode = ref<TimelineMode>('all')
-const hiddenLegendKeys = ref(new Set<string>())
-const chartScrollEl = ref<HTMLElement | null>(null)
-const showLimitOverlay = ref(true)
+type TimelineMode = 'all' | 'main'
+const mode = computed({ get: () => store.timelineMode, set: (v) => { store.timelineMode = v } })
+const stackMode = computed({ get: () => store.timelineStackMode, set: (v) => { store.timelineStackMode = v } })
+const hiddenLegendKeys = computed({ get: () => store.timelineHiddenLegendKeys, set: (v) => { store.timelineHiddenLegendKeys = v } })
+const showLimitOverlay = computed({ get: () => store.timelineShowLimitOverlay, set: (v) => { store.timelineShowLimitOverlay = v } })
+const showCacheOverlay = computed({ get: () => store.timelineShowCacheOverlay, set: (v) => { store.timelineShowCacheOverlay = v } })
+const tokenChartScrollEl = ref<HTMLElement | null>(null)
+const costChartScrollEl = ref<HTMLElement | null>(null)
 
 const session = computed(() => store.selectedSession)
 const entry = computed(() => store.selectedEntry)
@@ -46,10 +52,19 @@ const filtered = computed(() => {
   return classified.value
 })
 
-const maxVal = computed(() => {
+const maxTokenVal = computed(() => {
   let max = 0
   for (const item of filtered.value) {
-    const val = mode.value === 'cost' ? (item.entry.costUsd ?? 0) : item.entry.contextInfo.totalTokens
+    const val = item.entry.contextInfo.totalTokens
+    if (val > max) max = val
+  }
+  return max
+})
+
+const maxCostVal = computed(() => {
+  let max = 0
+  for (const item of filtered.value) {
+    const val = item.entry.costUsd ?? 0
     if (val > max) max = val
   }
   return max
@@ -73,23 +88,26 @@ function toggleLegend(key: string) {
 }
 
 const maxVisibleVal = computed(() => {
-  if (hiddenLegendKeys.value.size === 0) return maxVal.value
+  if (hiddenLegendKeys.value.size === 0) return maxTokenVal.value
   let max = 0
   for (const item of filtered.value) {
-    const val = mode.value === 'cost' ? (item.entry.costUsd ?? 0) : visibleTokens(item.entry, hiddenLegendKeys.value)
+    const val = visibleTokens(item.entry, hiddenLegendKeys.value)
     if (val > max) max = val
   }
   return max
 })
 
 function getBarHeight(item: { entry: ProjectedEntry }): number {
-  const val = mode.value === 'cost' ? (item.entry.costUsd ?? 0) : visibleTokens(item.entry, hiddenLegendKeys.value)
+  const val = visibleTokens(item.entry, hiddenLegendKeys.value)
   return calculateBarHeight(val, maxVisibleVal.value)
 }
 
 function getStackSegments(item: { entry: ProjectedEntry }): GroupSegment[] {
-  if (mode.value === 'cost') return []
   return stackSegments(item.entry, hiddenLegendKeys.value)
+}
+
+function getCostBarHeight(item: { entry: ProjectedEntry }): number {
+  return calculateBarHeight(item.entry.costUsd ?? 0, maxCostVal.value)
 }
 
 function selectTurn(entry: ProjectedEntry) {
@@ -120,7 +138,7 @@ const contextLimit = computed(() => {
 // Chart Y ceiling: account for context limit when overlay is on (not in cost mode)
 const chartMaxWithLimit = computed(() => {
   const base = maxVisibleVal.value
-  if (!showLimitOverlay.value || mode.value === 'cost') return base
+  if (!showLimitOverlay.value) return base
   return Math.max(base, contextLimit.value)
 })
 
@@ -134,13 +152,17 @@ const limitPct = computed(() => {
 
 // Bar height scaled to the (potentially expanded) ceiling
 function getBarHeightWithLimit(item: { entry: ProjectedEntry }): number {
+  if (stackMode.value === 'normalized') return 100
   if (!showLimitOverlay.value) return getBarHeight(item)
-  const val = mode.value === 'cost' ? (item.entry.costUsd ?? 0) : visibleTokens(item.entry, hiddenLegendKeys.value)
+  const val = visibleTokens(item.entry, hiddenLegendKeys.value)
   return calculateBarHeight(val, chartMaxWithLimit.value)
 }
 
 // Y ticks adjusted when limit overlay changes the ceiling
 const yTicksWithLimit = computed(() => calculateYTicks(chartMaxWithLimit.value))
+const costYTicks = computed(() => calculateYTicks(maxCostVal.value))
+
+const yTicksNormalized = [0, 25, 50, 75, 100]
 
 const diffData = computed((): DiffData | null => {
   const e = entry.value
@@ -165,90 +187,240 @@ const legendGroups = computed(() => {
   }))
 })
 
-function scrollChartToLatest() {
+// ── Cache hit rate overlay (SVG polyline) ──
+
+// Check if any entries have cache data
+const hasCacheData = computed(() => {
+  return filtered.value.some(item => cacheHitRate(item.entry) !== null)
+})
+
+// SVG polyline points for cache hit rate, scaled to bars-wrap dimensions.
+// X: each bar's center position. Y: cache rate 0=bottom, 1=top of chart.
+const cacheLinePoints = computed((): string => {
+  const items = filtered.value
+  if (items.length === 0) return ''
+  const count = items.length
+  const isSp = isSparse.value
+  // In sparse mode bars fill 100%, in dense mode each is 10px + 2px gap
+  const points: string[] = []
+  for (let i = 0; i < count; i++) {
+    const rate = cacheHitRate(items[i].entry)
+    if (rate === null) continue
+    // X: center of bar i (percentage of container width)
+    const xPct = isSp
+      ? ((i + 0.5) / count) * 100
+      : ((i * 12 + 5) / (count * 12)) * 100
+    // Y: inverted (0% = top, 100% = bottom)
+    const yPct = (1 - rate) * 100
+    points.push(`${xPct.toFixed(2)},${yPct.toFixed(2)}`)
+  }
+  return points.join(' ')
+})
+
+const cacheLineTooltip = computed(() => {
+  const e = entry.value
+  if (!e) return ''
+  const rate = cacheHitRate(e)
+  if (rate === null) return 'No cache data'
+  return `Cache hit: ${Math.round(rate * 100)}%`
+})
+
+// ── Turns remaining projection ──
+
+const projection = computed(() => {
+  return projectTurnsRemaining(classified.value)
+})
+
+// Projected dashed extension on the token timeline: a line from the last bar
+// angling toward the context limit.  We draw from the last bar's top-right
+// corner to the right edge of the chart, at the slope implied by the growth
+// rate, capped at the limit line.
+const projectionLinePct = computed((): { x1: number; y1: number; x2: number; y2: number } | null => {
+  const p = projection.value
+  if (p.turnsRemaining === null || p.turnsRemaining <= 0 || p.growthPerTurn <= 0) return null
+  if (stackMode.value === 'normalized') return null
+
+  const items = filtered.value
+  if (items.length === 0) return null
+  const count = items.length
+  const isSp = isSparse.value
+  const max = showLimitOverlay.value ? chartMaxWithLimit.value : maxVisibleVal.value
+  if (max === 0) return null
+
+  // Start: center of last bar
+  const x1 = isSp
+    ? ((count - 0.5) / count) * 100
+    : (((count - 1) * 12 + 5) / (count * 12)) * 100
+  const y1 = (1 - p.currentTokens / max) * 100
+
+  // End: right edge of chart, at projected token level
+  // Growth per bar-width in Y% terms
+  const barWidthPct = isSp ? (1 / count) * 100 : (12 / (count * 12)) * 100
+  const growthYPerBar = (p.growthPerTurn / max) * 100
+  // How many bar-widths from x1 to x=100%
+  const barsToEdge = (100 - x1) / barWidthPct
+  const projectedTokensAtEdge = p.currentTokens + p.growthPerTurn * barsToEdge
+  // Cap at context limit
+  const cappedTokens = Math.min(projectedTokensAtEdge, p.contextLimit)
+  const x2End = 100
+  const y2End = (1 - cappedTokens / max) * 100
+
+  // If the limit is reached before the right edge, shorten the line
+  if (projectedTokensAtEdge > p.contextLimit && growthYPerBar > 0) {
+    const barsToLimit = (p.contextLimit - p.currentTokens) / p.growthPerTurn
+    const x2 = x1 + barsToLimit * barWidthPct
+    const y2 = (1 - p.contextLimit / max) * 100
+    return { x1, y1, x2: Math.min(x2, 100), y2: Math.max(y2, 0) }
+  }
+
+  return { x1, y1, x2: x2End, y2: Math.max(y2End, 0) }
+})
+
+function scrollToLatest(el: HTMLElement | null) {
+  if (!el) return
+  el.scrollLeft = el.scrollWidth
+}
+
+function scrollChartsToLatest() {
   nextTick(() => {
-    if (!chartScrollEl.value) return
-    chartScrollEl.value.scrollLeft = chartScrollEl.value.scrollWidth
+    scrollToLatest(tokenChartScrollEl.value)
+    scrollToLatest(costChartScrollEl.value)
   })
 }
 
 onMounted(() => {
-  scrollChartToLatest()
+  scrollChartsToLatest()
 })
 
 watch(
-  () => session.value?.id,
+  () => [
+    session.value?.id ?? '',
+    mode.value,
+    filtered.value.length,
+    filtered.value[filtered.value.length - 1]?.entry.id ?? '',
+  ],
   () => {
-    scrollChartToLatest()
+    scrollChartsToLatest()
   },
-)
-
-watch(
-  () => filtered.value.length,
-  (next, prev) => {
-    if ((prev ?? 0) === 0 && next > 0) {
-      scrollChartToLatest()
-    }
-  },
+  { immediate: true },
 )
 </script>
 
 <template>
   <div v-if="session" class="timeline-tab">
-    <!-- ═══ Chart ═══ -->
-    <section class="panel">
-      <div class="panel-head">
-        <span class="panel-title">Timeline</span>
+    <div class="timeline-scope-controls">
+      <span class="scope-label">Scope</span>
+      <div class="scope-toggle">
         <button
-          v-if="mode !== 'cost'"
-          class="overlay-toggle"
-          :class="{ on: showLimitOverlay }"
-          @click="showLimitOverlay = !showLimitOverlay"
+          v-for="m in (['all', 'main'] as TimelineMode[])"
+          :key="'scope-' + m"
+          :class="{ on: mode === m }"
+          @click="mode = m"
         >
-          <span class="legend-dot legend-dot--dashed" />
-          Limit
+          {{ m === 'all' ? 'All turns' : 'Main turns' }}
         </button>
-        <div class="mode-toggle">
-          <button v-for="m in (['all', 'main', 'cost'] as TimelineMode[])" :key="m"
-            :class="{ on: mode === m }" @click="mode = m">
-            {{ m === 'all' ? 'All' : m === 'main' ? 'Main' : 'Cost' }}
+      </div>
+    </div>
+
+    <!-- ═══ Token timeline ═══ -->
+    <section class="panel panel--hero">
+      <div class="panel-head">
+        <span class="panel-title">Token Timeline</span>
+        <div class="panel-controls">
+          <button v-if="hasCacheData" class="overlay-toggle" :class="{ on: showCacheOverlay }" @click="showCacheOverlay = !showCacheOverlay">
+            <span class="legend-dot legend-dot--cache" />
+            Cache
           </button>
+          <button v-if="stackMode === 'absolute'" class="overlay-toggle" :class="{ on: showLimitOverlay }" @click="showLimitOverlay = !showLimitOverlay">
+            <span class="legend-dot legend-dot--dashed" />
+            Limit
+          </button>
+          <div class="mode-toggle">
+            <button :class="{ on: stackMode === 'absolute' }" v-tooltip="'Absolute token counts'" @click="stackMode = 'absolute'">
+              <i class="i-carbon-chart-column mode-icon" />
+              Abs
+            </button>
+            <button :class="{ on: stackMode === 'normalized' }" v-tooltip="'Normalized to 100% per turn'" @click="stackMode = 'normalized'">
+              <i class="i-carbon-chart-maximum mode-icon" />
+              Pct
+            </button>
+          </div>
         </div>
       </div>
       <div class="panel-body">
         <div class="chart-container">
           <div class="y-axis">
-            <span v-for="tick in [...(showLimitOverlay ? yTicksWithLimit : yTicks)].reverse()" :key="tick">{{ formatYTick(tick, mode === 'cost' ? 'cost' : 'tokens') }}</span>
+            <template v-if="stackMode === 'normalized'">
+              <span v-for="tick in [...yTicksNormalized].reverse()" :key="'norm-' + tick">{{ tick }}%</span>
+            </template>
+            <template v-else>
+              <span v-for="tick in [...(showLimitOverlay ? yTicksWithLimit : yTicks)].reverse()" :key="tick">{{ formatYTick(tick, 'tokens') }}</span>
+            </template>
           </div>
-          <div ref="chartScrollEl" class="chart-scroll">
+          <div ref="tokenChartScrollEl" class="chart-scroll">
             <div class="bars-wrap" :class="{ sparse: isSparse }">
               <div class="bars" :class="{ sparse: isSparse }">
                 <div
                   v-for="(item, i) in filtered" :key="item.entry.id"
-                  class="bar" :class="{ active: entry?.id === item.entry.id }"
+                  class="bar" :class="{ active: entry?.id === item.entry.id, normalized: stackMode === 'normalized' }"
                   :style="{ height: getBarHeightWithLimit(item) + '%' }"
-                  v-tooltip="mode === 'cost' ? barTooltip(item.entry, item.isMain) : ''"
                   @click="selectTurn(item.entry)"
                 >
-                  <div v-if="mode === 'cost'" class="bar-cost" :style="{ background: barColor(item.entry.contextInfo.model, item.isMain) }" />
-                  <template v-else>
-                    <div
-                      v-for="segment in getStackSegments(item)"
-                      :key="item.entry.id + '-' + segment.key"
-                      class="bar-segment"
-                      :style="{ height: segment.pct + '%', background: segment.color }"
-                      v-tooltip="segmentTooltip(item.entry, segment)"
-                    />
-                  </template>
+                  <div
+                    v-for="segment in getStackSegments(item)"
+                    :key="item.entry.id + '-' + segment.key"
+                    class="bar-segment"
+                    :style="{ height: segment.pct + '%', background: segment.color }"
+                    v-tooltip="segmentTooltip(item.entry, segment)"
+                  />
                 </div>
               </div>
 
               <!-- Context limit line overlay -->
               <div
-                v-if="showLimitOverlay && mode !== 'cost' && limitPct >= 0"
+                v-if="stackMode === 'absolute' && showLimitOverlay && limitPct >= 0"
                 class="limit-line"
                 :style="{ top: limitPct + '%' }"
               />
+
+              <!-- Cache hit rate line overlay -->
+              <svg
+                v-if="showCacheOverlay && cacheLinePoints"
+                class="cache-line-svg"
+                viewBox="0 0 100 100"
+                preserveAspectRatio="none"
+              >
+                <polyline
+                  :points="cacheLinePoints"
+                  fill="none"
+                  stroke="var(--accent-cyan)"
+                  stroke-width="1.5"
+                  vector-effect="non-scaling-stroke"
+                  stroke-linejoin="round"
+                  stroke-linecap="round"
+                  opacity="0.7"
+                />
+              </svg>
+
+              <!-- Turns remaining projection line -->
+              <svg
+                v-if="stackMode === 'absolute' && projectionLinePct"
+                class="projection-line-svg"
+                viewBox="0 0 100 100"
+                preserveAspectRatio="none"
+              >
+                <line
+                  :x1="projectionLinePct.x1"
+                  :y1="projectionLinePct.y1"
+                  :x2="projectionLinePct.x2"
+                  :y2="projectionLinePct.y2"
+                  stroke="var(--accent-amber)"
+                  stroke-width="1.5"
+                  stroke-dasharray="4 3"
+                  vector-effect="non-scaling-stroke"
+                  opacity="0.5"
+                />
+              </svg>
             </div>
 
             <div class="events" :class="{ sparse: isSparse }">
@@ -272,13 +444,7 @@ watch(
             </div>
           </div>
         </div>
-        <div class="chart-legend" v-if="mode === 'cost'">
-          <span v-for="m in legendModels" :key="m.name" class="legend-item">
-            <span class="legend-dot" :style="{ background: m.color }" />
-            {{ m.name }}
-          </span>
-        </div>
-        <div class="chart-legend" v-else>
+        <div class="chart-legend">
           <button
             v-for="g in legendGroups" :key="g.key"
             class="legend-item legend-item--interactive"
@@ -288,51 +454,63 @@ watch(
             <span class="legend-dot" :style="{ background: hiddenLegendKeys.has(g.key) ? 'var(--text-ghost)' : g.color }" />
             {{ g.name }}
           </button>
+          <span v-if="projection.turnsRemaining !== null && projection.turnsRemaining > 0" class="projection-badge" v-tooltip="`Growing ~${fmtTokens(Math.round(projection.growthPerTurn))}/turn over ${projection.sinceCompaction} turns since last compaction`">
+            ~{{ projection.turnsRemaining }} turns remaining
+          </span>
+          <span v-else-if="projection.turnsRemaining === 0" class="projection-badge projection-badge--warn" v-tooltip="'Context window is at or near the limit'">
+            At limit
+          </span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══ Cost timeline ═══ -->
+    <section class="panel panel--secondary panel--spine panel--cost">
+      <div class="panel-head">
+        <span class="panel-title">Cost Timeline</span>
+        <span class="panel-sub">Scope: {{ mode === 'main' ? 'Main turns only' : 'All turns' }}</span>
+      </div>
+      <div class="panel-body">
+        <div class="chart-container">
+          <div class="y-axis">
+            <span v-for="tick in [...costYTicks].reverse()" :key="'cost-' + tick">{{ formatYTick(tick, 'cost') }}</span>
+          </div>
+          <div ref="costChartScrollEl" class="chart-scroll">
+            <div class="bars-wrap" :class="{ sparse: isSparse }">
+              <div class="bars" :class="{ sparse: isSparse }">
+                <div
+                  v-for="item in filtered" :key="'cost-' + item.entry.id"
+                  class="bar" :class="{ active: entry?.id === item.entry.id }"
+                  :style="{ height: getCostBarHeight(item) + '%' }"
+                  v-tooltip="barTooltip(item.entry, item.isMain)"
+                  @click="selectTurn(item.entry)"
+                >
+                  <div class="bar-cost" :style="{ background: barColor(item.entry.contextInfo.model, item.isMain) }" />
+                </div>
+              </div>
+            </div>
+            <div class="labels" :class="{ sparse: isSparse }">
+              <div v-for="(num, i) in turnNumbers" :key="'cost-label-' + i" class="label">
+                {{ num && (labelStep <= 1 || num % labelStep === 0) ? num : '' }}
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="chart-legend">
+          <span v-for="m in legendModels" :key="m.name" class="legend-item">
+            <span class="legend-dot" :style="{ background: m.color }" />
+            {{ m.name }}
+          </span>
         </div>
       </div>
     </section>
 
     <!-- ═══ Context diff ═══ -->
-    <section class="panel" v-if="diffData">
-      <div class="panel-head">
-        <span class="panel-title">Context Diff</span>
-        <span class="panel-sub">Turn {{ diffData.prevTurnNum }} → {{ diffData.currTurnNum }}</span>
-        <span class="diff-delta" :style="{ color: diffData.delta >= 0 ? 'var(--accent-green)' : 'var(--accent-red)' }">
-          {{ diffData.delta >= 0 ? '+' : '' }}{{ fmtTokens(diffData.delta) }}
-        </span>
-      </div>
-      <div class="panel-body diff-body">
-        <div
-          v-if="diffData.topIncreases.length > 0 || diffData.topDecreases.length > 0"
-          class="diff-summary-row"
-        >
-          <div class="diff-summary-group" v-if="diffData.topIncreases.length > 0">
-            <span class="diff-summary-label">Growth drivers</span>
-            <button v-for="item in diffData.topIncreases" :key="'inc-' + item.group" class="diff-summary-chip diff-summary-chip--up" @click="jumpToCategory(item.category)">
-              {{ item.label }} +{{ fmtTokens(item.delta) }}
-            </button>
-          </div>
-          <div class="diff-summary-group" v-if="diffData.topDecreases.length > 0">
-            <span class="diff-summary-label">Shrink drivers</span>
-            <button v-for="item in diffData.topDecreases" :key="'dec-' + item.group" class="diff-summary-chip diff-summary-chip--down" @click="jumpToCategory(item.category)">
-              {{ item.label }} {{ fmtTokens(item.delta) }}
-            </button>
-          </div>
-        </div>
-
-        <button v-for="(line, i) in diffData.lines" :key="i" class="diff-line" :class="`diff-${line.type}`" @click="jumpToCategory(line.category)">
-          {{ line.text }}
-        </button>
-      </div>
-    </section>
-    <section class="panel" v-else-if="entry">
-      <div class="panel-head">
-        <span class="panel-title">Context Diff</span>
-      </div>
-      <div class="panel-body">
-        <span class="diff-empty">First turn — no previous context.</span>
-      </div>
-    </section>
+    <ContextDiffPanel
+      :diff-data="diffData"
+      :show-when-empty="!!entry"
+      @category-click="jumpToCategory"
+    />
   </div>
 </template>
 
@@ -346,8 +524,72 @@ watch(
   gap: var(--space-4);
 }
 
+.timeline-scope-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.scope-label {
+  @include section-label;
+  font-size: var(--text-xs);
+  color: var(--text-dim);
+}
+
+.scope-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+
+  button {
+    font-size: var(--text-xs);
+    padding: 4px 10px;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: background 0.1s, color 0.1s;
+
+    &:hover { color: var(--text-secondary); }
+    &.on { background: var(--accent-blue-dim); color: var(--accent-blue); }
+    & + button { border-left: 1px solid var(--border-dim); }
+  }
+}
+
 // ── Panels ──
 .panel { @include panel; }
+
+.panel--hero {
+  border-color: var(--border-mid);
+  border-left: 3px solid var(--accent-blue);
+  box-shadow: -4px 0 12px rgba(14, 165, 233, 0.06);
+}
+
+.panel--secondary {
+  background: var(--bg-field);
+  border-color: rgba(51, 51, 51, 0.75);
+}
+
+.panel--spine {
+  position: relative;
+  border-left: none;
+
+  &::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: var(--spine-color, var(--accent-blue));
+    pointer-events: none;
+  }
+}
+
+.panel--cost {
+  --spine-color: var(--accent-green);
+}
 
 .panel-head {
   padding: var(--space-2) var(--space-4);
@@ -355,6 +597,17 @@ watch(
   display: flex;
   align-items: center;
   gap: var(--space-2);
+}
+
+.panel-controls {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.panel--secondary .panel-head {
+  background: var(--bg-surface);
 }
 
 .panel-title { @include section-label; }
@@ -366,8 +619,6 @@ watch(
   display: flex;
   align-items: center;
   gap: 4px;
-  margin-left: auto;
-  margin-right: var(--space-2);
   font-size: var(--text-xs);
   padding: 2px 7px;
   background: none;
@@ -379,29 +630,42 @@ watch(
 
   &:hover { color: var(--text-secondary); border-color: var(--border-mid); }
   &.on { background: var(--accent-red-dim); color: var(--accent-red); border-color: rgba(239, 68, 68, 0.3); }
+
+  &:has(.legend-dot--cache).on {
+    background: rgba(6, 182, 212, 0.12);
+    color: var(--accent-cyan);
+    border-color: rgba(6, 182, 212, 0.3);
+  }
 }
 
 // ── Mode toggle ──
 .mode-toggle {
   display: flex;
-  margin-left: auto;
+  margin-left: 0;
   border: 1px solid var(--border-dim);
   border-radius: var(--radius-sm);
   overflow: hidden;
 
   button {
     font-size: var(--text-xs);
-    padding: 3px 8px;
+    padding: 3px 9px;
     background: none;
     border: none;
     color: var(--text-muted);
     cursor: pointer;
     transition: background 0.1s, color 0.1s;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
 
     &:hover { color: var(--text-secondary); }
     &.on { background: var(--accent-blue-dim); color: var(--accent-blue); }
     & + button { border-left: 1px solid var(--border-dim); }
   }
+}
+
+.mode-icon {
+  font-size: 12px;
 }
 
 // ── Chart ──
@@ -474,6 +738,9 @@ watch(
   &:hover { filter: brightness(1.3); }
   &.active {
     box-shadow: 0 0 0 1.5px var(--accent-blue), 0 0 6px rgba(94, 159, 248, 0.25);
+  }
+  &.normalized {
+    border-radius: 0;
   }
 }
 
@@ -620,85 +887,45 @@ watch(
   opacity: 0.5;
 }
 
-
-
-// ── Diff ──
-.diff-delta {
-  margin-left: auto;
-  @include mono-text;
-  font-size: var(--text-xs);
-  font-weight: 700;
+.legend-dot--cache {
+  width: 10px;
+  height: 2px;
+  border-radius: 0;
+  background: var(--accent-cyan);
+  opacity: 0.7;
 }
 
-.diff-body { padding: var(--space-3) var(--space-4); }
-
-.diff-summary-row {
-  border: 1px solid var(--border-dim);
-  border-radius: var(--radius-sm);
-  background: var(--bg-surface);
-  padding: var(--space-2);
-  margin-bottom: var(--space-2);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-
-.diff-summary-group {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.diff-summary-label {
-  font-size: var(--text-xs);
-  color: var(--text-ghost);
-}
-
-.diff-summary-chip {
-  @include mono-text;
-  font-size: var(--text-xs);
-  border-radius: var(--radius-sm);
-  padding: 2px 6px;
-  border: 1px solid transparent;
-  cursor: pointer;
-  background: none;
-  transition: filter 0.12s;
-
-  &:hover { filter: brightness(1.3); }
-}
-
-.diff-summary-chip--up {
-  color: #4ade80;
-  background: rgba(16, 185, 129, 0.08);
-  border-color: rgba(16, 185, 129, 0.25);
-}
-
-.diff-summary-chip--down {
-  color: #f87171;
-  background: rgba(240, 96, 96, 0.08);
-  border-color: rgba(240, 96, 96, 0.25);
-}
-
-.diff-line {
-  @include mono-text;
-  font-size: var(--text-xs);
-  padding: 2px 6px;
-  border-radius: 2px;
-  margin-bottom: 1px;
-  border: none;
-  background: none;
+// ── Cache hit rate line overlay ──
+.cache-line-svg {
+  position: absolute;
+  inset: 0;
   width: 100%;
-  text-align: left;
-  cursor: pointer;
-  display: block;
-  transition: filter 0.12s;
-
-  &:hover { filter: brightness(1.3); }
+  height: 100%;
+  pointer-events: none;
+  z-index: 2;
 }
 
-.diff-add { background: rgba(16, 185, 129, 0.06); color: #4ade80; }
-.diff-remove { background: rgba(240, 96, 96, 0.06); color: #f87171; }
-.diff-same { color: var(--text-ghost); }
-.diff-empty { @include mono-text; color: var(--text-ghost); font-size: var(--text-xs); }
+// ── Projection line overlay ──
+.projection-line-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+}
+
+// ── Projection badge ──
+.projection-badge {
+  @include mono-text;
+  font-size: var(--text-xs);
+  color: var(--accent-amber);
+  opacity: 0.8;
+  margin-left: auto;
+
+  &--warn {
+    color: var(--accent-red);
+  }
+}
+
 </style>

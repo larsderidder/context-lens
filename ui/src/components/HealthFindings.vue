@@ -21,7 +21,7 @@ function handleRecClick(rec: { messageIndex?: number; highlight?: string }) {
 </script>
 
 <template>
-  <section class="panel" v-if="entry.healthScore || recommendations.length > 0">
+  <section class="panel panel--primary" v-if="entry.healthScore || recommendations.length > 0">
     <div class="panel-head">
       <span class="panel-title">Findings</span>
       <span class="finding-count" v-if="recommendations.length">{{ recommendations.length }}</span>
@@ -35,13 +35,13 @@ function handleRecClick(rec: { messageIndex?: number; highlight?: string }) {
       </span>
     </div>
     <!-- Recommendations -->
-    <div v-if="recommendations.length > 0" class="panel-body rec-list">
+    <div v-if="recommendations.length > 0" class="panel-body rec-list" :class="{ 'rec-list--scroll': recommendations.length > 3 }">
       <div v-for="(r, i) in recommendations" :key="i"
         class="rec"
         :class="{ 'rec-clickable': r.messageIndex != null }"
         @click="r.messageIndex != null && handleRecClick(r)"
       >
-        <span class="rec-dot" :class="`sev-${r.severity}`" />
+        <i class="rec-icon" :class="[`sev-${r.severity}`, r.severity === 'high' ? 'i-carbon-warning-alt' : r.severity === 'med' ? 'i-carbon-information' : 'i-carbon-checkmark']" />
         <div class="rec-content">
           <div class="rec-title">{{ r.title }}</div>
           <div class="rec-detail">{{ r.detail }}</div>
@@ -57,6 +57,22 @@ function handleRecClick(rec: { messageIndex?: number; highlight?: string }) {
 
 .panel {
   @include panel;
+}
+
+.panel--primary {
+  position: relative;
+  border-left: none;
+
+  &::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: var(--accent-amber);
+    pointer-events: none;
+  }
 }
 
 .panel-head {
@@ -104,6 +120,13 @@ function handleRecClick(rec: { messageIndex?: number; highlight?: string }) {
 
 .rec-list { padding: var(--space-3) var(--space-4); }
 
+.rec-list--scroll {
+  max-height: 220px;
+  overflow-y: auto;
+  padding-right: calc(var(--space-4) - 4px);
+  @include scrollbar-thin;
+}
+
 .rec {
   display: flex;
   align-items: flex-start;
@@ -115,16 +138,14 @@ function handleRecClick(rec: { messageIndex?: number; highlight?: string }) {
   &:first-child { padding-top: 0; }
 }
 
-.rec-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: var(--radius-sm);
-  margin-top: 5px;
+.rec-icon {
+  font-size: 14px;
+  margin-top: 1px;
   flex-shrink: 0;
 
-  &.sev-high { background: var(--accent-red); box-shadow: 0 0 4px var(--accent-red); }
-  &.sev-med { background: var(--accent-amber); box-shadow: 0 0 4px var(--accent-amber); }
-  &.sev-low { background: var(--accent-green); }
+  &.sev-high { color: var(--accent-red); }
+  &.sev-med { color: var(--accent-amber); }
+  &.sev-low { color: var(--accent-green); }
 }
 
 .rec-clickable {

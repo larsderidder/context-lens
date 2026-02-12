@@ -2,11 +2,13 @@
 import { computed, ref } from 'vue'
 import { useSessionStore } from '@/stores/session'
 import { useExpandable } from '@/composables/useExpandable'
-import { fmtTokens, fmtCost, fmtPct, fmtDuration, healthColor, shortModel, modelColorClass } from '@/utils/format'
-import { classifyEntries, extractCallSummary, CATEGORY_META } from '@/utils/messages'
+import { fmtTokens, fmtCost, fmtPct, fmtDuration, healthColor } from '@/utils/format'
+import { classifyEntries, CATEGORY_META, SIMPLE_GROUPS, SIMPLE_META, groupMessagesByCategory, buildToolNameMap } from '@/utils/messages'
 import { computeRecommendations } from '@/utils/recommendations'
+import { calculateContextDiff, projectTurnsRemaining } from '@/utils/timeline'
 import type { ProjectedEntry } from '@/api-types'
 import CompositionTreemap from './CompositionTreemap.vue'
+import ContextDiffPanel from './ContextDiffPanel.vue'
 import HealthFindings from './HealthFindings.vue'
 
 const store = useSessionStore()
@@ -41,23 +43,8 @@ const classified = computed(() => {
   return classifyEntries([...session.value.entries].reverse())
 })
 
-const turnGroup = computed(() => {
-  const e = entry.value
-  if (!e || !session.value) return []
-  const allClassified = classified.value
-  const idx = allClassified.findIndex(c => c.entry.id === e.id)
-  if (idx < 0) return [{ entry: e, isMain: true }]
-
-  let mainIdx = idx
-  for (let i = idx; i >= 0; i--) {
-    if (allClassified[i].isMain) { mainIdx = i; break }
-  }
-  const group: typeof allClassified = []
-  for (let j = mainIdx; j < allClassified.length; j++) {
-    if (j > mainIdx && allClassified[j].isMain) break
-    group.push(allClassified[j])
-  }
-  return group
+const projection = computed(() => {
+  return projectTurnsRemaining(classified.value)
 })
 
 const turnNum = computed(() => {
@@ -71,68 +58,6 @@ const turnNum = computed(() => {
   }
   return num
 })
-
-const agentBreakdown = computed(() => {
-  const cl = turnGroup.value
-  if (cl.length === 0) return { main: [] as any[], subGroups: [] as any[], totalTok: 0, subPct: 0, subTokPct: 0 }
-
-  const agents = new Map<string, {
-    key: string; label: string; model: string; latestTokens: number
-    cost: number; count: number; isMain: boolean
-  }>()
-
-  for (const item of cl) {
-    const ak = item.entry.agentKey || '_main'
-    if (!agents.has(ak)) {
-      agents.set(ak, {
-        key: ak, label: item.entry.agentLabel || 'Main',
-        model: item.entry.contextInfo.model, latestTokens: 0,
-        cost: 0, count: 0, isMain: item.isMain,
-      })
-    }
-    const ag = agents.get(ak)!
-    ag.latestTokens = item.entry.contextInfo.totalTokens
-    ag.cost += item.entry.costUsd || 0
-    ag.count += 1
-  }
-
-  const mainAgents = [...agents.values()].filter(a => a.isMain)
-  const subAgents = [...agents.values()].filter(a => !a.isMain)
-
-  const subByModel = new Map<string, {
-    model: string; shortModel: string; totalTokens: number
-    totalCost: number; count: number; agents: typeof mainAgents
-  }>()
-  for (const ag of subAgents) {
-    const sm = shortModel(ag.model)
-    if (!subByModel.has(sm)) {
-      subByModel.set(sm, { model: ag.model, shortModel: sm, totalTokens: 0, totalCost: 0, count: 0, agents: [] })
-    }
-    const g = subByModel.get(sm)!
-    g.totalTokens += ag.latestTokens
-    g.totalCost += ag.cost
-    g.count += ag.count
-    g.agents.push(ag)
-  }
-
-  let totalTok = 0
-  for (const a of mainAgents) totalTok += a.latestTokens
-  for (const g of subByModel.values()) totalTok += g.totalTokens
-
-  const subCount = cl.filter(x => !x.isMain).length
-  const subPct = cl.length > 0 ? Math.round(subCount / cl.length * 100) : 0
-  const subTok = subAgents.reduce((s, a) => s + a.latestTokens, 0)
-  const subTokPct = totalTok > 0 ? Math.round(subTok / totalTok * 100) : 0
-
-  return {
-    main: mainAgents,
-    subGroups: [...subByModel.values()].sort((a, b) => b.totalTokens - a.totalTokens),
-    totalTok,
-    subPct,
-    subTokPct,
-  }
-})
-
 
 const recommendations = computed(() => {
   const e = entry.value
@@ -158,8 +83,8 @@ const compositionDelta = computed(() => {
   const e = entry.value
   const prev = previousMainEntry.value
   if (!e || !prev) return []
-  const prevMap = new Map(prev.composition.map((item) => [item.category, item.tokens]))
-  const currMap = new Map(e.composition.map((item) => [item.category, item.tokens]))
+  const prevMap = new Map<string, number>(prev.composition.map((item) => [item.category, item.tokens]))
+  const currMap = new Map<string, number>(e.composition.map((item) => [item.category, item.tokens]))
   const allCats = new Set([...prevMap.keys(), ...currMap.keys()])
 
   return Array.from(allCats)
@@ -171,6 +96,46 @@ const compositionDelta = computed(() => {
     .filter((item) => item.delta !== 0)
     .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
 })
+
+// ── Composition tape (inline bar in Context stat card) ──
+const compositionTape = computed(() => {
+  const e = entry.value
+  if (!e?.composition?.length) return null
+  const total = e.composition.reduce((s, c) => s + c.tokens, 0)
+  if (total === 0) return null
+
+  // Build reverse map: category -> group key
+  const catToGroup: Record<string, string> = {}
+  for (const [gk, cats] of Object.entries(SIMPLE_GROUPS)) {
+    for (const cat of cats) catToGroup[cat] = gk
+  }
+
+  const grouped = new Map<string, number>()
+  for (const c of e.composition) {
+    const g = catToGroup[c.category] ?? c.category
+    grouped.set(g, (grouped.get(g) || 0) + c.tokens)
+  }
+  return [...grouped.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([key, tokens]) => ({
+      key,
+      color: SIMPLE_META[key]?.color ?? '#475569',
+      pct: tokens / total * 100,
+    }))
+})
+
+// ── Context diff ──
+const diffData = computed(() => {
+  const e = entry.value
+  if (!e || classified.value.length === 0) return null
+  return calculateContextDiff(e, classified.value)
+})
+
+// ── Messages preview ──
+const messages = computed(() => entry.value?.contextInfo.messages || [])
+const toolNameMap = computed(() => buildToolNameMap(messages.value))
+const categorizedMessages = computed(() => groupMessagesByCategory(messages.value))
+const totalMsgTokens = computed(() => categorizedMessages.value.reduce((s, g) => s + g.tokens, 0))
 
 const healthNarrative = computed(() => {
   const e = entry.value
@@ -212,9 +177,13 @@ function openNarrativeTarget(target: 'messages' | 'timeline') {
   store.setInspectorTab(target)
 }
 
-function jumpToMessagesCategory(category: string) {
+function jumpToMessagesCategory(category: string, openDetail = true) {
   store.setInspectorTab('messages')
-  store.focusMessageCategory(category)
+  store.focusMessageCategory(category, openDetail)
+}
+
+function openAllMessages() {
+  store.setInspectorTab('messages')
 }
 
 function jumpToMessagesTool(toolName: string) {
@@ -226,20 +195,6 @@ function handleRecClick(rec: { messageIndex?: number; highlight?: string }) {
   if (rec.messageIndex == null) return
   store.setInspectorTab('messages')
   store.focusMessageByIndex(rec.messageIndex, rec.highlight)
-}
-
-function modelBarColor(model: string): string {
-  if (/opus/i.test(model)) return '#fb923c'
-  if (/sonnet/i.test(model)) return 'var(--accent-blue)'
-  if (/haiku/i.test(model)) return '#a78bfa'
-  if (/gpt/i.test(model)) return '#10b981'
-  return '#94a3b8'
-}
-
-function barPct(tokens: number): number {
-  return agentBreakdown.value.totalTok > 0
-    ? Math.round(tokens / agentBreakdown.value.totalTok * 100)
-    : 0
 }
 
 function auditTooltip(audit: { id: string; name: string; description: string }): string {
@@ -259,6 +214,14 @@ function auditTooltip(audit: { id: string; name: string; description: string }):
   const direction = delta >= 0 ? 'grew' : 'shrunk'
   return `Compared with previous main turn, context ${direction} by ${fmtTokens(abs)} (${pctOfLimit.toFixed(1)}% of limit).`
 }
+
+function msgCategoryLabel(cat: string): string {
+  return CATEGORY_META[cat]?.label ?? cat
+}
+
+function msgCategoryDot(cat: string): string {
+  return CATEGORY_META[cat]?.color ?? '#475569'
+}
 </script>
 
 <template>
@@ -269,22 +232,40 @@ function auditTooltip(audit: { id: string; name: string; description: string }):
         <div class="narrative-detail">{{ healthNarrative.detail }}</div>
       </div>
       <div class="narrative-actions">
-        <button class="narrative-action" @click="openNarrativeTarget('messages')">Review Messages</button>
-        <button class="narrative-action" @click="openNarrativeTarget('timeline')">View Timeline Diff</button>
+        <button class="narrative-action" @click="openNarrativeTarget('messages')">
+          <i class="i-carbon-chat" /> Review Messages
+        </button>
+        <button class="narrative-action" @click="openNarrativeTarget('timeline')">
+          <i class="i-carbon-activity" /> View Timeline
+        </button>
       </div>
     </section>
 
     <!-- ═══ Stats row ═══ -->
     <div class="stats-grid">
       <!-- Context utilization -->
-      <div class="stat-card">
+      <div class="stat-card stat-card--spine" :style="{ '--spine-color': utilizationColor }">
         <div class="stat-readout" :style="{ color: utilizationColor }">
           {{ fmtPct(utilization) }}
         </div>
         <div class="stat-label">Context</div>
         <div class="stat-detail">{{ fmtTokens(entry.contextInfo.totalTokens) }} / {{ fmtTokens(entry.contextLimit) }}</div>
-        <!-- Utilization bar -->
-        <div class="util-track">
+        <div v-if="projection.turnsRemaining !== null && projection.turnsRemaining > 0" class="stat-projection" v-tooltip="`Growing ~${fmtTokens(Math.round(projection.growthPerTurn))}/turn over ${projection.sinceCompaction} turns`">
+          ~{{ projection.turnsRemaining }} turns left
+        </div>
+        <div v-else-if="projection.turnsRemaining === 0" class="stat-projection stat-projection--warn" v-tooltip="'Context window is at or near the limit'">
+          At limit
+        </div>
+        <!-- Composition tape -->
+        <div v-if="compositionTape" class="stat-tape">
+          <div
+            v-for="seg in compositionTape" :key="seg.key"
+            class="stat-tape-seg"
+            :style="{ flex: seg.pct, background: seg.color }"
+          />
+        </div>
+        <!-- Fallback plain utilization bar -->
+        <div v-else class="util-track">
           <div class="util-fill" :style="{ width: Math.min(utilization * 100, 100) + '%', background: utilizationColor }" />
         </div>
       </div>
@@ -346,98 +327,9 @@ function auditTooltip(audit: { id: string; name: string; description: string }):
     <CompositionTreemap
       :entry="entry"
       :turn-num="turnNum"
-      @category-click="jumpToMessagesCategory"
+      @category-click="(cat) => jumpToMessagesCategory(cat, false)"
       @tool-click="jumpToMessagesTool"
     />
-
-    <!-- ═══ Agent breakdown ═══ -->
-    <section class="panel" v-if="classified.length > 1">
-      <div class="panel-head">
-        <span class="panel-title">Agents</span>
-      </div>
-      <div class="panel-body agent-list">
-        <div v-for="ag in agentBreakdown.main" :key="ag.key" class="agent-row">
-          <span class="agent-name">Main <span class="agent-model">{{ shortModel(ag.model) }}</span></span>
-          <div class="bar-track"><div class="bar-fill" :style="{ width: barPct(ag.latestTokens) + '%', background: modelBarColor(ag.model) }" /></div>
-          <span class="agent-stat">{{ fmtTokens(ag.latestTokens) }} · {{ fmtCost(ag.cost) }}</span>
-        </div>
-        <template v-for="g in agentBreakdown.subGroups" :key="g.shortModel">
-          <div class="agent-row clickable" @click="toggle('agent-' + g.shortModel)">
-            <span class="agent-name">
-              <span class="expand-arrow">{{ isExpanded('agent-' + g.shortModel) ? '▾' : '▸' }}</span>
-              Sub <span class="agent-model">{{ g.shortModel }}</span>
-              <span class="agent-count">×{{ g.count }}</span>
-            </span>
-            <div class="bar-track"><div class="bar-fill" :style="{ width: barPct(g.totalTokens) + '%', background: modelBarColor(g.model) }" /></div>
-            <span class="agent-stat">{{ fmtTokens(g.totalTokens) }} · {{ fmtCost(g.totalCost) }}</span>
-          </div>
-          <template v-if="isExpanded('agent-' + g.shortModel)">
-            <div v-for="sub in g.agents" :key="sub.key" class="agent-row sub-row">
-              <span class="agent-name sub-name">{{ sub.label || sub.key }} <span class="agent-count">×{{ sub.count }}</span></span>
-              <div class="bar-track"><div class="bar-fill" :style="{ width: barPct(sub.latestTokens) + '%', background: modelBarColor(sub.model), opacity: 0.5 }" /></div>
-              <span class="agent-stat sub-stat">{{ fmtTokens(sub.latestTokens) }} · {{ fmtCost(sub.cost) }}</span>
-            </div>
-          </template>
-        </template>
-        <div v-if="agentBreakdown.subPct > 0" class="agent-footer">
-          {{ agentBreakdown.subPct }}% calls subagent · {{ agentBreakdown.subTokPct }}% tokens
-        </div>
-      </div>
-    </section>
-
-    <!-- ═══ Turn detail ═══ -->
-    <section class="panel" v-if="turnGroup.length > 0">
-      <div class="panel-head">
-        <span class="panel-title">Turn {{ turnNum }}</span>
-        <span class="panel-sub">
-          {{ turnGroup.length }} call{{ turnGroup.length !== 1 ? 's' : '' }}
-          · {{ fmtTokens(turnGroup.reduce((s, x) => s + x.entry.contextInfo.totalTokens, 0)) }}
-          · {{ fmtCost(turnGroup.reduce((s, x) => s + (x.entry.costUsd || 0), 0)) }}
-        </span>
-      </div>
-      <div class="panel-body call-list">
-        <div v-for="item in turnGroup" :key="item.entry.id" class="call-item">
-          <div
-            class="call-row"
-            :class="{ 'call-main': item.isMain, 'expanded': isExpanded(String(item.entry.id)) }"
-            @click="toggle(String(item.entry.id))"
-          >
-            <span class="call-badge" :class="modelColorClass(item.entry.contextInfo.model)">
-              {{ shortModel(item.entry.contextInfo.model) }}
-            </span>
-            <span class="call-desc" :class="{ main: item.isMain }">
-              {{ extractCallSummary(item.entry) || item.entry.agentLabel || (item.isMain ? 'Main' : 'Sub') }}
-            </span>
-            <span class="call-tok">{{ fmtTokens(item.entry.contextInfo.totalTokens) }}</span>
-            <span class="call-cost">{{ fmtCost(item.entry.costUsd) }}</span>
-          </div>
-          <Transition name="call-expand">
-            <div v-if="isExpanded(String(item.entry.id))" class="call-detail">
-              <div class="detail-section">
-                <span class="detail-label">Messages</span>
-                <span class="detail-value">{{ item.entry.contextInfo.messages?.length || 0 }}</span>
-              </div>
-              <div class="detail-section" v-if="item.entry.usage">
-                <span class="detail-label">Input</span>
-                <span class="detail-value">{{ fmtTokens(item.entry.usage.inputTokens) }} ({{ item.entry.usage.cacheReadTokens ? fmtTokens(item.entry.usage.cacheReadTokens) + ' cached' : 'no cache' }})</span>
-              </div>
-              <div class="detail-section" v-if="item.entry.usage">
-                <span class="detail-label">Output</span>
-                <span class="detail-value">{{ fmtTokens(item.entry.usage.outputTokens) }}</span>
-              </div>
-              <div class="detail-section" v-if="item.entry.timings">
-                <span class="detail-label">Duration</span>
-                <span class="detail-value">{{ fmtDuration(item.entry.timings.total_ms) }}</span>
-              </div>
-              <div class="detail-section" v-if="item.entry.stopReason">
-                <span class="detail-label">Stop reason</span>
-                <span class="detail-value">{{ item.entry.stopReason }}</span>
-              </div>
-            </div>
-          </Transition>
-        </div>
-      </div>
-    </section>
 
     <!-- ═══ Findings ═══ -->
     <HealthFindings
@@ -446,6 +338,46 @@ function auditTooltip(audit: { id: string; name: string; description: string }):
       :audit-tooltip="auditTooltip"
       @recommendation-click="handleRecClick"
     />
+
+    <!-- ═══ Context Diff ═══ -->
+    <ContextDiffPanel
+      :diff-data="diffData"
+      :current-entry="entry"
+      :previous-entry="previousMainEntry"
+      :show-tapes="true"
+      :hide-unchanged="true"
+      summary-mode="combined"
+      delta-tone="bad"
+      @category-click="(cat) => jumpToMessagesCategory(cat, false)"
+    />
+
+    <!-- ═══ Messages preview ═══ -->
+    <section v-if="categorizedMessages.length" class="panel panel--secondary">
+      <div class="panel-head">
+        <span class="panel-title">Messages</span>
+        <span class="panel-sub">{{ messages.length }} messages · {{ fmtTokens(totalMsgTokens) }}</span>
+      </div>
+      <div class="panel-body msg-preview">
+        <div
+          v-for="group in categorizedMessages" :key="group.category"
+          class="msg-group-row"
+          @click="jumpToMessagesCategory(group.category, false)"
+        >
+          <span class="msg-group-dot" :style="{ background: msgCategoryDot(group.category) }" />
+          <span class="msg-group-name">{{ msgCategoryLabel(group.category) }}</span>
+          <span class="msg-group-count">{{ group.items.length }}</span>
+          <span class="msg-group-tokens">{{ fmtTokens(group.tokens) }}</span>
+          <span class="msg-group-pct">{{ totalMsgTokens > 0 ? Math.round(group.tokens / totalMsgTokens * 100) : 0 }}%</span>
+          <div class="msg-group-bar">
+            <div class="msg-group-bar-fill" :style="{
+              width: totalMsgTokens > 0 ? (group.tokens / totalMsgTokens * 100) + '%' : '0%',
+              background: msgCategoryDot(group.category),
+            }" />
+          </div>
+        </div>
+        <button class="msg-view-all" @click="openAllMessages">View all messages ›</button>
+      </div>
+    </section>
   </div>
 </template>
 
@@ -453,29 +385,46 @@ function auditTooltip(audit: { id: string; name: string; description: string }):
 @use '../styles/mixins' as *;
 
 .overview {
-  padding: var(--space-5);
+  padding: var(--space-4);
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--space-3);
 }
 
 .health-narrative {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: var(--space-4);
+  gap: var(--space-3);
   border: 1px solid var(--border-mid);
+  border-left: none;
   border-radius: var(--radius-md);
   background: var(--bg-surface);
-  padding: var(--space-3) var(--space-4);
+  padding: var(--space-2) var(--space-3);
+
+  &::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: transparent;
+    pointer-events: none;
+  }
 }
 
 .narrative-advisory {
   border-color: rgba(245, 158, 11, 0.4);
   background: rgba(245, 158, 11, 0.06);
+
+  &::before { background: var(--accent-amber); }
 }
 
 .narrative-neutral {
   border-color: rgba(94, 159, 248, 0.35);
+
+  &::before { background: var(--accent-blue); }
 }
 
 .narrative-copy {
@@ -510,6 +459,11 @@ function auditTooltip(audit: { id: string; name: string; description: string }):
   border-radius: 0;
   cursor: pointer;
   transition: border-color 0.12s, color 0.12s, background 0.12s;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+
+  i { font-size: 12px; }
 
   &:hover {
     border-color: var(--border-mid);
@@ -530,10 +484,27 @@ function auditTooltip(audit: { id: string; name: string; description: string }):
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: var(--space-4);
+  padding: var(--space-3) var(--space-3);
   background: var(--bg-surface);
   border: 1px solid var(--border-dim);
   border-radius: var(--radius-sm);
+  position: relative;
+}
+
+.stat-card--spine {
+  border-left: none;
+
+  &::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: var(--spine-color, var(--accent-blue));
+    border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+    pointer-events: none;
+  }
 }
 
 .stat-card--health {
@@ -563,6 +534,34 @@ function auditTooltip(audit: { id: string; name: string; description: string }):
   font-size: var(--text-xs);
   color: var(--text-ghost);
   margin-top: 2px;
+}
+
+.stat-projection {
+  @include mono-text;
+  font-size: 9px;
+  color: var(--accent-amber);
+  margin-top: 2px;
+  cursor: help;
+
+  &--warn {
+    color: var(--accent-red);
+  }
+}
+
+// ── Composition tape in Context card ──
+.stat-tape {
+  margin-top: 6px;
+  height: 3px;
+  width: 100%;
+  display: flex;
+  border-radius: 2px;
+  overflow: hidden;
+  gap: 1px;
+}
+
+.stat-tape-seg {
+  height: 100%;
+  min-width: 1px;
 }
 
 .util-track {
@@ -596,12 +595,21 @@ function auditTooltip(audit: { id: string; name: string; description: string }):
   @include panel;
 }
 
+.panel--secondary {
+  background: var(--bg-field);
+  border-color: rgba(51, 51, 51, 0.75);
+}
+
 .panel-head {
   padding: var(--space-2) var(--space-4);
   border-bottom: 1px solid var(--border-dim);
   display: flex;
   align-items: center;
   gap: var(--space-2);
+}
+
+.panel--secondary .panel-head {
+  background: var(--bg-surface);
 }
 
 .panel-title {
@@ -614,195 +622,91 @@ function auditTooltip(audit: { id: string; name: string; description: string }):
 }
 
 .panel-body {
-  padding: var(--space-4);
+  padding: var(--space-3);
 }
 
-// ═══ Agent breakdown ═══
-.agent-list {
-  padding: var(--space-3) var(--space-4);
-  max-height: 280px;
-  overflow-y: auto;
-  @include scrollbar-thin;
-}
-
-.agent-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: 4px 0;
-  font-size: var(--text-sm);
-
-  &.clickable { cursor: pointer; }
-  &.sub-row { padding-left: var(--space-5); }
-}
-
-.agent-name {
-  width: 130px;
-  color: var(--text-secondary);
-  @include truncate;
-  flex-shrink: 0;
-}
-
-.sub-name { color: var(--text-dim); font-size: var(--text-xs); }
-.agent-model { @include mono-text; color: var(--text-muted); }
-.agent-count { @include mono-text; font-size: var(--text-xs); color: var(--text-ghost); }
-.expand-arrow { color: var(--text-muted); margin-right: 2px; font-size: var(--text-xs); }
-
-.bar-track {
-  flex: 1;
-  height: 5px;
-  background: var(--bg-raised);
-  border-radius: 3px;
-  overflow: hidden;
-}
-
-.bar-fill {
-  height: 100%;
-  border-radius: 3px;
-  transition: width 0.4s ease;
-}
-
-.agent-stat {
-  @include mono-text;
-  width: 110px;
-  text-align: right;
-  color: var(--text-dim);
-  font-size: var(--text-xs);
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.sub-stat { font-size: var(--text-xs); }
-
-.agent-footer {
-  margin-top: var(--space-2);
-  font-size: var(--text-xs);
-  color: var(--text-ghost);
-}
-
-// ═══ Call rows ═══
-.call-list { padding: var(--space-2) var(--space-3); }
-
-.call-item + .call-item {
-  margin-top: 4px;
-}
-
-.call-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: 5px 6px;
-  border-radius: 0;
-  font-size: var(--text-sm);
-  transition: background 0.1s;
-  cursor: pointer;
-
-  &:hover { background: var(--bg-hover); }
-  &.call-main {
-    background: rgba(91, 156, 245, 0.16);
-    border: 1px solid rgba(91, 156, 245, 0.25);
-  }
-  &.expanded { 
-    background: var(--bg-surface); 
-    border-bottom: 1px solid var(--border-dim);
-    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
-  }
-}
-
-.call-detail {
-  background: var(--bg-raised);
-  border: 1px solid var(--border-dim);
-  border-top: none;
-  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
-  padding: var(--space-2) var(--space-3);
-  margin: 0 6px 0 6px;
+// ═══ Messages preview ═══
+.msg-preview {
+  padding: var(--space-2) var(--space-4);
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 }
 
-.call-expand-enter-active,
-.call-expand-leave-active {
-  transition: max-height 0.2s ease, opacity 0.16s ease;
-  overflow: hidden;
-}
-
-.call-expand-enter-from,
-.call-expand-leave-to {
-  max-height: 0;
-  opacity: 0;
-}
-
-.call-expand-enter-to,
-.call-expand-leave-from {
-  max-height: 220px;
-  opacity: 1;
-}
-
-.detail-section {
+.msg-group-row {
   display: flex;
-  justify-content: space-between;
-  font-size: var(--text-xs);
+  align-items: center;
+  gap: var(--space-2);
+  padding: 4px 4px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.1s;
+
+  &:hover { background: var(--bg-hover); }
 }
 
-.detail-label {
-  color: var(--text-dim);
-}
-
-.detail-value {
-  @include mono-text;
-  color: var(--text-secondary);
-  font-size: var(--text-xs);
-}
-
-.call-badge {
-  @include mono-text;
-  font-size: 10px;
-  padding: 1px 5px;
-  border-radius: 2px;
-  background: var(--bg-raised);
-  min-width: 52px;
-  width: auto;
-  text-align: center;
+.msg-group-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 1px;
   flex-shrink: 0;
-  color: var(--text-primary);
-  white-space: nowrap;
 }
 
-.call-desc {
-  @include truncate;
-  @include sans-text;
-  color: var(--text-secondary);
-  flex: 1;
+.msg-group-name {
   font-size: var(--text-sm);
-
-  &.main { color: var(--text-primary); }
-}
-
-.call-tok {
-  @include mono-text;
   color: var(--text-secondary);
-  font-size: var(--text-xs);
-  width: 60px;
-  text-align: right;
-  flex-shrink: 0;
+  min-width: 120px;
 }
 
-.call-cost {
+.msg-group-count {
   @include mono-text;
-  color: var(--accent-green);
   font-size: var(--text-xs);
-  width: 50px;
+  color: var(--text-dim);
+  width: 30px;
   text-align: right;
-  flex-shrink: 0;
 }
 
-// Model colors
-.model-opus { color: #fb923c; }
-.model-sonnet { color: var(--accent-blue); }
-.model-haiku { color: #a78bfa; }
-.model-gpt { color: #10b981; }
-.model-gemini { color: var(--accent-cyan); }
-.model-default { color: var(--text-dim); }
+.msg-group-tokens {
+  @include mono-text;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  width: 55px;
+  text-align: right;
+}
 
+.msg-group-pct {
+  @include mono-text;
+  font-size: var(--text-xs);
+  color: var(--text-dim);
+  width: 32px;
+  text-align: right;
+}
+
+.msg-group-bar {
+  flex: 1;
+  height: 4px;
+  background: var(--bg-raised);
+  border-radius: 2px;
+  overflow: hidden;
+  min-width: 40px;
+}
+
+.msg-group-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.msg-view-all {
+  @include mono-text;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  padding: 6px 4px 0;
+  cursor: pointer;
+  transition: color 0.12s;
+
+  &:hover { color: var(--accent-blue); }
+}
 </style>

@@ -50,6 +50,14 @@ export const useSessionStore = defineStore('session', () => {
   const messageFocusTool = ref<string | null>(null)
   const messageFocusIndex = ref<number | null>(null)
   const messageFocusHighlight = ref<string | null>(null)
+  const messageFocusOpenDetail = ref(false)
+
+  // Timeline tab persistent state
+  const timelineMode = ref<'all' | 'main'>('all')
+  const timelineStackMode = ref<'absolute' | 'normalized'>('absolute')
+  const timelineHiddenLegendKeys = ref(new Set<string>())
+  const timelineShowLimitOverlay = ref(true)
+  const timelineShowCacheOverlay = ref(false)
 
   // Sessions that received data recently (for pulse animation)
   const recentlyUpdated = ref<Set<string>>(new Set())
@@ -282,11 +290,12 @@ export const useSessionStore = defineStore('session', () => {
     modelFilter.value = model
   }
 
-  function focusMessageCategory(category: string) {
+  function focusMessageCategory(category: string, openDetail = false) {
     messageFocusCategory.value = category
     messageFocusTool.value = null
     messageFocusIndex.value = null
     messageFocusHighlight.value = null
+    messageFocusOpenDetail.value = openDetail
     messageFocusToken.value += 1
   }
 
@@ -427,6 +436,12 @@ export const useSessionStore = defineStore('session', () => {
     messageFocusTool,
     messageFocusIndex,
     messageFocusHighlight,
+    messageFocusOpenDetail,
+    timelineMode,
+    timelineStackMode,
+    timelineHiddenLegendKeys,
+    timelineShowLimitOverlay,
+    timelineShowCacheOverlay,
     recentlyUpdated,
 
     // Computed

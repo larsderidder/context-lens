@@ -115,7 +115,14 @@ const activeDetailedTreemapNodes = computed((): TreemapNode[] => {
   return topLevelTreemapNodes.value
 })
 
-const detailedLegendNodes = computed(() => activeDetailedTreemapNodes.value.slice(0, 8))
+const DETAILED_LEGEND_CAP = 5
+const detailedLegendNodes = computed(() => activeDetailedTreemapNodes.value.slice(0, DETAILED_LEGEND_CAP))
+const hiddenDetailedLegendNodes = computed(() => activeDetailedTreemapNodes.value.slice(DETAILED_LEGEND_CAP))
+const hiddenDetailedLegendTooltip = computed(() =>
+  hiddenDetailedLegendNodes.value
+    .map((item) => `${item.label}: ${legendPct(item.tokens)}`)
+    .join('\n'),
+)
 
 function buildTreemapLayout(nodes: TreemapNode[]): TreemapLayoutNode[] {
   if (nodes.length === 0) return []
@@ -187,6 +194,13 @@ function resetTreemapDrill() {
   treemapDrillKey.value = null
 }
 
+const totalTokens = computed(() => props.entry?.composition?.reduce((s, c) => s + c.tokens, 0) ?? 0)
+
+function legendPct(tokens: number): string {
+  if (totalTokens.value === 0) return ''
+  return Math.round(tokens / totalTokens.value * 100) + '%'
+}
+
 watch(
   () => props.entry?.id,
   () => {
@@ -196,7 +210,7 @@ watch(
 </script>
 
 <template>
-  <section class="panel" v-if="entry.composition.length > 0">
+  <section class="panel panel--hero" v-if="entry.composition.length > 0">
     <div class="panel-head">
       <span class="panel-title">Composition</span>
       <span class="panel-sub">Turn {{ turnNum }} · {{ fmtTokens(entry.composition.reduce((s, c) => s + c.tokens, 0)) }}</span>
@@ -260,11 +274,12 @@ watch(
         <template v-if="treemapMode === 'detailed'">
           <span v-for="item in detailedLegendNodes" :key="`legend-${item.key}`" class="legend-item">
             <span class="legend-dot" :style="{ background: item.color }" />
-            {{ item.label }}
+            {{ item.label }} <span class="legend-pct">{{ legendPct(item.tokens) }}</span>
           </span>
           <span
             v-if="activeDetailedTreemapNodes.length > detailedLegendNodes.length"
             class="legend-item"
+            v-tooltip="hiddenDetailedLegendTooltip"
           >
             +{{ activeDetailedTreemapNodes.length - detailedLegendNodes.length }} more
           </span>
@@ -272,7 +287,7 @@ watch(
         <template v-else>
           <span v-for="g in simpleComposition" :key="g.key" class="legend-item">
             <span class="legend-dot" :style="{ background: g.color }" />
-            {{ g.label }}
+            {{ g.label }} <span class="legend-pct">{{ legendPct(g.tokens) }}</span>
           </span>
         </template>
       </div>
@@ -285,6 +300,10 @@ watch(
 
 .panel {
   @include panel;
+}
+
+.panel--hero {
+  border-color: var(--border-mid);
 }
 
 .panel-head {
@@ -347,7 +366,7 @@ watch(
 }
 
 .treemap {
-  height: 78px;
+  height: 140px;
   border-radius: 0;
   overflow: hidden;
   position: relative;
@@ -477,4 +496,10 @@ watch(
   border-radius: 2px;
   flex-shrink: 0;
 }
+
+.legend-pct {
+  @include mono-text;
+  color: var(--text-ghost);
+}
+
 </style>

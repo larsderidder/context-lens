@@ -409,3 +409,85 @@ export function segmentTooltip(entry: ProjectedEntry, activeSegment: GroupSegmen
 export function formatYTick(value: number, mode: 'cost' | 'tokens'): string {
   return mode === 'cost' ? fmtCost(value) : fmtTokens(value)
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Cache Hit Rate
+// ══════════════════════════════════════════════════════════════════════════════
+
+export function cacheHitRate(entry: ProjectedEntry): number | null {
+  if (!entry.usage) return null
+  const total = entry.usage.inputTokens + entry.usage.cacheReadTokens + entry.usage.cacheWriteTokens
+  if (total === 0) return null
+  return entry.usage.cacheReadTokens / total
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Turns Remaining Projection
+// ══════════════════════════════════════════════════════════════════════════════
+
+export interface TurnsProjection {
+  turnsRemaining: number | null // null = not enough data or no growth
+  growthPerTurn: number         // average tokens added per main turn since last compaction
+  sinceCompaction: number       // how many main turns since last compaction (or session start)
+  contextLimit: number
+  currentTokens: number
+}
+
+/**
+ * Estimate turns remaining before hitting the context limit.
+ * Only considers main turns since the last compaction event (or session start).
+ * Requires at least 2 data points to compute a growth rate.
+ */
+export function projectTurnsRemaining(
+  classified: ClassifiedEntry[],
+): TurnsProjection {
+  const empty: TurnsProjection = {
+    turnsRemaining: null, growthPerTurn: 0, sinceCompaction: 0,
+    contextLimit: 0, currentTokens: 0,
+  }
+  if (classified.length === 0) return empty
+
+  // Get main entries in chronological order
+  const mainEntries = classified.filter(c => c.isMain).map(c => c.entry)
+  if (mainEntries.length < 2) return empty
+
+  const latest = mainEntries[mainEntries.length - 1]
+  const contextLimit = latest.contextLimit
+  if (contextLimit <= 0) return empty
+
+  // Find the last compaction: a >25% drop in tokens between consecutive main turns
+  let startIdx = 0
+  for (let i = 1; i < mainEntries.length; i++) {
+    const prev = mainEntries[i - 1].contextInfo.totalTokens
+    const curr = mainEntries[i].contextInfo.totalTokens
+    if (prev > 0 && curr < prev * 0.75) {
+      startIdx = i // restart from after compaction
+    }
+  }
+
+  const window = mainEntries.slice(startIdx)
+  if (window.length < 2) return empty
+
+  const first = window[0].contextInfo.totalTokens
+  const last = window[window.length - 1].contextInfo.totalTokens
+  const growth = last - first
+  const turns = window.length - 1
+  const growthPerTurn = growth / turns
+
+  const currentTokens = last
+  const remaining = contextLimit - currentTokens
+
+  let turnsRemaining: number | null = null
+  if (growthPerTurn > 0) {
+    turnsRemaining = Math.floor(remaining / growthPerTurn)
+    if (turnsRemaining < 0) turnsRemaining = 0
+  }
+
+  return {
+    turnsRemaining,
+    growthPerTurn,
+    sinceCompaction: window.length,
+    contextLimit,
+    currentTokens,
+  }
+}
