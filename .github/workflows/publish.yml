@@ -16,9 +16,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          registry-url: https://registry.npmjs.org
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm exec biome check .
       - run: pnpm test
-      - run: npm publish --access public
+      - run: |
+          echo "registry=https://registry.npmjs.org/" > ~/.npmrc
+          npm publish --access public
