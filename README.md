@@ -68,17 +68,21 @@ This starts the proxy (port 4040), opens the web UI (http://localhost:4041), set
 
 ### Screenshots
 
-**Findings**
+**Sessions list**
+
+![Sessions list](sessions-screenshot.png)
+
+**Messages view with drill-down details**
+
+![Messages view](messages-screenshot.png)
+
+**Timeline view**
+
+![Timeline view](timeline-screenshot.png)
+
+**Findings panel**
 
 ![Findings panel](findings-screenshot.png)
-
-**Diff view**
-
-![Context diff view](diff.png)
-
-**Drill-down details**
-
-![Drill-down details panel](overview-sidebar.png)
 
 ## Manual Mode
 
@@ -178,6 +182,27 @@ The tool makes its own TLS connection through the proxy, preserving its native T
 **What the proxy captures**
 
 Each request is parsed to extract: model name, system prompts, tool definitions, message history (with per-message token estimates), and content block types (text, tool calls, tool results, images, thinking). The response is captured to extract usage stats and cost. Requests are grouped into conversations using session IDs (Anthropic `metadata.user_id`), response chaining (OpenAI `previous_response_id`), or a fingerprint of the system prompt + first user message.
+
+## Why Context Lens?
+
+Tools like [Langfuse](https://langfuse.com/) and [Braintrust](https://braintrust.dev/) are great for observability when you control the code: you add their SDK, instrument your calls, and get traces in a dashboard. Context Lens solves a different problem.
+
+**You can't instrument tools you don't own.** Claude Code, Codex, Gemini CLI, and Aider are closed-source binaries. You can't add an SDK to them. Context Lens works as a transparent proxy, so it captures everything without touching the tool's code.
+
+**Context composition, not just token counts.** Most observability tools show you input/output token totals. Context Lens breaks down *what's inside* the context window: how much is system prompts vs. tool definitions vs. conversation history vs. tool results vs. thinking blocks. That's the information you need to understand why a session costs what it does.
+
+**Local and private.** Everything runs on your machine. No accounts, no cloud, no data leaving your network. Start it, use it, stop it.
+
+| | Context Lens | Langfuse / Braintrust |
+|:---|:---|:---|
+| **Setup** | `npx context-lens claude` | Add SDK, configure API keys |
+| **Works with closed-source tools** | Yes (proxy) | No (needs instrumentation) |
+| **Context composition breakdown** | Yes (treemap, per-category) | Token totals only |
+| **Runs locally** | Yes, entirely | Cloud or self-hosted server |
+| **Prompt management & evals** | No | Yes |
+| **Team/production use** | No (single-user, local) | Yes |
+
+Context Lens is for developers who want to understand and optimize their coding agent sessions. If you need production monitoring, prompt versioning, or team dashboards, use Langfuse.
 
 ## Data
 
