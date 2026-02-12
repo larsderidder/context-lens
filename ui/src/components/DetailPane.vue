@@ -401,8 +401,8 @@ const metaPairs = computed((): [string, string][] => {
       <div class="header-top">
         <span class="detail-title" :style="{ color: titleColor }">{{ titleText }}</span>
         <div class="nav-btns">
-          <button :disabled="!canPrev" @click="navigate(-1)" v-tooltip="'↑ Previous'">↑</button>
-          <button :disabled="!canNext" @click="navigate(1)" v-tooltip="'↓ Next'">↓</button>
+          <button :disabled="!canPrev" @click="navigate(-1)" v-tooltip="'↑ Previous'"><i class="i-carbon-chevron-up" /></button>
+          <button :disabled="!canNext" @click="navigate(1)" v-tooltip="'↓ Next'"><i class="i-carbon-chevron-down" /></button>
         </div>
         <button class="close-btn" @click="$emit('close')" v-tooltip="'Close (Esc)'">
           <i class="i-carbon-close" />
@@ -454,6 +454,7 @@ const metaPairs = computed((): [string, string][] => {
 
     <!-- ── Footer meta ── -->
     <div class="detail-footer">
+      <div class="meta-header">Metadata</div>
       <template v-for="([label, val]) in metaPairs" :key="label">
         <span class="meta-key">{{ label }}</span>
         <span class="meta-val" :title="val">{{ val }}</span>
@@ -700,6 +701,15 @@ const metaPairs = computed((): [string, string][] => {
   gap: 3px var(--space-4);
   @include mono-text;
   font-size: 12px;
+}
+
+.meta-header {
+  grid-column: 1 / -1;
+  color: var(--text-muted);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 2px;
 }
 
 .meta-key { color: var(--text-dim); }

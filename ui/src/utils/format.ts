@@ -5,11 +5,10 @@ export function fmtTokens(n: number): string {
   return String(n)
 }
 
-/** Format cost: 0.0034 → "$0.0034", 1.23 → "$1.23", null → "--" */
+/** Format cost: 0.0034 → "$0.00", 1.23 → "$1.23", null → "--" */
 export function fmtCost(c: number | null | undefined): string {
   if (c == null) return '--'
-  if (c === 0) return '$0.00'
-  return '$' + c.toFixed(c < 0.01 ? 4 : 2)
+  return '$' + c.toFixed(2)
 }
 
 /** Format ISO timestamp to local time: "14:32" */

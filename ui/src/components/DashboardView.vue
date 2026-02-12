@@ -150,12 +150,30 @@ function healthRatingClass(s: ConversationSummary): string {
   return 'health-good'
 }
 
+function auditRatingClass(score: number): string {
+  if (score >= 90) return 'health-good'
+  if (score >= 50) return 'health-warn'
+  return 'health-bad'
+}
+
 function relativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime()
   if (diff < 60000) return 'just now'
   if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`
   if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`
   return `${Math.floor(diff / 86400000)}d ago`
+}
+
+function exactTime(iso: string): string {
+  const d = new Date(iso)
+  const time = d.toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  })
+  const date = d.toLocaleDateString('en-CA') // YYYY-MM-DD format
+  return `${time} on ${date}`
 }
 
 function compactDir(path: string | null | undefined): string {
@@ -323,7 +341,7 @@ function onKeydown(e: KeyboardEvent) {
               :class="{ checked: isSourceActive(src) }"
               @click="toggleSource(src)"
             >
-              <span class="check">✓</span>
+              <span class="check"><i class="i-carbon-checkmark" /></span>
               <span class="source-badge" :class="sourceBadgeClass(src)">{{ src }}</span>
             </div>
           </div>
@@ -392,27 +410,36 @@ function onKeydown(e: KeyboardEvent) {
                 <span class="num green">{{ fmtCost(s.totalCost) }}</span>
               </td>
               <td class="col-health">
-                <span class="health-num" :class="healthRatingClass(s)">
-                  {{ s.healthScore?.overall ?? '—' }}
-                </span>
+                <div class="health-cell">
+                  <span class="health-num" :class="healthRatingClass(s)">
+                    {{ s.healthScore?.overall ?? '—' }}
+                  </span>
+                  <div v-if="s.healthScore?.audits" class="health-tooltip">
+                    <div class="health-tooltip-title">Health Score: {{ s.healthScore.overall }}</div>
+                    <div v-for="audit in s.healthScore.audits" :key="audit.id" class="health-audit-line">
+                      <span class="health-audit-name">{{ audit.name }}</span>
+                      <span class="health-audit-score" :class="auditRatingClass(audit.score)">{{ audit.score }}</span>
+                    </div>
+                  </div>
+                </div>
               </td>
               <td class="col-spark">
                 <div class="inline-spark" v-html="getSparkSVG(s)"></div>
               </td>
               <td class="col-time">
-                <span class="time-text">{{ relativeTime(s.latestTimestamp) }}</span>
+                <span class="time-text" :title="exactTime(s.latestTimestamp)">{{ relativeTime(s.latestTimestamp) }}</span>
               </td>
               <td class="col-arrow">
                 <button
                   class="inspect-btn"
                   title="Open in inspector"
                   @click.stop="inspectSession(s.id)"
-                >→</button>
+                ><i class="i-carbon-arrow-right" /></button>
               </td>
             </tr>
 
             <!-- Expand row -->
-            <tr v-if="isExpanded(s.id)" class="expand-row open">
+            <tr class="expand-row" :class="{ open: isExpanded(s.id) }">
               <td colspan="11">
                 <div class="expand-content">
                   <div class="expand-inner">
@@ -449,10 +476,10 @@ function onKeydown(e: KeyboardEvent) {
                       <!-- Findings -->
                       <div class="expand-section">
                         <div class="expand-section-label">Findings</div>
-                        <div class="expand-findings">
+                        <div class="expand-findings" :class="{ 'expand-findings--scroll': getFindings(s).length > 5 }">
                           <template v-if="getFindings(s).length > 0">
                             <div v-for="(f, i) in getFindings(s)" :key="i" class="finding">
-                              <span class="finding-dot" :class="`sev-${f.severity}`"></span>
+                              <i class="finding-icon" :class="[`sev-${f.severity}`, f.severity === 'high' ? 'i-carbon-warning-alt' : f.severity === 'med' ? 'i-carbon-information' : 'i-carbon-checkmark']"></i>
                               <span class="finding-text">
                                 {{ f.title }}
                                 <span v-if="f.impact" class="finding-impact" :class="`sev-${f.severity}`">{{ f.impact }}</span>
@@ -460,18 +487,13 @@ function onKeydown(e: KeyboardEvent) {
                             </div>
                           </template>
                           <div v-else class="finding">
-                            <span class="finding-dot sev-low"></span>
+                            <i class="finding-icon sev-low i-carbon-checkmark"></i>
                             <span class="finding-text muted">No issues detected.</span>
                           </div>
                         </div>
                       </div>
 
-                      <!-- Inspector button -->
-                      <div class="expand-actions">
-                        <button class="inspect-link-btn" @click="inspectSession(s.id)">
-                          Show in Inspector →
-                        </button>
-                      </div>
+
                     </template>
                   </div>
                 </div>
@@ -600,7 +622,7 @@ function onKeydown(e: KeyboardEvent) {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 10px;
+  font-size: 9px;
   color: transparent;
   transition: background 0.1s, border-color 0.1s, color 0.1s;
   flex-shrink: 0;
@@ -640,7 +662,6 @@ function onKeydown(e: KeyboardEvent) {
   border: 1px solid var(--border-dim);
   border-radius: var(--radius-lg);
   overflow: hidden;
-  padding-top: 24px;
 }
 
 .ledger {
@@ -651,7 +672,7 @@ function onKeydown(e: KeyboardEvent) {
 .ledger th {
   @include section-label;
   text-align: left;
-  padding: 10px 12px;
+  padding: 6px 10px;
   border-bottom: 1px solid var(--border-mid);
   background: var(--bg-surface);
   position: sticky;
@@ -665,7 +686,7 @@ function onKeydown(e: KeyboardEvent) {
 }
 
 .ledger td {
-  padding: 10px 12px;
+  padding: 6px 10px;
   border-bottom: 1px solid var(--border-dim);
   vertical-align: middle;
 }
@@ -694,7 +715,7 @@ function onKeydown(e: KeyboardEvent) {
 .priority-bar {
   width: 3px;
   height: 100%;
-  min-height: 36px;
+  min-height: 28px;
 }
 
 .prio-critical { background: var(--accent-red); }
@@ -710,7 +731,7 @@ function onKeydown(e: KeyboardEvent) {
 .col-cost { width: 64px; text-align: right !important; }
 .col-health { width: 52px; text-align: center !important; }
 .col-spark { width: 80px; padding-left: 0 !important; padding-right: 0 !important; }
-.col-time { width: 52px; text-align: right !important; }
+.col-time { width: 72px; text-align: right !important; white-space: nowrap; }
 .col-arrow { width: 28px; text-align: center !important; }
 
 // ── Cell styles ──
@@ -724,13 +745,13 @@ function onKeydown(e: KeyboardEvent) {
   line-height: 1.4;
 }
 
-// Badge colors (reuse from SessionList naming convention)
-:deep(.badge-claude) { background: rgba(251, 146, 60, 0.15); color: #fb923c; }
-:deep(.badge-codex) { background: rgba(52, 211, 153, 0.15); color: #34d399; }
-:deep(.badge-aider) { background: rgba(14, 165, 233, 0.15); color: var(--accent-blue); }
-:deep(.badge-kimi) { background: rgba(167, 139, 250, 0.15); color: var(--accent-purple); }
-:deep(.badge-pi) { background: rgba(167, 139, 250, 0.15); color: var(--accent-purple); }
-:deep(.badge-unknown) { background: var(--bg-raised); color: var(--text-dim); }
+// Badge colors
+.badge-claude { background: rgba(251, 146, 60, 0.15); color: #fb923c; }
+.badge-codex { background: rgba(52, 211, 153, 0.15); color: #34d399; }
+.badge-aider { background: rgba(14, 165, 233, 0.15); color: var(--accent-blue); }
+.badge-kimi { background: rgba(167, 139, 250, 0.15); color: var(--accent-purple); }
+.badge-pi { background: rgba(167, 139, 250, 0.15); color: var(--accent-purple); }
+.badge-unknown { background: var(--bg-raised); color: var(--text-dim); }
 
 .model-text {
   @include mono-text;
@@ -769,20 +790,95 @@ function onKeydown(e: KeyboardEvent) {
 .util-mid { color: var(--accent-amber); background: var(--accent-amber-dim); }
 .util-high { color: var(--accent-red); background: var(--accent-red-dim); }
 
+.health-cell {
+  position: relative;
+  display: inline-block;
+}
+
 .health-num {
   @include mono-text;
   font-size: var(--text-sm);
   font-weight: 600;
+  cursor: help;
 }
 
 .health-good { color: var(--accent-green); }
 .health-warn { color: var(--accent-amber); }
 .health-bad { color: var(--accent-red); }
 
+.health-tooltip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-bright);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  z-index: 100;
+  box-shadow: var(--shadow-lg);
+  min-width: 200px;
+
+  .health-cell:hover & {
+    opacity: 1;
+  }
+
+  &::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 6px solid transparent;
+    border-top-color: var(--border-bright);
+  }
+}
+
+.health-tooltip-title {
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-dim);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.health-audit-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 2px 0;
+}
+
+.health-audit-name {
+  color: var(--text-secondary);
+}
+
+.health-audit-score {
+  font-weight: 600;
+  text-align: right;
+}
+
 .time-text {
   @include mono-text;
   font-size: var(--text-xs);
   color: var(--text-muted);
+  cursor: help;
+  display: inline-block;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  transition: background 0.15s, color 0.15s;
+  
+  &:hover {
+    background: var(--bg-hover);
+    color: var(--text-secondary);
+  }
 }
 
 .inline-spark {
@@ -796,67 +892,50 @@ function onKeydown(e: KeyboardEvent) {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
-  background: none;
+  width: 26px;
+  height: 26px;
+  background: var(--bg-raised);
   border: 1px solid var(--border-dim);
   border-radius: var(--radius-sm);
   cursor: pointer;
-  color: var(--text-ghost);
-  font-size: 12px;
-  transition: border-color 0.12s, color 0.12s, background 0.12s;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.15s ease;
   padding: 0;
   line-height: 1;
 
   &:hover {
-    border-color: var(--accent-blue);
-    color: var(--accent-blue);
-    background: var(--accent-blue-dim);
-  }
-}
-
-// ── Expand actions (inside expanded row) ──
-.expand-actions {
-  display: flex;
-  justify-content: flex-end;
-  padding-top: var(--space-3);
-  margin-top: var(--space-2);
-  border-top: 1px solid var(--border-dim);
-}
-
-.inspect-link-btn {
-  font-size: var(--text-sm);
-  font-weight: 500;
-  padding: 6px 12px;
-  background: var(--bg-raised);
-  border: 1px solid var(--border-dim);
-  border-radius: var(--radius-sm);
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: all 0.15s;
-
-  &:hover {
     background: var(--accent-blue-dim);
     border-color: var(--accent-blue);
     color: var(--accent-blue);
+    transform: translateX(2px);
   }
 }
 
 // ── Expanded row detail ──
 .expand-row td {
   padding: 0 !important;
-  border-bottom: 1px solid var(--border-dim);
+  border-bottom: 1px solid transparent;
+  background: transparent !important;
+  transition: border-color 0.22s ease, background-color 0.22s ease;
+}
+
+.expand-row.open td {
+  border-bottom-color: var(--border-dim);
   background: var(--bg-expand, #141414) !important;
 }
 
 .expand-content {
   overflow: hidden;
-  animation: expandIn 0.2s ease forwards;
+  max-height: 0;
+  opacity: 0;
+  transition: max-height 0.26s cubic-bezier(0.25, 0.46, 0.45, 0.94), opacity 0.2s ease;
 }
 
-@keyframes expandIn {
-  from { max-height: 0; opacity: 0; }
-  to { max-height: 400px; opacity: 1; }
+.expand-row.open .expand-content {
+  max-height: 420px;
+  opacity: 1;
 }
 
 .expand-inner {
@@ -864,6 +943,17 @@ function onKeydown(e: KeyboardEvent) {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+  transform: translateY(-2px);
+  transition: padding 0.26s cubic-bezier(0.25, 0.46, 0.45, 0.94), transform 0.2s ease;
+}
+
+.expand-row.open .expand-inner {
+  transform: translateY(0);
+}
+
+.expand-row:not(.open) .expand-inner {
+  padding-top: 0;
+  padding-bottom: 0;
 }
 
 .expand-loading {
@@ -922,23 +1012,30 @@ function onKeydown(e: KeyboardEvent) {
   gap: 6px;
 }
 
+.expand-findings--scroll {
+  --finding-row-height: 22px;
+  max-height: calc((5 * var(--finding-row-height)) + (4 * 6px));
+  overflow-y: auto;
+  padding-right: 4px;
+  @include scrollbar-thin;
+}
+
 .finding {
   display: flex;
   align-items: flex-start;
   gap: var(--space-2);
   font-size: var(--text-sm);
+  min-height: var(--finding-row-height, auto);
 }
 
-.finding-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 1px;
-  margin-top: 5px;
+.finding-icon {
+  font-size: 13px;
+  margin-top: 1px;
   flex-shrink: 0;
 
-  &.sev-high { background: var(--accent-red); box-shadow: 0 0 4px var(--accent-red); }
-  &.sev-med { background: var(--accent-amber); box-shadow: 0 0 4px var(--accent-amber); }
-  &.sev-low { background: var(--accent-green); }
+  &.sev-high { color: var(--accent-red); }
+  &.sev-med { color: var(--accent-amber); }
+  &.sev-low { color: var(--accent-green); }
 }
 
 .finding-text {
@@ -1010,7 +1107,7 @@ function onKeydown(e: KeyboardEvent) {
   background: var(--bg-field);
   border: 1px solid var(--border-dim);
   border-radius: var(--radius-lg);
-  padding: var(--space-4);
+  padding: var(--space-3);
   text-align: center;
   transition: border-color 0.2s ease;
 
@@ -1069,7 +1166,7 @@ function onKeydown(e: KeyboardEvent) {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .expand-content { animation: none; }
+  .expand-content { transition: none; }
   .inspect-btn { transition: none; }
 }
 </style>

@@ -4,6 +4,7 @@ import FloatingVue from 'floating-vue'
 import App from './App.vue'
 
 import 'floating-vue/dist/style.css'
+import 'splitpanes/dist/splitpanes.css'
 import 'virtual:uno.css'
 import './styles/main.scss'
 

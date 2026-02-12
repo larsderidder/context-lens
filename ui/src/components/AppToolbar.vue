@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useSessionStore } from '@/stores/session'
 import { fmtCost, shortModel, sourceBadgeClass } from '@/utils/format'
 import { getExportUrl } from '@/api'
-import { ref } from 'vue'
 
 const store = useSessionStore()
 const showExportMenu = ref(false)
+const sessionIdCopied = ref(false)
 
 const isInspector = computed(() => store.view === 'inspector' && !!store.selectedSession)
 
@@ -27,10 +27,48 @@ function compactDir(path: string | null | undefined): string {
   return p
 }
 
-function handleExport(format: 'lhar' | 'lhar.json', scope: 'all' | 'session') {
+const selectedSessionId = computed(() => store.selectedSessionId ?? '')
+
+function safeFilenamePart(input: string): string {
+  return String(input || '')
+    .trim()
+    .replace(/[^a-zA-Z0-9._-]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 80) || 'unknown'
+}
+
+async function downloadWithFilename(url: string, filename: string) {
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(`Download failed: ${res.status}`)
+  const blob = await res.blob()
+  const blobUrl = URL.createObjectURL(blob)
+  try {
+    const a = document.createElement('a')
+    a.href = blobUrl
+    a.download = filename
+    a.style.display = 'none'
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+  } finally {
+    URL.revokeObjectURL(blobUrl)
+  }
+}
+
+async function handleExport(format: 'lhar' | 'lhar.json', scope: 'all' | 'session') {
   const convoId = scope === 'session' ? store.selectedSessionId ?? undefined : undefined
   const url = getExportUrl(format, convoId)
-  window.open(url, '_blank')
+  if (scope === 'session' && convoId) {
+    const ext = format === 'lhar' ? 'lhar' : 'lhar.json'
+    const safeId = safeFilenamePart(convoId)
+    try {
+      await downloadWithFilename(url, `context-lens-session-${safeId}.${ext}`)
+    } catch {
+      window.open(url, '_blank')
+    }
+  } else {
+    window.open(url, '_blank')
+  }
   showExportMenu.value = false
 }
 
@@ -43,20 +81,53 @@ function handleReset() {
 function goBack() {
   store.setView('dashboard')
 }
+
+async function copySessionId() {
+  const id = selectedSessionId.value
+  if (!id) return
+  try {
+    await navigator.clipboard.writeText(id)
+    sessionIdCopied.value = true
+  } catch {}
+  setTimeout(() => { sessionIdCopied.value = false }, 1400)
+}
+
+function sessionIdDisplay(id: string): string {
+  if (id.length <= 18) return id
+  return `${id.slice(0, 8)}…${id.slice(-8)}`
+}
+
+function sessionIdTitle(id: string): string {
+  if (sessionIdCopied.value) return `Copied: ${id}`
+  return `Session ID: ${id} (click to copy)`
+}
+
+function sessionIdClass() {
+  return {
+    copied: sessionIdCopied.value,
+  }
+}
+
+function onSessionIdKeydown(e: KeyboardEvent) {
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault()
+    copySessionId()
+  }
+}
 </script>
 
 <template>
   <header class="toolbar">
     <!-- ═══ Left: brand or back + session context ═══ -->
     <template v-if="isInspector && session">
-      <div class="toolbar-brand">
+      <button class="toolbar-brand toolbar-brand-btn" @click="goBack">
         <svg class="logo-mark" width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
           <circle cx="9" cy="9" r="7.5" fill="none" stroke="var(--accent-blue)" stroke-width="1" opacity="0.35" />
           <circle cx="9" cy="9" r="4" fill="none" stroke="var(--accent-blue)" stroke-width="1" opacity="0.6" />
           <circle cx="9" cy="9" r="1.5" fill="var(--accent-blue)" />
         </svg>
         <span class="brand-text">Context Lens</span>
-      </div>
+      </button>
 
       <span class="toolbar-sep"></span>
 
@@ -66,10 +137,32 @@ function goBack() {
         {{ compactDir(session.workingDirectory) }}
       </span>
       <span class="toolbar-sep"></span>
+      <span
+        v-if="selectedSessionId"
+        class="session-id"
+        :class="sessionIdClass()"
+        :title="sessionIdTitle(selectedSessionId)"
+        role="button"
+        tabindex="0"
+        :aria-label="sessionIdTitle(selectedSessionId)"
+        @click="copySessionId"
+        @keydown="onSessionIdKeydown"
+      >
+        SID {{ sessionIdDisplay(selectedSessionId) }}
+        <span class="session-id-hint">
+          <template v-if="sessionIdCopied">
+            Copied
+          </template>
+          <template v-else>
+            <i class="i-carbon-copy" /> copy
+          </template>
+        </span>
+      </span>
+      <span v-if="selectedSessionId" class="toolbar-sep"></span>
       <span class="session-stat">{{ summary?.entryCount ?? session.entries.length }} turns</span>
       <span class="session-stat cost">{{ fmtCost(summary?.totalCost ?? 0) }}</span>
       <span v-if="summary?.healthScore" class="session-stat">
-        Health <span class="session-health" :class="{
+        Latest health <span class="session-health" :class="{
           good: summary.healthScore.rating === 'good',
           warn: summary.healthScore.rating === 'needs-work',
           bad: summary.healthScore.rating === 'poor',
@@ -78,14 +171,14 @@ function goBack() {
     </template>
 
     <template v-else>
-      <div class="toolbar-brand">
+      <button class="toolbar-brand toolbar-brand-btn" @click="goBack">
         <svg class="logo-mark" width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
           <circle cx="9" cy="9" r="7.5" fill="none" stroke="var(--accent-blue)" stroke-width="1" opacity="0.35" />
           <circle cx="9" cy="9" r="4" fill="none" stroke="var(--accent-blue)" stroke-width="1" opacity="0.6" />
           <circle cx="9" cy="9" r="1.5" fill="var(--accent-blue)" />
         </svg>
         <span class="brand-text">Context Lens</span>
-      </div>
+      </button>
     </template>
 
     <!-- ═══ Right: global controls ═══ -->
@@ -112,16 +205,16 @@ function goBack() {
 
       <div class="toolbar-dropdown" v-if="store.totalRequests > 0">
         <button class="toolbar-control" @click="showExportMenu = !showExportMenu">
-          Export
+          <i class="i-carbon-download" /> Export
         </button>
         <Transition name="dropdown">
           <div v-if="showExportMenu" class="dropdown-menu" @mouseleave="showExportMenu = false">
-            <button class="dropdown-item" @click="handleExport('lhar.json', 'all')">All (.lhar.json)</button>
-            <button class="dropdown-item" @click="handleExport('lhar', 'all')">All (.lhar)</button>
+            <button class="dropdown-item" @click="handleExport('lhar.json', 'all')"><i class="i-carbon-document" /> All (.lhar.json)</button>
+            <button class="dropdown-item" @click="handleExport('lhar', 'all')"><i class="i-carbon-document" /> All (.lhar)</button>
             <template v-if="store.selectedSessionId">
               <div class="dropdown-sep" />
-              <button class="dropdown-item" @click="handleExport('lhar.json', 'session')">Session (.lhar.json)</button>
-              <button class="dropdown-item" @click="handleExport('lhar', 'session')">Session (.lhar)</button>
+              <button class="dropdown-item" @click="handleExport('lhar.json', 'session')"><i class="i-carbon-document" /> Session (.lhar.json)</button>
+              <button class="dropdown-item" @click="handleExport('lhar', 'session')"><i class="i-carbon-document" /> Session (.lhar)</button>
             </template>
           </div>
         </Transition>
@@ -132,7 +225,7 @@ function goBack() {
         class="toolbar-control toolbar-control--danger"
         @click="handleReset"
       >
-        Reset
+        <i class="i-carbon-trash-can" /> Reset
       </button>
     </div>
   </header>
@@ -158,6 +251,16 @@ function goBack() {
   gap: var(--space-2);
   user-select: none;
   flex-shrink: 0;
+}
+
+.toolbar-brand-btn {
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+
+  &:hover .brand-text { color: var(--accent-blue); }
+  &:focus-visible { @include focus-ring; }
 }
 
 .brand-text {
@@ -227,6 +330,50 @@ function goBack() {
   &.bad { color: var(--accent-red); }
 }
 
+.session-id {
+  @include mono-text;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  transition: color 0.12s;
+  text-decoration: underline dotted transparent;
+  text-underline-offset: 2px;
+  user-select: all;
+
+  &:hover {
+    color: var(--text-secondary);
+    text-decoration-color: var(--text-ghost);
+  }
+
+  &.copied {
+    color: var(--accent-green);
+    text-decoration-color: rgba(16, 185, 129, 0.5);
+  }
+
+  &:focus-visible { @include focus-ring; }
+}
+
+.session-id-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--text-ghost);
+  opacity: 0;
+  transition: opacity 0.12s, color 0.12s;
+
+  i { font-size: 10px; }
+}
+
+.session-id:hover .session-id-hint,
+.session-id:focus-visible .session-id-hint,
+.session-id.copied .session-id-hint {
+  opacity: 1;
+}
+
 // ── Right side ──
 .toolbar-right {
   margin-left: auto;
@@ -277,6 +424,11 @@ function goBack() {
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: border-color 0.15s, color 0.15s, background 0.15s;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+
+  i { font-size: 12px; }
 
   &:hover {
     border-color: var(--border-mid);
@@ -316,7 +468,9 @@ function goBack() {
 }
 
 .dropdown-item {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   width: 100%;
   padding: 6px 10px;
   font-size: var(--text-xs);
@@ -327,6 +481,8 @@ function goBack() {
   cursor: pointer;
   text-align: left;
   transition: background 0.1s, color 0.1s;
+
+  i { font-size: 12px; color: var(--text-muted); }
 
   &:hover {
     background: var(--bg-hover);

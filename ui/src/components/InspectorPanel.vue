@@ -8,10 +8,10 @@ import TurnScrubber from '@/components/TurnScrubber.vue'
 
 const store = useSessionStore()
 
-const tabs: { id: InspectorTab; label: string }[] = [
-  { id: 'overview', label: 'Overview' },
-  { id: 'messages', label: 'Messages' },
-  { id: 'timeline', label: 'Timeline' },
+const tabs: { id: InspectorTab; label: string; icon: string }[] = [
+  { id: 'overview', label: 'Overview', icon: 'i-carbon-dashboard' },
+  { id: 'messages', label: 'Messages', icon: 'i-carbon-chat' },
+  { id: 'timeline', label: 'Timeline', icon: 'i-carbon-activity' },
 ]
 
 function onKeydown(e: KeyboardEvent) {
@@ -35,6 +35,7 @@ function onKeydown(e: KeyboardEvent) {
         :class="{ active: store.inspectorTab === tab.id }"
         @click="store.setInspectorTab(tab.id)"
       >
+        <i :class="tab.icon" />
         {{ tab.label }}
       </button>
     </div>
@@ -78,6 +79,11 @@ function onKeydown(e: KeyboardEvent) {
   border-bottom: 2px solid transparent;
   background: none;
   transition: color 0.12s, border-color 0.12s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+
+  i { font-size: 14px; }
 
   &:hover { color: var(--text-secondary); }
 

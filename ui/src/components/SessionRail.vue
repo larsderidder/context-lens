@@ -33,6 +33,18 @@ function tileTooltip(s: ConversationSummary): string {
   return `${s.source} · ${model}\n${turns} · ${cost}${health}${dir}`
 }
 
+function utilizationPct(s: ConversationSummary): number {
+  if (!s.contextLimit) return 0
+  return Math.min(100, Math.round((s.latestTotalTokens / s.contextLimit) * 100))
+}
+
+function utilizationClass(s: ConversationSummary): string {
+  const pct = utilizationPct(s)
+  if (pct >= 80) return 'high'
+  if (pct >= 60) return 'mid'
+  return 'low'
+}
+
 /** Floating-vue tooltip options: show instantly, positioned right of rail */
 const tipOpts = { delay: { show: 50, hide: 0 }, placement: 'right' as const }
 </script>
@@ -44,18 +56,9 @@ const tipOpts = { delay: { show: 50, hide: 0 }, placement: 'right' as const }
       v-tooltip="{ content: 'Dashboard', ...tipOpts }"
       @click="goToDashboard"
     >
-      <svg class="grid-icon" width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
-        <rect x="0" y="0" width="6" height="6" rx="1" />
-        <rect x="8" y="0" width="6" height="6" rx="1" />
-        <rect x="0" y="8" width="6" height="6" rx="1" />
-        <rect x="8" y="8" width="6" height="6" rx="1" />
-      </svg>
+      <i class="i-carbon-grid grid-icon" />
     </button>
-
-    <div class="rail-label">
-      <span class="rail-label-text">Sessions</span>
-      <span class="rail-label-count">{{ store.summaries.length }}</span>
-    </div>
+    <span class="rail-label">SESSIONS</span>
 
     <div class="rail-scroll">
       <button
@@ -72,8 +75,8 @@ const tipOpts = { delay: { show: 50, hide: 0 }, placement: 'right' as const }
         <span class="tile-source" :class="sourceBadgeClass(s.source)">
           {{ s.source || '?' }}
         </span>
-        <span class="tile-turns">{{ s.entryCount }} t</span>
-        <span class="tile-health" :class="healthClass(s)" />
+        <span class="tile-meta">{{ s.entryCount }}t</span>
+        <span class="tile-util" :class="utilizationClass(s)">{{ utilizationPct(s) }}%</span>
       </button>
     </div>
   </nav>
@@ -83,7 +86,7 @@ const tipOpts = { delay: { show: 50, hide: 0 }, placement: 'right' as const }
 @use '../styles/mixins' as *;
 
 .session-rail {
-  width: 64px;
+  width: 78px;
   background: var(--bg-field);
   border-right: 1px solid var(--border-dim);
   display: flex;
@@ -97,53 +100,41 @@ const tipOpts = { delay: { show: 50, hide: 0 }, placement: 'right' as const }
 
 // ── Back button ──
 .rail-back {
-  width: 48px;
-  height: 28px;
+  width: 56px;
+  height: 56px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: none;
-  border: 1px solid var(--border-dim);
-  border-radius: var(--radius-sm);
-  color: var(--text-dim);
+  background: var(--bg-surface);
+  border: 2px solid var(--border-mid);
+  border-radius: 50%;
+  color: var(--text-secondary);
   cursor: pointer;
-  transition: border-color 0.12s, color 0.12s, background 0.12s;
+  transition: border-color 0.15s, color 0.15s, background 0.15s, transform 0.15s;
   flex-shrink: 0;
+  margin-bottom: 6px;
 
   &:hover {
-    border-color: var(--border-mid);
-    color: var(--text-primary);
-    background: var(--bg-raised);
+    border-color: var(--accent-blue);
+    color: var(--accent-blue);
+    background: var(--accent-blue-dim);
+    transform: translateX(-2px);
   }
 
   &:focus-visible { @include focus-ring; }
 }
 
-.grid-icon {
-  display: block;
-}
-
-// ── Section label ──
 .rail-label {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0;
-  padding: 6px 0 4px;
-  flex-shrink: 0;
-}
-
-.rail-label-text {
-  @include section-label;
   font-size: 8px;
+  text-transform: uppercase;
   letter-spacing: 0.1em;
   color: var(--text-ghost);
+  margin: 3px 0 4px;
 }
 
-.rail-label-count {
-  @include mono-text;
-  font-size: 9px;
-  color: var(--text-muted);
+.grid-icon {
+  display: block;
+  font-size: 18px;
 }
 
 // ── Scrollable tile list ──
@@ -164,8 +155,8 @@ const tipOpts = { delay: { show: 50, hide: 0 }, placement: 'right' as const }
 
 // ── Session tile ──
 .rail-tile {
-  width: 50px;
-  min-height: 46px;
+  width: 62px;
+  min-height: 50px;
   border-radius: var(--radius-md);
   display: flex;
   flex-direction: column;
@@ -175,10 +166,9 @@ const tipOpts = { delay: { show: 50, hide: 0 }, placement: 'right' as const }
   cursor: pointer;
   border: 1.5px solid transparent;
   background: var(--bg-surface);
-  transition: all 0.12s;
-  position: relative;
+  transition: background 0.12s, border-color 0.12s;
   flex-shrink: 0;
-  padding: 6px 3px 4px;
+  padding: 5px 5px 4px;
 
   &:hover {
     background: var(--bg-raised);
@@ -215,27 +205,35 @@ const tipOpts = { delay: { show: 50, hide: 0 }, placement: 'right' as const }
   text-align: center;
 }
 
-// ── Turn count ──
-.tile-turns {
+// ── Tile metadata ──
+.tile-meta {
   @include mono-text;
   font-size: 9px;
   color: var(--text-muted);
   line-height: 1;
-  letter-spacing: 0.02em;
 }
 
-// ── Health bar ──
-.tile-health {
-  width: 24px;
-  height: 3px;
+.tile-util {
+  @include mono-text;
+  font-size: 9px;
+  font-weight: 600;
+  padding: 1px 4px;
   border-radius: 2px;
-  margin-top: 1px;
-  background: var(--bg-raised);
 
-  &.health-good { background: var(--accent-green); }
-  &.health-warn { background: var(--accent-amber); }
-  &.health-bad { background: var(--accent-red); }
-  &.health-none { background: var(--border-mid); }
+  &.low {
+    color: var(--accent-blue);
+    background: var(--accent-blue-dim);
+  }
+
+  &.mid {
+    color: var(--accent-amber);
+    background: var(--accent-amber-dim);
+  }
+
+  &.high {
+    color: var(--accent-red);
+    background: var(--accent-red-dim);
+  }
 }
 
 // ── Source badge colors (reuse from format.ts sourceBadgeClass) ──
@@ -245,4 +243,9 @@ const tipOpts = { delay: { show: 50, hide: 0 }, placement: 'right' as const }
 .badge-kimi { color: var(--accent-purple); }
 .badge-pi { color: var(--accent-purple); }
 .badge-unknown { color: var(--text-dim); }
+
+// ── Accessibility: respect reduced motion ──
+@media (prefers-reduced-motion: reduce) {
+  .rail-tile { transition-duration: 0.01ms !important; }
+}
 </style>

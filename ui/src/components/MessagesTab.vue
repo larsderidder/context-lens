@@ -3,12 +3,10 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Splitpanes, Pane } from 'splitpanes'
 import { useSessionStore } from '@/stores/session'
 import { useExpandable } from '@/composables/useExpandable'
-import { fmtTokens, shortModel } from '@/utils/format'
-import { groupMessagesByCategory, buildToolNameMap, extractPreview, CATEGORY_META, classifyMessageRole, classifyEntries } from '@/utils/messages'
+import { fmtTokens } from '@/utils/format'
+import { groupMessagesByCategory, buildToolNameMap, extractPreview, CATEGORY_META, classifyMessageRole } from '@/utils/messages'
 import type { ParsedMessage } from '@/api-types'
 import DetailPane from '@/components/DetailPane.vue'
-import TreeView from '@/components/TreeView.vue'
-import type { TreeNode } from '@/components/TreeView.vue'
 
 const messageScrollByKey = new Map<string, number>()
 
@@ -17,7 +15,7 @@ const entry = computed(() => store.selectedEntry)
 const session = computed(() => store.selectedSession)
 const { isExpanded, toggle, expand } = useExpandable()
 const msgListEl = ref<HTMLElement | null>(null)
-const viewMode = ref<'current' | 'tree'>('current')
+const viewMode = ref<'chrono' | 'category'>('chrono')
 
 const detailOpen = ref(false)
 const detailIndex = ref(0)
@@ -46,16 +44,108 @@ const isCompactedFallback = computed(() => {
 })
 // Note: store.entryDetailLoading is unwrapped by Pinia, so no .value needed
 
+// Latest (live) entry's messages, used to show "future" messages grayed out
+const latestEntry = computed(() => {
+  if (!session.value || session.value.entries.length === 0) return null
+  return session.value.entries[0] // entries are newest-first
+})
+
+const latestMessages = computed((): ParsedMessage[] => {
+  if (!latestEntry.value) return []
+  void store.entryDetailVersion
+  const detail = store.getEntryDetail(latestEntry.value.id)
+  if (detail?.messages?.length) return detail.messages
+  return latestEntry.value.contextInfo.messages || []
+})
+
+// How many messages are in the selected (possibly pinned) entry's context
+const selectedMessageCount = computed(() => messages.value.length)
+
+// Are we viewing an older turn (pinned) where the latest has more messages?
+const hasFutureMessages = computed(() => {
+  if (store.selectionMode !== 'pinned') return false
+  return latestMessages.value.length > selectedMessageCount.value
+})
+
+// Combined chrono messages: selected entry's messages + future messages from latest
+const chronoAllMessages = computed(() => {
+  if (!hasFutureMessages.value) {
+    return messages.value.map((msg, i) => ({ msg, origIdx: i, future: false }))
+  }
+  const result: { msg: ParsedMessage; origIdx: number; future: boolean }[] = []
+  // Current turn's messages (in context)
+  for (let i = 0; i < messages.value.length; i++) {
+    result.push({ msg: messages.value[i], origIdx: i, future: false })
+  }
+  // Future messages from the latest entry (beyond the selected turn's context)
+  for (let i = messages.value.length; i < latestMessages.value.length; i++) {
+    result.push({ msg: latestMessages.value[i], origIdx: i, future: true })
+  }
+  return result
+})
+
+// Detect turn boundaries in the message list.
+// A turn boundary is where a new user message appears after assistant output,
+// signaling the start of a new conversational turn.
+const chronoTurnBoundaries = computed(() => {
+  const msgs = chronoAllMessages.value
+  const boundaries = new Set<number>()
+  // Mark index 0 as the start of turn 1
+  if (msgs.length > 0) boundaries.add(0)
+  let seenAssistant = false
+  for (let i = 0; i < msgs.length; i++) {
+    const role = msgs[i].msg.role
+    if (role === 'assistant') {
+      seenAssistant = true
+    } else if (role === 'user' && seenAssistant) {
+      boundaries.add(i)
+      seenAssistant = false
+    }
+  }
+  return boundaries
+})
+
+// Map from message index to turn number
+const chronoTurnNumbers = computed(() => {
+  const map = new Map<number, number>()
+  let turnNum = 0
+  for (const idx of chronoTurnBoundaries.value) {
+    turnNum++
+    map.set(idx, turnNum)
+  }
+  return map
+})
+
 const categorized = computed(() => {
   return groupMessagesByCategory(messages.value)
 })
 
 const flatMessages = computed(() => {
+  if (viewMode.value === 'chrono') return chronoMessages.value
   const result: { msg: ParsedMessage; origIdx: number }[] = []
   for (const group of categorized.value) {
     for (const item of group.items) result.push(item)
   }
   return result
+})
+
+// Chronological: messages in context order for DetailPane navigation
+const chronoMessages = computed(() => {
+  // Only include non-future messages for detail pane navigation
+  return messages.value.map((msg, i) => ({ msg, origIdx: i }))
+})
+
+// Cumulative token sums for the chrono gutter (only for in-context messages)
+const chronoCumTokens = computed(() => {
+  const sums: number[] = []
+  let running = 0
+  for (const item of chronoAllMessages.value) {
+    if (!item.future) {
+      running += item.msg.tokens || 0
+    }
+    sums.push(running)
+  }
+  return sums
 })
 
 const totalMsgTokens = computed(() => {
@@ -110,65 +200,6 @@ const hasCategoryFallback = computed(() => {
   return !!focusedCategory.value && !!focusCategory.value && focusedCategory.value !== focusCategory.value
 })
 
-const treeNodes = computed<TreeNode[]>(() => {
-  if (!session.value) return []
-  const ordered = classifyEntries([...session.value.entries].reverse())
-  const selectedId = store.selectedEntry?.id ?? null
-  let selectedMainId: number | null = null
-  if (selectedId != null) {
-    for (const item of ordered) {
-      if (item.isMain) selectedMainId = item.entry.id
-      if (item.entry.id === selectedId) break
-    }
-  }
-  const mainRows: TreeNode[] = []
-  let turnCounter = 0
-  for (let i = 0; i < ordered.length; i++) {
-    const item = ordered[i]
-    if (!item.isMain) continue
-    turnCounter += 1
-
-    let subagentCalls = 0
-    for (let j = i + 1; j < ordered.length; j++) {
-      if (ordered[j].isMain) break
-      subagentCalls += 1
-    }
-
-    const groups = groupMessagesByCategory(item.entry.contextInfo.messages || [])
-    const turnLabel = `Turn ${turnCounter} · ${shortModel(item.entry.contextInfo.model)}`
-    const turnMeta = subagentCalls > 0
-      ? `${fmtTokens(item.entry.contextInfo.totalTokens)} · ${subagentCalls} sub`
-      : fmtTokens(item.entry.contextInfo.totalTokens)
-
-    mainRows.push({
-      id: `turn-${item.entry.id}`,
-      label: turnLabel,
-      meta: turnMeta,
-      selectable: false,
-      children: groups.map((group) => ({
-        id: `turn-${item.entry.id}-cat-${group.category}`,
-        label: (CATEGORY_META[group.category] || { label: group.category }).label,
-        meta: `${group.items.length} · ${fmtTokens(group.tokens)}`,
-        color: (CATEGORY_META[group.category] || { color: '#4b5563' }).color,
-        selectable: false,
-        children: group.items.map((msgItem) => ({
-          id: `turn-${item.entry.id}-msg-${msgItem.origIdx}`,
-          label: extractPreview(msgItem.msg, toolNameMap.value) || '(empty)',
-          meta: fmtTokens(msgItem.msg.tokens || 0),
-          selectable: true,
-          payload: { entryId: item.entry.id, origIdx: msgItem.origIdx },
-        })),
-      })),
-    })
-  }
-  // Latest turn first in tree navigation.
-  const latestFirst = mainRows.reverse()
-  if (store.selectionMode === 'pinned' && selectedMainId != null) {
-    return latestFirst.filter((node) => node.id === `turn-${selectedMainId}`)
-  }
-  return latestFirst
-})
-
 function openDetail(flatIdx: number) {
   detailIndex.value = flatIdx
   syncSelectionSignature(flatIdx)
@@ -177,6 +208,14 @@ function openDetail(flatIdx: number) {
 
 function closeDetail() {
   detailOpen.value = false
+}
+
+function onMessagesKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape' && detailOpen.value) {
+    closeDetail()
+    e.preventDefault()
+    e.stopPropagation()
+  }
 }
 
 function messageKey(msg: ParsedMessage): string {
@@ -236,7 +275,49 @@ function flatIndexOf(catIdx: number, itemIdx: number): number {
 
 function openDetailByOrigIndex(origIdx: number) {
   const flatIdx = flatMessages.value.findIndex((item) => item.origIdx === origIdx)
-  if (flatIdx >= 0) openDetail(flatIdx)
+  if (flatIdx >= 0) {
+    // In category view, expand the category that contains this message
+    if (viewMode.value === 'category') {
+      const msg = messages.value[origIdx]
+      if (msg) {
+        const category = classifyMessageRole(msg)
+        expand(category)
+      }
+    }
+    openDetail(flatIdx)
+  }
+}
+
+function chronoCategoryColor(msg: ParsedMessage): string {
+  const cat = classifyMessageRole(msg)
+  return (CATEGORY_META[cat] || { color: '#4b5563' }).color
+}
+
+function chronoCategoryLabel(msg: ParsedMessage): string {
+  const cat = classifyMessageRole(msg)
+  return (CATEGORY_META[cat] || { label: cat }).label
+}
+
+// Navigate to the turn that contains a future message (by its index in latestMessages)
+function jumpToFutureMessage(msgIndex: number) {
+  if (!session.value) return
+  // Entries are newest-first. Find the earliest entry whose message count includes this index.
+  const entries = session.value.entries
+  // Walk from oldest to newest (reverse order) and find the first entry
+  // whose message count is greater than msgIndex.
+  let targetEntry: typeof entries[0] | null = null
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const msgCount = entries[i].contextInfo.messages?.length ?? 0
+    if (msgCount > msgIndex) {
+      targetEntry = entries[i]
+      break
+    }
+  }
+  if (!targetEntry) {
+    // Fall back to the latest entry
+    targetEntry = entries[0]
+  }
+  store.pinEntry(targetEntry.id)
 }
 
 function toolResultName(msg: ParsedMessage): string | null {
@@ -266,10 +347,24 @@ async function applyMessageFocus() {
   // Focus by message index (e.g. from security alert findings)
   const focusIdx = store.messageFocusIndex
   if (focusIdx != null) {
-    // Retry loop: the tab/data may not be ready on the first tick
+    // In chrono mode, origIdx maps directly to position
+    if (viewMode.value === 'chrono') {
+      for (let attempt = 0; attempt < 4; attempt++) {
+        await nextTick()
+        openDetailByOrigIndex(focusIdx)
+        await nextTick()
+        const root = msgListEl.value
+        if (root) {
+          const rows = Array.from(root.querySelectorAll('.chrono-row')) as HTMLElement[]
+          const target = rows.find(row => row.classList.contains('selected'))
+          if (target) { target.scrollIntoView({ block: 'center', behavior: 'smooth' }); return }
+        }
+      }
+      return
+    }
+    // Category mode: retry loop
     for (let attempt = 0; attempt < 4; attempt++) {
       await nextTick()
-      // Find which category contains this message
       for (const group of categorized.value) {
         const match = group.items.find(item => item.origIdx === focusIdx)
         if (match) {
@@ -293,6 +388,44 @@ async function applyMessageFocus() {
 
   const category = focusCategory.value
   if (!category) return
+
+  const shouldOpenDetail = store.messageFocusOpenDetail
+
+  // If openDetail is requested, switch to chrono mode and open the detail pane
+  // Otherwise, switch to category mode to show all messages of that type
+  if (shouldOpenDetail) {
+    viewMode.value = 'chrono'
+  } else {
+    viewMode.value = 'category'
+  }
+
+  // In chrono mode, scroll to the latest message of the focused category
+  if (viewMode.value === 'chrono') {
+    for (let attempt = 0; attempt < 4; attempt++) {
+      await nextTick()
+      const root = msgListEl.value
+      if (!root) continue
+      const rows = Array.from(root.querySelectorAll('.chrono-row')) as HTMLElement[]
+      // Find latest (last) row whose origIdx matches a message in the target category
+      let lastMatchIdx = -1
+      for (let i = messages.value.length - 1; i >= 0; i--) {
+        if (classifyMessageRole(messages.value[i]) === category) {
+          lastMatchIdx = i
+          break
+        }
+      }
+      if (lastMatchIdx >= 0 && rows[lastMatchIdx]) {
+        rows[lastMatchIdx].scrollIntoView({ block: 'center', behavior: 'smooth' })
+        // If openDetail is requested, open the detail pane for this message
+        if (shouldOpenDetail) {
+          await nextTick()
+          openDetailByOrigIndex(lastMatchIdx)
+        }
+        return
+      }
+    }
+    return
+  }
 
   let root: HTMLElement | null = null
   for (let attempt = 0; attempt < 4; attempt++) {
@@ -321,24 +454,6 @@ async function applyMessageFocus() {
 
 function clearToolFilter() {
   store.focusMessageCategory(focusCategory.value || store.messageFocusCategory || 'tool_results')
-}
-
-async function openFromTree(turnEntryId: number, origIdx: number) {
-  store.pinEntry(turnEntryId)
-  store.focusMessageByIndex(origIdx)
-  await nextTick()
-  openDetailByOrigIndex(origIdx)
-}
-
-function handleTreeSelect(node: TreeNode) {
-  const entryId = Number(node.payload?.entryId)
-  const origIdx = Number(node.payload?.origIdx)
-  if (!Number.isFinite(entryId) || !Number.isFinite(origIdx)) return
-  openFromTree(entryId, origIdx)
-}
-
-function handleTreeToggle(id: string) {
-  toggle(id)
 }
 
 function handleMsgListScroll() {
@@ -408,6 +523,17 @@ watch(
   { immediate: true },
 )
 
+// Also load the latest entry's detail when pinned (for future messages in chrono view)
+watch(
+  () => latestEntry.value?.id,
+  async (latestId) => {
+    if (latestId != null && latestId !== entry.value?.id) {
+      await store.loadEntryDetail(latestId)
+    }
+  },
+  { immediate: true },
+)
+
 onMounted(async () => {
   if (store.inspectorTab === 'messages' && store.messageFocusCategory) {
     await applyMessageFocus()
@@ -432,19 +558,18 @@ watch(
 </script>
 
 <template>
-  <div v-if="entry" class="messages-tab">
+  <div v-if="entry" class="messages-tab" @keydown="onMessagesKeydown">
     <Splitpanes class="default-theme" :push-other-panes="false">
       <Pane :min-size="25" :size="detailOpen ? 42 : 100">
         <div ref="msgListEl" class="msg-list" @scroll.passive="handleMsgListScroll">
           <div class="message-view-toggle">
-            <button :class="{ on: viewMode === 'current' }" @click="viewMode = 'current'">Current Context</button>
-            <button :class="{ on: viewMode === 'tree' }" @click="viewMode = 'tree'">Session Tree</button>
+            <button :class="{ on: viewMode === 'chrono' }" @click="viewMode = 'chrono'">Chronological</button>
+            <button :class="{ on: viewMode === 'category' }" @click="viewMode = 'category'">By Category</button>
           </div>
 
-          <template v-if="viewMode === 'current'">
+          <template v-if="viewMode === 'category'">
           <div v-if="heaviestMessages.length > 0" class="heavy-strip">
             <div class="heavy-title">Top heavy messages</div>
-            <div class="heavy-hint">Tip: use ↑/↓ in detail pane to move between messages, Esc to close.</div>
             <div class="heavy-actions">
               <button
                 v-for="item in heaviestMessages"
@@ -470,10 +595,6 @@ watch(
             <button v-if="focusedToolName" class="focus-clear" @click.stop="clearToolFilter">Show all</button>
           </div>
 
-          <div class="scope-note">
-            Showing messages from the selected call context (newest first).
-          </div>
-
           <div
             v-for="(group, catIdx) in categorized"
             :key="group.category"
@@ -482,7 +603,7 @@ watch(
           >
             <!-- Group header -->
             <div class="group-head" @click="toggle(group.category)">
-              <span class="group-arrow">{{ (isExpanded(group.category) || focusCategory === group.category) ? '▾' : '▸' }}</span>
+              <i class="group-arrow" :class="(isExpanded(group.category) || focusCategory === group.category) ? 'i-carbon-chevron-down' : 'i-carbon-chevron-right'" />
               <span class="group-dot" :style="{ background: (CATEGORY_META[group.category] || { color: '#4b5563' }).color }" />
               <span class="group-name">{{ (CATEGORY_META[group.category] || { label: group.category }).label }}</span>
               <span class="group-stats">
@@ -521,21 +642,47 @@ watch(
           </div>
           </template>
 
-          <template v-else>
-            <div class="scope-note">
-              {{ store.selectionMode === 'pinned'
-                ? 'Tree scoped to pinned turn.'
-                : 'Tree scoped to session (latest turn first).' }}
-            </div>
-            <div class="tree-wrap">
-              <TreeView
-                :nodes="treeNodes"
-                :is-expanded="isExpanded"
-                @toggle="handleTreeToggle"
-                @select="handleTreeSelect"
-              />
+          <template v-else-if="viewMode === 'chrono'">
+            <div class="chrono-list">
+              <template v-for="(item, i) in chronoAllMessages" :key="i">
+                <!-- Turn boundary marker -->
+                <div v-if="chronoTurnNumbers.has(i)" class="chrono-turn-marker" :class="{ future: item.future }">
+                  <span class="chrono-turn-label">Turn {{ chronoTurnNumbers.get(i) }}</span>
+                  <span class="chrono-turn-line" />
+                </div>
+
+                <!-- Future separator (shown once, at the boundary) -->
+                <div v-if="item.future && i === selectedMessageCount" class="chrono-future-sep">
+                  <span class="chrono-future-line" />
+                  <span class="chrono-future-label">After this turn</span>
+                  <span class="chrono-future-line" />
+                </div>
+
+                <div
+                  class="chrono-row"
+                  :class="{
+                    selected: !item.future && detailOpen && flatMessages[detailIndex]?.origIdx === item.origIdx,
+                    future: item.future,
+                  }"
+                  :style="{ '--cat-border': chronoCategoryColor(item.msg) }"
+                  @click="item.future ? jumpToFutureMessage(item.origIdx) : openDetail(item.origIdx)"
+                >
+                  <span
+                    class="chrono-gutter"
+                    v-tooltip="item.future ? 'Click to jump to this turn' : `Cumulative: ${fmtTokens(chronoCumTokens[i])} of ${fmtTokens(totalMsgTokens)}`"
+                  >
+                    {{ item.future ? '' : fmtTokens(chronoCumTokens[i]) }}
+                  </span>
+                  <span class="chrono-cat-dot" :style="{ background: chronoCategoryColor(item.msg) }" />
+                  <span class="chrono-type">{{ chronoCategoryLabel(item.msg) }}</span>
+                  <span class="chrono-preview">{{ extractPreview(item.msg, toolNameMap) || '(empty)' }}</span>
+                  <span class="chrono-tok" :class="{ hot: !item.future && (item.msg.tokens || 0) > 2000 }">{{ fmtTokens(item.msg.tokens || 0) }}</span>
+                </div>
+              </template>
             </div>
           </template>
+
+
         </div>
       </Pane>
       <Pane v-if="detailOpen" :min-size="25" :size="58">
@@ -607,12 +754,7 @@ watch(
 
 .heavy-title {
   @include section-label;
-}
-
-.heavy-hint {
-  font-size: var(--text-xs);
-  color: var(--text-ghost);
-  margin: 3px 0 var(--space-2);
+  margin-bottom: var(--space-2);
 }
 
 .heavy-actions {
@@ -664,16 +806,6 @@ watch(
   color: var(--accent-amber);
   font-size: var(--text-xs);
   @include mono-text;
-}
-
-.scope-note {
-  margin: 0 var(--space-4) var(--space-2);
-  color: var(--text-ghost);
-  font-size: var(--text-xs);
-}
-
-.tree-wrap {
-  margin: 0 var(--space-3) var(--space-2);
 }
 
 .heavy-action {
@@ -732,9 +864,9 @@ watch(
 
 .group-arrow {
   color: var(--text-ghost);
-  width: 10px;
-  font-size: var(--text-xs);
+  font-size: 10px;
   flex-shrink: 0;
+  transition: transform 0.12s ease;
 }
 
 .group-dot {
@@ -818,6 +950,7 @@ watch(
   width: 10px;
   font-size: var(--text-xs);
   flex-shrink: 0;
+  pointer-events: none;
 }
 
 .msg-preview {
@@ -826,6 +959,7 @@ watch(
   color: var(--text-dim);
   flex: 1;
   font-size: var(--text-sm);
+  pointer-events: none;
 }
 
 .msg-tok {
@@ -834,7 +968,142 @@ watch(
   font-size: var(--text-xs);
   white-space: nowrap;
   flex-shrink: 0;
+  pointer-events: none;
 
   &.hot { color: var(--accent-amber); }
 }
+
+// ── Chronological view ──
+.chrono-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.chrono-row {
+  @include data-row;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px var(--space-3) 4px 0;
+  font-size: var(--text-sm);
+  border-left: 3px solid var(--cat-border, var(--border-dim));
+  border-bottom: 1px solid rgba(28, 37, 53, 0.25);
+  margin-left: var(--space-2);
+
+  &:last-child { border-bottom: none; }
+
+  &.future {
+    opacity: 0.3;
+
+    &:hover { opacity: 0.5; }
+  }
+}
+
+.chrono-gutter {
+  @include mono-text;
+  font-size: 9px;
+  color: var(--text-ghost);
+  width: 42px;
+  text-align: right;
+  flex-shrink: 0;
+  padding-left: var(--space-2);
+  cursor: help;
+  transition: color 0.12s;
+
+  .chrono-row:hover:not(.future) & {
+    color: var(--text-dim);
+  }
+}
+
+.chrono-cat-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 1px;
+  flex-shrink: 0;
+}
+
+.chrono-type {
+  @include mono-text;
+  font-size: var(--text-xs);
+  color: var(--text-dim);
+  width: 90px;
+  flex-shrink: 0;
+  @include truncate;
+}
+
+.chrono-preview {
+  @include truncate;
+  @include sans-text;
+  color: var(--text-dim);
+  flex: 1;
+  font-size: var(--text-sm);
+  pointer-events: none;
+}
+
+.chrono-tok {
+  @include mono-text;
+  color: var(--text-ghost);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  flex-shrink: 0;
+  pointer-events: none;
+
+  &.hot { color: var(--accent-amber); }
+}
+
+// ── Turn boundary markers ──
+.chrono-turn-marker {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px var(--space-3) 2px;
+  margin-left: var(--space-2);
+
+  &.future { opacity: 0.3; }
+}
+
+.chrono-turn-label {
+  @include mono-text;
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.chrono-turn-line {
+  flex: 1;
+  height: 1px;
+  background: var(--border-dim);
+  min-width: 0;
+}
+
+// ── Future messages separator ──
+.chrono-future-sep {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  margin-left: var(--space-2);
+}
+
+.chrono-future-line {
+  flex: 1;
+  height: 1px;
+  background: var(--accent-amber);
+  opacity: 0.3;
+}
+
+.chrono-future-label {
+  @include mono-text;
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--accent-amber);
+  opacity: 0.6;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 </style>

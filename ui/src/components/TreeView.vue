@@ -60,7 +60,7 @@ const depthPadding = computed(() => `${(props.depth || 0) * 14 + 6}px`)
           :aria-label="expanded(node) ? 'Collapse' : 'Expand'"
           @click.stop="onToggle(node.id)"
         >
-          {{ expanded(node) ? '▾' : '▸' }}
+          <i :class="expanded(node) ? 'i-carbon-chevron-down' : 'i-carbon-chevron-right'" />
         </button>
         <span v-else class="tree-caret-placeholder" />
         <span v-if="node.color" class="tree-dot" :style="{ background: node.color }" />
@@ -111,7 +111,7 @@ const depthPadding = computed(() => `${(props.depth || 0) * 14 + 6}px`)
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: var(--text-xs);
+  font-size: 10px;
   color: var(--text-ghost);
   flex-shrink: 0;
 }
