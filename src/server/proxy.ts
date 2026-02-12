@@ -12,6 +12,49 @@ import { headersForResolution, selectHeaders } from "../server-utils.js";
 import type { ContextInfo, RequestMeta, Upstreams } from "../types.js";
 import type { Store } from "./store.js";
 
+function buildForwardHeaders(
+  reqHeaders: http.IncomingHttpHeaders,
+  targetHost: string | null,
+  bodyLength?: number,
+): Record<string, any> {
+  const forwardHeaders = { ...reqHeaders } as Record<string, any>;
+  delete forwardHeaders["x-target-url"];
+  delete forwardHeaders.host;
+  if (targetHost) {
+    forwardHeaders.host = targetHost;
+  }
+
+  if (bodyLength != null) {
+    delete forwardHeaders["transfer-encoding"];
+    forwardHeaders["content-length"] = bodyLength;
+  }
+
+  return forwardHeaders;
+}
+
+function attachProxyLifecycleHandlers(
+  res: http.ServerResponse,
+  proxyReq: http.ClientRequest,
+): void {
+  // Abort upstream request if client disconnects
+  res.on("close", () => {
+    if (!proxyReq.destroyed) proxyReq.destroy();
+  });
+
+  proxyReq.on("error", (err) => {
+    // Suppress errors from client-initiated disconnects
+    if (res.destroyed) return;
+    const detail = err.message || ("code" in err ? err.code : "unknown");
+    console.error("Proxy error:", detail);
+    if (!res.headersSent) {
+      res.writeHead(502, { "Content-Type": "application/json" });
+    }
+    if (!res.destroyed) {
+      res.end(JSON.stringify({ error: "Proxy error", details: err.message }));
+    }
+  });
+}
+
 export function forwardRequest(
   req: http.IncomingMessage,
   res: http.ServerResponse,
@@ -30,15 +73,12 @@ export function forwardRequest(
   );
   const targetParsed = url.parse(targetUrl);
 
-  const forwardHeaders = { ...req.headers } as Record<string, any>;
-  delete forwardHeaders["x-target-url"];
-  delete forwardHeaders.host;
-  forwardHeaders.host = targetParsed.host;
   // When we buffer the body, replace chunked encoding with exact content-length
-  if (body) {
-    delete forwardHeaders["transfer-encoding"];
-    forwardHeaders["content-length"] = body.length;
-  }
+  const forwardHeaders = buildForwardHeaders(
+    req.headers,
+    targetParsed.host,
+    body ? body.length : undefined,
+  );
 
   const protocol = targetParsed.protocol === "https:" ? https : http;
   const proxyReq = protocol.request(
@@ -60,23 +100,7 @@ export function forwardRequest(
     },
   );
 
-  // Abort upstream request if client disconnects
-  res.on("close", () => {
-    if (!proxyReq.destroyed) proxyReq.destroy();
-  });
-
-  proxyReq.on("error", (err) => {
-    // Suppress errors from client-initiated disconnects
-    if (res.destroyed) return;
-    const detail = err.message || ("code" in err ? err.code : "unknown");
-    console.error("Proxy error:", detail);
-    if (!res.headersSent) {
-      res.writeHead(502, { "Content-Type": "application/json" });
-    }
-    if (!res.destroyed) {
-      res.end(JSON.stringify({ error: "Proxy error", details: err.message }));
-    }
-  });
+  attachProxyLifecycleHandlers(res, proxyReq);
 
   if (body) proxyReq.write(body);
   proxyReq.end();
@@ -192,14 +216,12 @@ export function createProxyHandler(
 
       const targetParsed = url.parse(targetUrl);
 
-      // Forward headers (remove proxy-specific ones)
-      const forwardHeaders = { ...req.headers } as Record<string, any>;
-      delete forwardHeaders["x-target-url"];
-      delete forwardHeaders.host;
-      delete forwardHeaders["transfer-encoding"];
-      forwardHeaders.host = targetParsed.host;
       // Ensure content-length matches the exact bytes we forward
-      forwardHeaders["content-length"] = bodyBuffer.length;
+      const forwardHeaders = buildForwardHeaders(
+        req.headers,
+        targetParsed.host,
+        bodyBuffer.length,
+      );
 
       // Make request to actual API
       const protocol = targetParsed.protocol === "https:" ? https : http;
@@ -303,25 +325,7 @@ export function createProxyHandler(
         },
       );
 
-      // Abort upstream request if client disconnects
-      res.on("close", () => {
-        if (!proxyReq.destroyed) proxyReq.destroy();
-      });
-
-      proxyReq.on("error", (err) => {
-        // Suppress errors from client-initiated disconnects
-        if (res.destroyed) return;
-        const detail = err.message || ("code" in err ? err.code : "unknown");
-        console.error("Proxy error:", detail);
-        if (!res.headersSent) {
-          res.writeHead(502, { "Content-Type": "application/json" });
-        }
-        if (!res.destroyed) {
-          res.end(
-            JSON.stringify({ error: "Proxy error", details: err.message }),
-          );
-        }
-      });
+      attachProxyLifecycleHandlers(res, proxyReq);
 
       proxyReq.write(bodyBuffer);
       proxyReq.end();

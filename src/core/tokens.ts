@@ -119,3 +119,64 @@ function countImages(val: unknown): number {
 
   return 0;
 }
+
+/**
+ * Rescale all token sub-fields in a ContextInfo so they are internally
+ * consistent with an authoritative total (typically from API usage data).
+ *
+ * Adjusts `systemTokens`, `toolsTokens`, per-message `.tokens`, and
+ * `messagesTokens` proportionally, then applies a rounding residual fix
+ * to `messagesTokens` so the invariant
+ * `totalTokens === systemTokens + toolsTokens + messagesTokens` holds exactly.
+ */
+export function rescaleContextTokens(
+  ci: {
+    systemTokens: number;
+    toolsTokens: number;
+    messagesTokens: number;
+    totalTokens: number;
+    messages: { tokens: number }[];
+  },
+  authoritative: number,
+): void {
+  const estimated = ci.systemTokens + ci.toolsTokens + ci.messagesTokens;
+  if (estimated === 0 || authoritative === 0) {
+    ci.systemTokens = 0;
+    ci.toolsTokens = 0;
+    ci.messagesTokens = 0;
+    ci.totalTokens = authoritative;
+    for (const msg of ci.messages) {
+      msg.tokens = 0;
+    }
+    return;
+  }
+  if (authoritative === estimated) {
+    ci.totalTokens = authoritative;
+    return;
+  }
+  const scale = authoritative / estimated;
+  ci.systemTokens = Math.round(ci.systemTokens * scale);
+  ci.toolsTokens = Math.round(ci.toolsTokens * scale);
+  for (const msg of ci.messages) {
+    msg.tokens = Math.round(msg.tokens * scale);
+  }
+  ci.messagesTokens = ci.messages.reduce((s, m) => s + m.tokens, 0);
+  ci.totalTokens = authoritative;
+  // Fix rounding residual so both invariants hold:
+  //   totalTokens === systemTokens + toolsTokens + messagesTokens
+  //   messagesTokens === sum(msg.tokens)
+  const residual =
+    authoritative - (ci.systemTokens + ci.toolsTokens + ci.messagesTokens);
+  if (residual !== 0) {
+    ci.messagesTokens += residual;
+    // Push the residual into the largest per-message entry (or first if tied)
+    // so sum(msg.tokens) stays equal to messagesTokens.
+    if (ci.messages.length > 0) {
+      let maxIdx = 0;
+      for (let i = 1; i < ci.messages.length; i++) {
+        if (ci.messages[i].tokens > ci.messages[maxIdx].tokens) maxIdx = i;
+      }
+      ci.messages[maxIdx].tokens += residual;
+    }
+  }
+}

@@ -13,7 +13,8 @@ import {
   toLharJson,
   toLharJsonl,
 } from "../src/lhar.js";
-import type { CapturedEntry, Conversation } from "../src/types.js";
+import { normalizeComposition } from "../src/lhar/composition.js";
+import type { CapturedEntry, CompositionEntry, Conversation } from "../src/types.js";
 
 const fixturesDir = join(process.cwd(), "test", "fixtures");
 const anthropicBasic = JSON.parse(
@@ -331,6 +332,109 @@ describe("analyzeComposition", () => {
         );
       }
     }
+  });
+
+  it("does not double-count cache_control blocks", () => {
+    const body = {
+      model: "claude-sonnet-4",
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: "A".repeat(400), // 100 tokens
+              cache_control: { type: "ephemeral" },
+            },
+          ],
+        },
+      ],
+    };
+    const ci = parseContextInfo("anthropic", body, "anthropic-messages");
+    const comp = analyzeComposition(ci, body);
+
+    // The text should appear in user_text only, not also in cache_markers
+    const userText = comp.find((c) => c.category === "user_text");
+    const cacheMarkers = comp.find((c) => c.category === "cache_markers");
+    assert.ok(userText, "should have user_text");
+    assert.ok(
+      !cacheMarkers,
+      "should NOT have a separate cache_markers entry (text is counted in its natural category)",
+    );
+
+    // Total composition tokens should match what we'd expect for ~100 tokens of text
+    // plus whatever metadata overhead, but NOT double-counted
+    const totalCompTokens = comp.reduce((s, c) => s + c.tokens, 0);
+    assert.ok(
+      totalCompTokens < 200,
+      `composition total (${totalCompTokens}) should not be inflated by double-counting`,
+    );
+  });
+});
+
+// --- normalizeComposition ---
+
+describe("normalizeComposition", () => {
+  it("scales composition tokens to match authoritative total", () => {
+    const comp: CompositionEntry[] = [
+      { category: "system_prompt", tokens: 100, pct: 50, count: 1 },
+      { category: "tool_definitions", tokens: 100, pct: 50, count: 1 },
+    ];
+    normalizeComposition(comp, 300);
+    assert.equal(comp[0].tokens, 150);
+    assert.equal(comp[1].tokens, 150);
+    assert.equal(comp.reduce((s, c) => s + c.tokens, 0), 300);
+  });
+
+  it("fixes rounding residual on the largest entry", () => {
+    const comp: CompositionEntry[] = [
+      { category: "system_prompt", tokens: 33, pct: 33, count: 1 },
+      { category: "tool_definitions", tokens: 33, pct: 33, count: 1 },
+      { category: "user_text", tokens: 34, pct: 34, count: 1 },
+    ];
+    normalizeComposition(comp, 100);
+    const total = comp.reduce((s, c) => s + c.tokens, 0);
+    assert.equal(total, 100, `sum must be exactly 100 after normalization, got ${total}`);
+  });
+
+  it("recomputes pct fields after scaling", () => {
+    const comp: CompositionEntry[] = [
+      { category: "system_prompt", tokens: 200, pct: 0, count: 1 },
+      { category: "user_text", tokens: 100, pct: 0, count: 1 },
+    ];
+    normalizeComposition(comp, 600);
+    // 200/300*600 = 400, 100/300*600 = 200
+    assert.equal(comp[0].tokens, 400);
+    assert.equal(comp[1].tokens, 200);
+    // pct should be relative to 600
+    const pct0 = Math.round((400 / 600) * 1000) / 10;
+    const pct1 = Math.round((200 / 600) * 1000) / 10;
+    assert.equal(comp[0].pct, pct0);
+    assert.equal(comp[1].pct, pct1);
+  });
+
+  it("no-ops when sum already matches", () => {
+    const comp: CompositionEntry[] = [
+      { category: "system_prompt", tokens: 60, pct: 60, count: 1 },
+      { category: "user_text", tokens: 40, pct: 40, count: 1 },
+    ];
+    normalizeComposition(comp, 100);
+    assert.equal(comp[0].tokens, 60);
+    assert.equal(comp[1].tokens, 40);
+  });
+
+  it("handles empty composition", () => {
+    const comp: CompositionEntry[] = [];
+    normalizeComposition(comp, 500); // should not throw
+    assert.equal(comp.length, 0);
+  });
+
+  it("handles zero authoritative", () => {
+    const comp: CompositionEntry[] = [
+      { category: "system_prompt", tokens: 100, pct: 100, count: 1 },
+    ];
+    normalizeComposition(comp, 0); // should not throw or divide by zero
+    assert.equal(comp.length, 1);
   });
 });
 

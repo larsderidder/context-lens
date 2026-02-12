@@ -156,6 +156,127 @@ describe("Store", () => {
     cleanup();
   });
 
+  it("maintains token sub-total invariant after API usage override", () => {
+    const { store, cleanup } = makeStore();
+
+    const body = {
+      model: "claude-sonnet-4-20250514",
+      system: "You are helpful.",
+      tools: [
+        {
+          name: "search",
+          description: "Search things",
+          input_schema: { type: "object", properties: { q: { type: "string" } } },
+        },
+      ],
+      messages: [
+        { role: "user", content: "x".repeat(4000) },
+        { role: "assistant", content: "y".repeat(2000) },
+        { role: "user", content: "z".repeat(1000) },
+      ],
+    };
+    const ci = parseContextInfo("anthropic", body, "anthropic-messages");
+    const estimated = ci.totalTokens;
+    assert.ok(estimated > 0, "sanity: estimated tokens should be > 0");
+
+    const entry = store.storeRequest(
+      ci,
+      {
+        model: "claude-sonnet-4-20250514",
+        stop_reason: "end_turn",
+        usage: {
+          input_tokens: 500,
+          output_tokens: 100,
+          cache_read_input_tokens: 300,
+          cache_creation_input_tokens: 200,
+        },
+      } as any,
+      "claude",
+      body,
+    );
+
+    const c = entry.contextInfo;
+    // totalTokens should be the authoritative value
+    assert.equal(c.totalTokens, 1000); // 500 + 300 + 200
+
+    // Sub-totals must sum to totalTokens
+    assert.equal(
+      c.totalTokens,
+      c.systemTokens + c.toolsTokens + c.messagesTokens,
+      `invariant broken: ${c.totalTokens} !== ${c.systemTokens} + ${c.toolsTokens} + ${c.messagesTokens}`,
+    );
+
+    // messagesTokens must equal sum of per-message tokens
+    // (note: messages are compacted, so we read from the detail file)
+    const detail = store.getEntryDetail(entry.id);
+    assert.ok(detail, "detail file should exist");
+    const msgSum = detail!.messages.reduce((s, m) => s + m.tokens, 0);
+    assert.equal(
+      detail!.messagesTokens,
+      msgSum,
+      `messagesTokens (${detail!.messagesTokens}) !== sum of msg.tokens (${msgSum})`,
+    );
+
+    cleanup();
+  });
+
+  it("composition sums to totalTokens after storeRequest", () => {
+    const { store, cleanup } = makeStore();
+
+    const body = {
+      model: "claude-sonnet-4-20250514",
+      system: "Be helpful.",
+      tools: [
+        {
+          name: "bash",
+          description: "Run commands",
+          input_schema: { type: "object", properties: { cmd: { type: "string" } } },
+        },
+      ],
+      messages: [
+        { role: "user", content: "Hello there" },
+        {
+          role: "assistant",
+          content: [
+            { type: "tool_use", id: "t1", name: "bash", input: { cmd: "ls" } },
+          ],
+        },
+        {
+          role: "user",
+          content: [
+            { type: "tool_result", tool_use_id: "t1", content: "file1.txt\nfile2.txt" },
+          ],
+        },
+      ],
+    };
+    const ci = parseContextInfo("anthropic", body, "anthropic-messages");
+
+    const entry = store.storeRequest(
+      ci,
+      {
+        model: "claude-sonnet-4-20250514",
+        stop_reason: "end_turn",
+        usage: {
+          input_tokens: 800,
+          output_tokens: 50,
+          cache_read_input_tokens: 100,
+          cache_creation_input_tokens: 100,
+        },
+      } as any,
+      "claude",
+      body,
+    );
+
+    const compSum = entry.composition.reduce((s, c) => s + c.tokens, 0);
+    assert.equal(
+      compSum,
+      entry.contextInfo.totalTokens,
+      `composition sum (${compSum}) !== totalTokens (${entry.contextInfo.totalTokens})`,
+    );
+
+    cleanup();
+  });
+
   it("stores, compacts, and increments revision", async () => {
     const { store, cleanup } = makeStore();
 
@@ -355,6 +476,21 @@ describe("Store", () => {
     const ci = store.getCapturedRequests()[0].contextInfo;
     assert.equal(ci.totalTokens, 120); // prompt only; completion is output, not context window input
 
+    // Sub-totals must be rescaled to maintain invariant
+    assert.equal(
+      ci.totalTokens,
+      ci.systemTokens + ci.toolsTokens + ci.messagesTokens,
+      `backfill invariant broken: ${ci.totalTokens} !== ${ci.systemTokens} + ${ci.toolsTokens} + ${ci.messagesTokens}`,
+    );
+
+    // Per-message tokens must sum to messagesTokens
+    const msgSum = ci.messages.reduce((s: number, m: any) => s + m.tokens, 0);
+    assert.equal(
+      ci.messagesTokens,
+      msgSum,
+      `backfill messagesTokens (${ci.messagesTokens}) !== sum of msg.tokens (${msgSum})`,
+    );
+
     try {
       rmSync(dir, { recursive: true, force: true });
     } catch {}
@@ -534,27 +670,31 @@ describe("Store", () => {
     assert.equal(entries.length, 1);
 
     const ci = entries[0].contextInfo;
-    // The image message should now have ~1,600 tokens (fixed estimate), not 750,000
+    // API usage says input_tokens=100, so totalTokens should be 100
+    // after both image migration and usage backfill with rescaling.
+    assert.equal(ci.totalTokens, 100);
+
+    // The image message should NOT have inflated tokens (750,000)
     const imageMsg = ci.messages[1];
     assert.ok(
       imageMsg.tokens < 5_000,
       `Expected image msg tokens <5,000 but got ${imageMsg.tokens}`,
     );
-    // Non-image messages should be unchanged
-    assert.equal(ci.messages[0].tokens, 2);
-    assert.equal(ci.messages[2].tokens, 4);
-    // Totals should be recalculated
-    assert.ok(
-      ci.messagesTokens < 10_000,
-      `Expected messagesTokens <10,000 but got ${ci.messagesTokens}`,
+
+    // Invariant: totalTokens === system + tools + messages
+    assert.equal(
+      ci.totalTokens,
+      ci.systemTokens + ci.toolsTokens + ci.messagesTokens,
+      `invariant broken: ${ci.totalTokens} !== ${ci.systemTokens} + ${ci.toolsTokens} + ${ci.messagesTokens}`,
     );
-    assert.ok(
-      ci.totalTokens < 10_200,
-      `Expected totalTokens <10,200 but got ${ci.totalTokens}`,
+
+    // Per-message tokens must sum to messagesTokens
+    const msgSum = ci.messages.reduce((s, m) => s + m.tokens, 0);
+    assert.equal(
+      ci.messagesTokens,
+      msgSum,
+      `messagesTokens (${ci.messagesTokens}) !== sum of msg.tokens (${msgSum})`,
     );
-    // systemTokens and toolsTokens should be unchanged
-    assert.equal(ci.systemTokens, 100);
-    assert.equal(ci.toolsTokens, 50);
 
     try {
       rmSync(dir, { recursive: true, force: true });
@@ -635,9 +775,24 @@ describe("Store", () => {
     store.loadState();
 
     const ci = store.getCapturedRequests()[0].contextInfo;
-    // messagesTokens should now match sum of per-message tokens (2 + 3 = 5)
-    assert.equal(ci.messagesTokens, 5);
-    assert.equal(ci.totalTokens, 155); // 100 + 50 + 5
+    // API usage says input_tokens=100, so totalTokens should be 100
+    // after image migration + usage backfill with rescaling.
+    assert.equal(ci.totalTokens, 100);
+
+    // Invariant: totalTokens === system + tools + messages
+    assert.equal(
+      ci.totalTokens,
+      ci.systemTokens + ci.toolsTokens + ci.messagesTokens,
+      `invariant broken: ${ci.totalTokens} !== ${ci.systemTokens} + ${ci.toolsTokens} + ${ci.messagesTokens}`,
+    );
+
+    // Per-message tokens must sum to messagesTokens
+    const msgSum = ci.messages.reduce((s, m) => s + m.tokens, 0);
+    assert.equal(
+      ci.messagesTokens,
+      msgSum,
+      `messagesTokens (${ci.messagesTokens}) !== sum of msg.tokens (${msgSum})`,
+    );
 
     try {
       rmSync(dir, { recursive: true, force: true });

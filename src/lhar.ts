@@ -6,7 +6,7 @@
  */
 
 // Composition analysis
-export { analyzeComposition } from "./lhar/composition.js";
+export { analyzeComposition, normalizeComposition } from "./lhar/composition.js";
 
 // Response usage parsing
 export { parseResponseUsage } from "./lhar/response.js";

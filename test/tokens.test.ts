@@ -2,6 +2,27 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { estimateTokens } from "../src/core.js";
+import { rescaleContextTokens } from "../src/core/tokens.js";
+import type { ContextInfo } from "../src/types.js";
+
+function makeContextInfo(overrides: Partial<ContextInfo> = {}): ContextInfo {
+  return {
+    provider: "anthropic",
+    apiFormat: "anthropic-messages",
+    model: "claude-sonnet-4",
+    systemTokens: 100,
+    toolsTokens: 50,
+    messagesTokens: 50,
+    totalTokens: 200,
+    systemPrompts: [],
+    tools: [],
+    messages: [
+      { role: "user", content: "hello", tokens: 20 },
+      { role: "assistant", content: "hi there friend", tokens: 30 },
+    ],
+    ...overrides,
+  };
+}
 
 describe("estimateTokens", () => {
   it("estimates string tokens as chars/4", () => {
@@ -89,5 +110,95 @@ describe("estimateTokens", () => {
     const tokens = estimateTokens(block);
     assert.ok(tokens < 5_000, `Expected <5,000 but got ${tokens}`);
     assert.ok(tokens >= 1_600, `Expected >=1,600 but got ${tokens}`);
+  });
+});
+
+describe("rescaleContextTokens", () => {
+  it("rescales sub-totals and per-message tokens proportionally", () => {
+    const ci = makeContextInfo();
+    rescaleContextTokens(ci, 400); // 2x scale
+    assert.equal(ci.systemTokens, 200);
+    assert.equal(ci.toolsTokens, 100);
+    assert.equal(ci.messages[0].tokens, 40);
+    assert.equal(ci.messages[1].tokens, 60);
+    assert.equal(ci.totalTokens, 400);
+  });
+
+  it("preserves invariant: total === system + tools + messages", () => {
+    const ci = makeContextInfo();
+    // Scale that causes rounding: 200 -> 301
+    rescaleContextTokens(ci, 301);
+    assert.equal(
+      ci.totalTokens,
+      ci.systemTokens + ci.toolsTokens + ci.messagesTokens,
+      "invariant broken: totalTokens !== system + tools + messages",
+    );
+    assert.equal(ci.totalTokens, 301);
+  });
+
+  it("ensures messagesTokens equals sum of per-message tokens after rounding fix", () => {
+    // Exhaustive check: try 1000 scale targets with values designed to
+    // maximize rounding residual (3 messages, prime-ish sub-totals).
+    for (let auth = 1; auth <= 1000; auth++) {
+      const ci = makeContextInfo({
+        systemTokens: 33,
+        toolsTokens: 33,
+        messagesTokens: 34,
+        totalTokens: 100,
+        messages: [
+          { role: "user", content: "a", tokens: 11 },
+          { role: "assistant", content: "b", tokens: 11 },
+          { role: "user", content: "c", tokens: 12 },
+        ],
+      });
+      rescaleContextTokens(ci, auth);
+      const msgSum = ci.messages.reduce((s, m) => s + m.tokens, 0);
+      assert.equal(
+        ci.messagesTokens,
+        msgSum,
+        `at auth=${auth}: messagesTokens (${ci.messagesTokens}) !== sum(msg.tokens) (${msgSum})`,
+      );
+      assert.equal(
+        ci.totalTokens,
+        ci.systemTokens + ci.toolsTokens + ci.messagesTokens,
+        `at auth=${auth}: outer invariant broken`,
+      );
+    }
+  });
+
+  it("no-ops when authoritative equals estimated", () => {
+    const ci = makeContextInfo();
+    rescaleContextTokens(ci, 200);
+    assert.equal(ci.systemTokens, 100);
+    assert.equal(ci.toolsTokens, 50);
+    assert.equal(ci.messagesTokens, 50);
+    assert.equal(ci.messages[0].tokens, 20);
+    assert.equal(ci.messages[1].tokens, 30);
+    assert.equal(ci.totalTokens, 200);
+  });
+
+  it("handles zero estimated gracefully", () => {
+    const ci = makeContextInfo({
+      systemTokens: 0,
+      toolsTokens: 0,
+      messagesTokens: 0,
+      totalTokens: 0,
+      messages: [],
+    });
+    // Should not throw or divide by zero
+    rescaleContextTokens(ci, 0);
+    assert.equal(ci.totalTokens, 0);
+  });
+
+  it("handles zero authoritative gracefully", () => {
+    const ci = makeContextInfo();
+    rescaleContextTokens(ci, 0);
+    assert.equal(ci.totalTokens, 0);
+    assert.equal(ci.systemTokens, 0);
+    assert.equal(ci.toolsTokens, 0);
+    assert.equal(ci.messagesTokens, 0);
+    for (const msg of ci.messages) {
+      assert.equal(msg.tokens, 0);
+    }
   });
 });

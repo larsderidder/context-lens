@@ -12,12 +12,14 @@ import {
   extractToolsUsed,
   extractWorkingDirectory,
   getContextLimit,
+  rescaleContextTokens,
   scanSecurity,
 } from "../core.js";
 import {
   analyzeComposition,
   buildLharRecord,
   buildSessionLine,
+  normalizeComposition,
   parseResponseUsage,
 } from "../lhar.js";
 import { safeFilenamePart } from "../server-utils.js";
@@ -173,9 +175,11 @@ export class Store {
       this.dataRevision = 1;
       // Loaded entries are already compact (projectEntry strips heavy data before saving).
       // Do NOT call compactEntry here. It would destroy the preserved response usage data.
+      // Order matters: image migration fixes inflated per-message tokens from base64 data
+      // BEFORE the usage backfill rescales everything proportionally.
+      const migrated = this.migrateImageTokenCounts();
       this.backfillTotalTokensFromUsage();
       this.backfillHealthScores();
-      const migrated = this.migrateImageTokenCounts();
       if (migrated > 0) {
         this.saveState();
       }
@@ -257,11 +261,15 @@ export class Store {
         );
       }
 
-      // Override estimated totalTokens with actual API usage.
-      // The estimate (chars/4) can be wildly off; the API's real token count
-      // (input + cacheRead + cacheWrite) is authoritative.
-      contextInfo.totalTokens = actualInputTokens;
+      // Rescale all sub-totals and per-message tokens to match the
+      // authoritative API usage. This preserves relative proportions while
+      // ensuring totalTokens === systemTokens + toolsTokens + messagesTokens.
+      rescaleContextTokens(contextInfo, actualInputTokens);
     }
+
+    // Normalize composition so sum(composition[].tokens) === totalTokens.
+    // This must happen after the totalTokens override so both systems agree.
+    normalizeComposition(composition, contextInfo.totalTokens);
 
     // Calculate cost with proper cache token pricing
     const inputTok = usage.inputTokens || contextInfo.totalTokens;
@@ -495,7 +503,7 @@ export class Store {
       const actual =
         usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens;
       if (actual > 0 && actual !== entry.contextInfo.totalTokens) {
-        entry.contextInfo.totalTokens = actual;
+        rescaleContextTokens(entry.contextInfo, actual);
         fixed++;
       }
     }
@@ -512,6 +520,10 @@ export class Store {
    */
   private migrateImageTokenCounts(): number {
     let migrated = 0;
+    const updateTotals = (ci: ContextInfo, messagesTokens: number): void => {
+      ci.messagesTokens = messagesTokens;
+      ci.totalTokens = ci.systemTokens + ci.toolsTokens + ci.messagesTokens;
+    };
     for (const entry of this.capturedRequests) {
       const ci = entry.contextInfo;
       let messagesTokens = 0;
@@ -544,15 +556,13 @@ export class Store {
         messagesTokens += msg.tokens;
       }
       if (changed) {
-        ci.messagesTokens = messagesTokens;
-        ci.totalTokens = ci.systemTokens + ci.toolsTokens + ci.messagesTokens;
+        updateTotals(ci, messagesTokens);
         migrated++;
       } else if (ci.messagesTokens !== messagesTokens) {
         // Messages with images may have been truncated during compaction,
         // leaving messagesTokens inflated even though no image blocks remain.
         // Fix by recalculating from the actual per-message token counts.
-        ci.messagesTokens = messagesTokens;
-        ci.totalTokens = ci.systemTokens + ci.toolsTokens + ci.messagesTokens;
+        updateTotals(ci, messagesTokens);
         migrated++;
       }
     }

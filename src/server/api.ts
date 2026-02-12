@@ -11,6 +11,17 @@ function projectEntryForApi(e: CapturedEntry) {
   return projectEntry(e, e.contextInfo);
 }
 
+function getExportEntries(
+  store: Store,
+  parsedUrl: url.UrlWithParsedQuery,
+): CapturedEntry[] {
+  const convoFilter = parsedUrl.query.conversation as string | undefined;
+  if (!convoFilter) return store.getCapturedRequests();
+  return store
+    .getCapturedRequests()
+    .filter((e) => e.conversationId === convoFilter);
+}
+
 function handleIngest(
   store: Store,
   req: http.IncomingMessage,
@@ -277,12 +288,7 @@ function handleExportLhar(
   _req: http.IncomingMessage,
   res: http.ServerResponse,
 ): void {
-  const convoFilter = parsedUrl.query.conversation as string | undefined;
-  const entries = convoFilter
-    ? store
-        .getCapturedRequests()
-        .filter((e) => e.conversationId === convoFilter)
-    : store.getCapturedRequests();
+  const entries = getExportEntries(store, parsedUrl);
   const jsonl = toLharJsonl(entries, store.getConversations());
   res.writeHead(200, {
     "Content-Type": "application/x-ndjson",
@@ -297,12 +303,7 @@ function handleExportLharJson(
   _req: http.IncomingMessage,
   res: http.ServerResponse,
 ): void {
-  const convoFilter = parsedUrl.query.conversation as string | undefined;
-  const entries = convoFilter
-    ? store
-        .getCapturedRequests()
-        .filter((e) => e.conversationId === convoFilter)
-    : store.getCapturedRequests();
+  const entries = getExportEntries(store, parsedUrl);
   const wrapped = toLharJson(entries, store.getConversations());
   res.writeHead(200, {
     "Content-Type": "application/json",

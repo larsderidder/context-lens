@@ -41,9 +41,7 @@ export function analyzeComposition(
       add("system_prompt", estimateTokens(rawBody.system));
     } else if (Array.isArray(rawBody.system)) {
       for (const block of rawBody.system) {
-        if (block.cache_control) {
-          add("cache_markers", estimateTokens(block.cache_control));
-        }
+        // cache_control metadata is negligible; count only the text content
         add("system_prompt", estimateTokens(block.text || block));
       }
     }
@@ -187,8 +185,8 @@ function classifyBlock(
     if (text.includes("<system-reminder>")) {
       add("system_injections", estimateTokens(text));
     } else if (block.cache_control) {
-      add("cache_markers", estimateTokens(block.cache_control));
-      // Still count the text content in its natural category
+      // Count text in its natural category only; the cache_control metadata
+      // itself is negligible overhead and should not inflate the total.
       if (role === "assistant") {
         add("assistant_text", estimateTokens(text));
       } else {
@@ -254,4 +252,48 @@ function buildCompositionArray(
   // Sort by tokens descending
   result.sort((a, b) => b.tokens - a.tokens);
   return result;
+}
+
+/**
+ * Normalize composition token counts so their sum equals an authoritative total.
+ *
+ * Scales each entry proportionally and applies a rounding residual fix on the
+ * largest entry so `sum(composition[].tokens) === authoritative` exactly.
+ * Also recomputes `pct` fields.
+ */
+export function normalizeComposition(
+  composition: CompositionEntry[],
+  authoritative: number,
+): void {
+  if (composition.length === 0) return;
+  const rawSum = composition.reduce((s, c) => s + c.tokens, 0);
+  if (rawSum === 0 || authoritative === 0) return;
+  if (rawSum === authoritative) {
+    // Already matches; just recompute pct for consistency
+    for (const c of composition) {
+      c.pct =
+        authoritative > 0
+          ? Math.round((c.tokens / authoritative) * 1000) / 10
+          : 0;
+    }
+    return;
+  }
+  const scale = authoritative / rawSum;
+  let running = 0;
+  for (const c of composition) {
+    c.tokens = Math.round(c.tokens * scale);
+    running += c.tokens;
+  }
+  // Fix rounding residual on the first (largest) entry
+  const residual = authoritative - running;
+  if (residual !== 0) {
+    composition[0].tokens += residual;
+  }
+  // Recompute pct
+  for (const c of composition) {
+    c.pct =
+      authoritative > 0
+        ? Math.round((c.tokens / authoritative) * 1000) / 10
+        : 0;
+  }
 }

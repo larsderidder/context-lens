@@ -30,4 +30,4 @@ export {
 } from "./core/routing.js";
 export { scanSecurity } from "./core/security.js";
 export { detectSource } from "./core/source.js";
-export { estimateTokens } from "./core/tokens.js";
+export { estimateTokens, rescaleContextTokens } from "./core/tokens.js";
