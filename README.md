@@ -35,6 +35,7 @@ npx context-lens claude "your prompt"
 npx context-lens codex "your prompt"
 npx context-lens gemini "your prompt"
 npx context-lens aider --model claude-sonnet-4
+npx context-lens pi
 npx context-lens -- python my_agent.py
 ```
 
@@ -48,6 +49,7 @@ This starts the proxy (port 4040), opens the web UI (http://localhost:4041), set
 | **OpenAI** | Reverse Proxy | ✅ Stable | `OPENAI_BASE_URL` |
 | **Google Gemini** | Reverse Proxy | 🧪 Experimental | `GOOGLE_GEMINI_BASE_URL` |
 | **ChatGPT (Subscription)** | MITM Proxy | ✅ Stable | `https_proxy` |
+| **Pi Coding Agent** | Reverse Proxy (temporary per-run config) | ✅ Stable | `PI_CODING_AGENT_DIR` (set by wrapper) |
 | **Aider / Generic** | Reverse Proxy | ✅ Stable | Detects standard patterns |
 
 ## What You Get
@@ -85,7 +87,7 @@ pnpm start
 # Port 4040 = proxy, port 4041 = web UI
 
 ANTHROPIC_BASE_URL=http://localhost:4040 claude "your prompt"
-OPENAI_BASE_URL=http://localhost:4040 codex "your prompt"
+OPENAI_BASE_URL=http://localhost:4040 codex "your prompt"  # API-key/OpenAI-base-url mode
 GOOGLE_GEMINI_BASE_URL=http://localhost:4040 gemini "your prompt"  # experimental
 ```
 
@@ -100,7 +102,24 @@ OPENAI_BASE_URL=http://localhost:4040/aider aider "prompt"
 
 ### Pi Coding Agent
 
-Pi ignores standard base-URL environment variables, so the CLI wrapper can't redirect it automatically. Instead, configure Pi to point at the proxy via `~/.pi/agent/models.json`:
+Pi ignores standard base-URL environment variables. `context-lens pi` works by creating a private per-run temporary Pi config directory under `/tmp/context-lens-pi-agent-*`, symlinking your normal `~/.pi/agent/*` files, and injecting proxy `baseUrl` overrides into its temporary `models.json`.
+
+Your real `~/.pi/agent/models.json` is never modified, and the temporary directory is removed when the command exits.
+
+```bash
+npx context-lens pi
+```
+
+Pi config paths:
+
+- Real Pi config dir: `~/.pi/agent`
+- Real Pi models file: `~/.pi/agent/models.json` (left untouched)
+- Temporary per-run config dir: `/tmp/context-lens-pi-agent-*`
+- Runtime override providers in temp `models.json`: `anthropic`, `openai`, `google-gemini-cli`, `google-antigravity`
+
+If you prefer not to use the temporary runtime override, you can also edit your real `~/.pi/agent/models.json` directly and set those providers' `baseUrl` values to `http://localhost:4040/pi`.
+
+Example `~/.pi/agent/models.json`:
 
 ```json
 {
@@ -113,8 +132,6 @@ Pi ignores standard base-URL environment variables, so the CLI wrapper can't red
 }
 ```
 
-Start the proxy (`pnpm start`), then run Pi normally. No CLI wrapper needed. The config hot-reloads when you switch models via `/model`, but adding new provider overrides requires restarting Pi.
-
 Tested with: Claude Opus 4.6, Gemini 2.5 Flash (via Gemini CLI subscription), GPT-OSS 120B (via Antigravity). The `openai-codex` provider (ChatGPT subscription) has the same Cloudflare limitation as Codex and is not supported through the reverse proxy.
 
 ### Codex Subscription Mode
@@ -125,6 +142,8 @@ Codex with a ChatGPT subscription needs mitmproxy for HTTPS interception (Cloudf
 pipx install mitmproxy
 npx context-lens codex "your prompt"
 ```
+
+If Codex fails with certificate trust errors, install/trust the mitmproxy CA certificate (`~/.mitmproxy/mitmproxy-ca-cert.pem`) for your environment.
 
 ## How It Works
 
