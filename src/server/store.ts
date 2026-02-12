@@ -9,6 +9,7 @@ import {
   estimateTokens,
   extractConversationLabel,
   extractSessionId,
+  extractToolsUsed,
   extractWorkingDirectory,
   getContextLimit,
   scanSecurity,
@@ -42,6 +43,7 @@ type StoreChangeListener = (event: StoreChangeEvent) => void;
 export class Store {
   private readonly dataDir: string;
   private readonly stateFile: string;
+  private readonly detailDir: string;
   private readonly maxSessions: number;
   private readonly maxCompactMessages: number;
   private readonly privacy: PrivacyLevel;
@@ -66,12 +68,18 @@ export class Store {
   }) {
     this.dataDir = opts.dataDir;
     this.stateFile = opts.stateFile;
+    this.detailDir = path.join(opts.dataDir, "details");
     this.maxSessions = opts.maxSessions;
     this.maxCompactMessages = opts.maxCompactMessages;
     this.privacy = opts.privacy ?? "standard";
 
     try {
       fs.mkdirSync(this.dataDir, { recursive: true });
+    } catch {
+      /* Directory may already exist */
+    }
+    try {
+      fs.mkdirSync(this.detailDir, { recursive: true });
     } catch {
       /* Directory may already exist */
     }
@@ -165,6 +173,7 @@ export class Store {
       this.dataRevision = 1;
       // Loaded entries are already compact (projectEntry strips heavy data before saving).
       // Do NOT call compactEntry here. It would destroy the preserved response usage data.
+      this.backfillTotalTokensFromUsage();
       this.backfillHealthScores();
       const migrated = this.migrateImageTokenCounts();
       if (migrated > 0) {
@@ -231,9 +240,39 @@ export class Store {
     // Compute composition and cost
     const composition = analyzeComposition(contextInfo, rawBody);
     const usage = parseResponseUsage(responseData);
+
+    // Validate estimation accuracy before overriding with actuals
+    const actualInputTokens =
+      usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens;
+    if (actualInputTokens > 0) {
+      const estimated = contextInfo.totalTokens;
+      const actual = actualInputTokens;
+      const diff = Math.abs(actual - estimated);
+      const pct = estimated > 0 ? (diff / estimated) * 100 : 0;
+
+      // Log significant estimation errors (>20% off or >10K tokens off)
+      if (pct > 20 || diff > 10_000) {
+        console.warn(
+          `Token estimation off by ${pct.toFixed(1)}% (estimated: ${estimated.toLocaleString()}, actual: ${actual.toLocaleString()}) for ${contextInfo.model}`,
+        );
+      }
+
+      // Override estimated totalTokens with actual API usage.
+      // The estimate (chars/4) can be wildly off; the API's real token count
+      // (input + cacheRead + cacheWrite) is authoritative.
+      contextInfo.totalTokens = actualInputTokens;
+    }
+
+    // Calculate cost with proper cache token pricing
     const inputTok = usage.inputTokens || contextInfo.totalTokens;
     const outputTok = usage.outputTokens;
-    const costUsd = estimateCost(contextInfo.model, inputTok, outputTok);
+    const costUsd = estimateCost(
+      contextInfo.model,
+      inputTok,
+      outputTok,
+      usage.cacheReadTokens,
+      usage.cacheWriteTokens,
+    );
 
     const entry: CapturedEntry = {
       id: this.nextEntryId++,
@@ -271,26 +310,19 @@ export class Store {
         (a, b) =>
           new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
       )[0];
+
+    // Collect all tools used across the conversation (including current entry)
     const sessionToolsUsed = new Set<string>();
     for (const e of sameConvo) {
-      for (const msg of e.contextInfo.messages) {
-        if (msg.contentBlocks) {
-          for (const b of msg.contentBlocks) {
-            if (b.type === "tool_use" && "name" in b && b.name)
-              sessionToolsUsed.add(b.name);
-          }
-        }
+      for (const tool of extractToolsUsed(e.contextInfo.messages)) {
+        sessionToolsUsed.add(tool);
       }
     }
     // Also scan current entry (not yet in capturedRequests)
-    for (const msg of contextInfo.messages) {
-      if (msg.contentBlocks) {
-        for (const b of msg.contentBlocks) {
-          if (b.type === "tool_use" && "name" in b && b.name)
-            sessionToolsUsed.add(b.name);
-        }
-      }
+    for (const tool of extractToolsUsed(contextInfo.messages)) {
+      sessionToolsUsed.add(tool);
     }
+
     const turnCount = sameConvo.filter((e) => !e.agentKey).length + 1;
     entry.healthScore = computeHealthScore(
       entry,
@@ -332,10 +364,14 @@ export class Store {
       const evictSet = new Set(toEvict);
       // Remove all entries belonging to evicted sessions
       for (let i = this.capturedRequests.length - 1; i >= 0; i--) {
+        const evictEntry = this.capturedRequests[i];
         if (
-          this.capturedRequests[i].conversationId &&
-          evictSet.has(this.capturedRequests[i].conversationId!)
+          evictEntry.conversationId &&
+          evictSet.has(evictEntry.conversationId)
         ) {
+          // Remove detail file
+          const detailPath = path.join(this.detailDir, `${evictEntry.id}.json`);
+          try { fs.unlinkSync(detailPath); } catch { /* may not exist */ }
           this.capturedRequests.splice(i, 1);
         }
       }
@@ -351,12 +387,14 @@ export class Store {
     this.dataRevision++;
     this.emitChange("entry-added", conversationId);
     this.logToDisk(entry);
+    this.saveEntryDetail(entry);
     this.compactEntry(entry);
     this.saveState();
     return entry;
   }
 
   deleteConversation(convoId: string): void {
+    this.removeConversationDetails(convoId);
     this.conversations.delete(convoId);
     for (let i = this.capturedRequests.length - 1; i >= 0; i--) {
       if (this.capturedRequests[i].conversationId === convoId)
@@ -372,6 +410,14 @@ export class Store {
   }
 
   resetAll(): void {
+    // Remove all detail files
+    try {
+      const files = fs.readdirSync(this.detailDir);
+      for (const f of files) {
+        try { fs.unlinkSync(path.join(this.detailDir, f)); } catch { /* ignore */ }
+      }
+    } catch { /* directory may not exist */ }
+
     this.capturedRequests.length = 0;
     this.conversations.clear();
     this.diskSessionsWritten.clear();
@@ -410,17 +456,14 @@ export class Store {
             new Date(a.timestamp).getTime(),
         )[0];
 
+      // Collect all tools used across the conversation (up to this entry)
       const sessionToolsUsed = new Set<string>();
       for (const e of [...sameConvo, entry]) {
-        for (const msg of e.contextInfo.messages) {
-          if (msg.contentBlocks) {
-            for (const b of msg.contentBlocks) {
-              if (b.type === "tool_use" && "name" in b && b.name)
-                sessionToolsUsed.add(b.name);
-            }
-          }
+        for (const tool of extractToolsUsed(e.contextInfo.messages)) {
+          sessionToolsUsed.add(tool);
         }
       }
+
       const turnCount =
         sameConvo.filter((e) => !e.agentKey).length +
         (entry.agentKey ? 0 : 1);
@@ -440,6 +483,31 @@ export class Store {
    * Before the image token fix, estimateTokens() would stringify base64 image
    * data, producing millions of phantom tokens. Persisted entries still have
    * those inflated counts. This migration recalculates from the compacted
+  /**
+   * Backfill totalTokens from API usage data for entries that only have estimates.
+   * The estimate (chars/4) can be wildly inaccurate; the API's real token count
+   * (input + cacheRead + cacheWrite) is authoritative.
+   */
+  private backfillTotalTokensFromUsage(): void {
+    let fixed = 0;
+    for (const entry of this.capturedRequests) {
+      const usage = parseResponseUsage(entry.response);
+      const actual =
+        usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens;
+      if (actual > 0 && actual !== entry.contextInfo.totalTokens) {
+        entry.contextInfo.totalTokens = actual;
+        fixed++;
+      }
+    }
+    if (fixed > 0) {
+      console.log(
+        `Fixed totalTokens from API usage for ${fixed} entries`,
+      );
+    }
+  }
+
+  /**
+   * Migrate image token counts: re-estimate token counts for messages containing
    * contentBlocks (which have no base64 data) using the fixed estimateTokens().
    */
   private migrateImageTokenCounts(): number {
@@ -494,6 +562,57 @@ export class Store {
     return migrated;
   }
 
+  /**
+   * Save full contextInfo for an entry to disk so the UI can retrieve
+   * uncompacted message content on demand.
+   */
+  private saveEntryDetail(entry: CapturedEntry): void {
+    const detailPath = path.join(this.detailDir, `${entry.id}.json`);
+    try {
+      fs.writeFileSync(
+        detailPath,
+        JSON.stringify({
+          contextInfo: entry.contextInfo,
+        }),
+      );
+    } catch (err: unknown) {
+      console.error(
+        "Detail save error:",
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  }
+
+  /**
+   * Load full contextInfo for an entry from disk.
+   * Returns null if the detail file doesn't exist (old entries before this feature).
+   */
+  getEntryDetail(entryId: number): ContextInfo | null {
+    const detailPath = path.join(this.detailDir, `${entryId}.json`);
+    try {
+      const data = JSON.parse(fs.readFileSync(detailPath, "utf-8"));
+      return data.contextInfo ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Remove detail files for entries belonging to a conversation.
+   */
+  private removeConversationDetails(convoId: string): void {
+    for (const entry of this.capturedRequests) {
+      if (entry.conversationId === convoId) {
+        const detailPath = path.join(this.detailDir, `${entry.id}.json`);
+        try {
+          fs.unlinkSync(detailPath);
+        } catch {
+          /* file may not exist */
+        }
+      }
+    }
+  }
+
   private logToDisk(entry: CapturedEntry): void {
     const safeSource = safeFilenamePart(entry.source || "unknown");
     const safeConvo = entry.conversationId
@@ -536,24 +655,26 @@ export class Store {
     }
   }
 
-  // Compact a content block: keep tool metadata, truncate text
+  // Compact a content block: keep tool metadata, truncate text.
+  // Full content is available via the detail API (per-entry files on disk).
   private compactBlock(b: ContentBlock): ContentBlock {
+    const limit = 200;
     switch (b.type) {
       case "tool_use":
         return { type: "tool_use", id: b.id, name: b.name, input: {} };
       case "tool_result": {
         const rc =
           typeof b.content === "string"
-            ? b.content.slice(0, 200)
+            ? b.content.slice(0, limit)
             : Array.isArray(b.content)
               ? b.content.map((bb) => this.compactBlock(bb))
               : "";
         return { type: "tool_result", tool_use_id: b.tool_use_id, content: rc };
       }
       case "text":
-        return { type: "text", text: (b.text || "").slice(0, 200) };
+        return { type: "text", text: (b.text || "").slice(0, limit) };
       case "input_text":
-        return { type: "input_text", text: (b.text || "").slice(0, 200) };
+        return { type: "input_text", text: (b.text || "").slice(0, limit) };
       case "image":
         return { type: "image" };
       default: {
@@ -562,10 +683,10 @@ export class Store {
         if (any.thinking)
           return {
             ...any,
-            thinking: any.thinking.slice(0, 200),
+            thinking: any.thinking.slice(0, limit),
           } as ContentBlock;
         if (any.text)
-          return { ...any, text: any.text.slice(0, 200) } as ContentBlock;
+          return { ...any, text: any.text.slice(0, limit) } as ContentBlock;
         return b;
       }
     }
@@ -574,13 +695,14 @@ export class Store {
   private compactMessages(
     messages: ContextInfo["messages"],
   ): ContextInfo["messages"] {
+    const limit = 200;
     const msgs =
       messages.length > this.maxCompactMessages
         ? messages.slice(-this.maxCompactMessages)
         : messages;
     return msgs.map((m) => ({
       role: m.role,
-      content: typeof m.content === "string" ? m.content.slice(0, 200) : "",
+      content: typeof m.content === "string" ? m.content.slice(0, limit) : "",
       tokens: m.tokens,
       contentBlocks: m.contentBlocks?.map((b) => this.compactBlock(b)) ?? null,
     }));

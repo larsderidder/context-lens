@@ -1,3 +1,4 @@
+import { parseResponseUsage } from "../lhar.js";
 import type { CapturedEntry, ContextInfo, ProjectedEntry } from "../types.js";
 
 /**
@@ -10,8 +11,16 @@ export function projectEntry(
   e: CapturedEntry,
   contextInfo: ContextInfo,
 ): ProjectedEntry {
-  const resp = e.response as Record<string, unknown> | undefined;
-  const usage = resp?.usage as Record<string, number> | undefined;
+  // Use the canonical response parser instead of ad-hoc field access
+  const usage = parseResponseUsage(e.response);
+
+  // Return null for usage if no actual data is present (all zeros)
+  const hasUsageData =
+    usage.inputTokens > 0 ||
+    usage.outputTokens > 0 ||
+    usage.cacheReadTokens > 0 ||
+    usage.cacheWriteTokens > 0;
+
   return {
     id: e.id,
     timestamp: e.timestamp,
@@ -31,15 +40,15 @@ export function projectEntry(
     costUsd: e.costUsd,
     healthScore: e.healthScore,
     securityAlerts: e.securityAlerts || [],
-    usage: usage
+    usage: hasUsageData
       ? {
-          inputTokens: usage.input_tokens || 0,
-          outputTokens: usage.output_tokens || 0,
-          cacheReadTokens: usage.cache_read_input_tokens || 0,
-          cacheWriteTokens: usage.cache_creation_input_tokens || 0,
+          inputTokens: usage.inputTokens,
+          outputTokens: usage.outputTokens,
+          cacheReadTokens: usage.cacheReadTokens,
+          cacheWriteTokens: usage.cacheWriteTokens,
         }
       : null,
-    responseModel: (resp?.model as string) || null,
-    stopReason: (resp?.stop_reason as string) || null,
+    responseModel: usage.model,
+    stopReason: usage.finishReasons[0] || null,
   };
 }

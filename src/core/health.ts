@@ -33,6 +33,62 @@ function lerp(value: number, breakpoints: [number, number][]): number {
   return breakpoints[breakpoints.length - 1][1];
 }
 
+function totalCompositionTokens(composition: CompositionEntry[]): number {
+  return composition.reduce((s, c) => s + c.tokens, 0);
+}
+
+function compositionCategoryTokens(
+  composition: CompositionEntry[],
+  category: CompositionEntry["category"],
+): number {
+  return composition.find((c) => c.category === category)?.tokens ?? 0;
+}
+
+function compositionCategoryPct(
+  composition: CompositionEntry[],
+  category: CompositionEntry["category"],
+): number {
+  return Math.round(composition.find((c) => c.category === category)?.pct ?? 0);
+}
+
+function largestToolResultTokens(messages: ParsedMessage[]): number {
+  let largest = 0;
+  for (const m of messages) {
+    if (!m.contentBlocks) continue;
+    for (const b of m.contentBlocks) {
+      if (b.type === "tool_result" && m.tokens > largest) {
+        largest = m.tokens;
+      }
+    }
+  }
+  return largest;
+}
+
+function definedToolNames(tools: Tool[]): Set<string> {
+  const names = new Set<string>();
+  for (const t of tools) {
+    const name =
+      "name" in t
+        ? t.name
+        : "function" in t
+          ? (t as { function: { name: string } }).function.name
+          : null;
+    if (name) names.add(name);
+  }
+  return names;
+}
+
+function countUsedDefinedTools(
+  sessionToolsUsed: Set<string>,
+  definedNames: Set<string>,
+): number {
+  let usedCount = 0;
+  for (const name of sessionToolsUsed) {
+    if (definedNames.has(name)) usedCount++;
+  }
+  return usedCount;
+}
+
 // ---------------------------------------------------------------------------
 // Audit 1: Context Utilization (weight 30)
 // ---------------------------------------------------------------------------
@@ -72,11 +128,10 @@ function scoreToolResults(
   messages: ParsedMessage[],
   utilizationPct: number,
 ): number {
-  const totalTok = composition.reduce((s, c) => s + c.tokens, 0);
+  const totalTok = totalCompositionTokens(composition);
   if (totalTok === 0) return 100;
 
-  const toolResults = composition.find((c) => c.category === "tool_results");
-  const toolResultTokens = toolResults ? toolResults.tokens : 0;
+  const toolResultTokens = compositionCategoryTokens(composition, "tool_results");
   const aggPct = (toolResultTokens / totalTok) * 100;
 
   const aggregateScore = lerp(aggPct, [
@@ -88,16 +143,7 @@ function scoreToolResults(
   ]);
 
   // Find largest single tool result message
-  let largestResult = 0;
-  for (const m of messages) {
-    if (m.contentBlocks) {
-      for (const b of m.contentBlocks) {
-        if (b.type === "tool_result" && m.tokens > largestResult) {
-          largestResult = m.tokens;
-        }
-      }
-    }
-  }
+  const largestResult = largestToolResultTokens(messages);
 
   const largestScore = lerp(largestResult, [
     [2000, 100],
@@ -120,22 +166,11 @@ function describeToolResults(
   messages: ParsedMessage[],
   utilizationPct: number,
 ): string {
-  const totalTok = composition.reduce((s, c) => s + c.tokens, 0);
+  const totalTok = totalCompositionTokens(composition);
   if (totalTok === 0) return "No context data.";
 
-  const toolResults = composition.find((c) => c.category === "tool_results");
-  const pct = toolResults ? Math.round(toolResults.pct) : 0;
-
-  let largestResult = 0;
-  for (const m of messages) {
-    if (m.contentBlocks) {
-      for (const b of m.contentBlocks) {
-        if (b.type === "tool_result" && m.tokens > largestResult) {
-          largestResult = m.tokens;
-        }
-      }
-    }
-  }
+  const pct = compositionCategoryPct(composition, "tool_results");
+  const largestResult = largestToolResultTokens(messages);
 
   const largestK =
     largestResult > 1000
@@ -167,11 +202,10 @@ function scoreToolEfficiency(
   sessionToolsUsed: Set<string>,
   turnCount: number,
 ): number {
-  const totalTok = composition.reduce((s, c) => s + c.tokens, 0);
+  const totalTok = totalCompositionTokens(composition);
   if (totalTok === 0 || tools.length === 0) return 100;
 
-  const toolDefs = composition.find((c) => c.category === "tool_definitions");
-  const toolDefTokens = toolDefs ? toolDefs.tokens : 0;
+  const toolDefTokens = compositionCategoryTokens(composition, "tool_definitions");
   const overheadPct = (toolDefTokens / totalTok) * 100;
 
   const overheadScore = lerp(overheadPct, [
@@ -182,21 +216,9 @@ function scoreToolEfficiency(
   ]);
 
   // Compute usage ratio
-  const definedNames = new Set<string>();
-  for (const t of tools) {
-    const name =
-      "name" in t
-        ? t.name
-        : "function" in t
-          ? (t as { function: { name: string } }).function.name
-          : null;
-    if (name) definedNames.add(name);
-  }
+  const definedNames = definedToolNames(tools);
   const totalDefined = definedNames.size || 1;
-  let usedCount = 0;
-  for (const name of sessionToolsUsed) {
-    if (definedNames.has(name)) usedCount++;
-  }
+  const usedCount = countUsedDefinedTools(sessionToolsUsed, definedNames);
   const usageRatio = (usedCount / totalDefined) * 100;
 
   let usageScore = lerp(usageRatio, [
@@ -219,26 +241,12 @@ function describeToolEfficiency(
   tools: Tool[],
   sessionToolsUsed: Set<string>,
 ): string {
-  const totalTok = composition.reduce((s, c) => s + c.tokens, 0);
+  const totalTok = totalCompositionTokens(composition);
   if (totalTok === 0 || tools.length === 0) return "No tool definitions.";
 
-  const toolDefs = composition.find((c) => c.category === "tool_definitions");
-  const pct = toolDefs ? Math.round(toolDefs.pct) : 0;
-
-  const definedNames = new Set<string>();
-  for (const t of tools) {
-    const name =
-      "name" in t
-        ? t.name
-        : "function" in t
-          ? (t as { function: { name: string } }).function.name
-          : null;
-    if (name) definedNames.add(name);
-  }
-  let usedCount = 0;
-  for (const name of sessionToolsUsed) {
-    if (definedNames.has(name)) usedCount++;
-  }
+  const pct = compositionCategoryPct(composition, "tool_definitions");
+  const definedNames = definedToolNames(tools);
+  const usedCount = countUsedDefinedTools(sessionToolsUsed, definedNames);
 
   return `Tool definitions are ${pct}% of context. ${usedCount}/${definedNames.size} tools used in session.`;
 }
@@ -290,11 +298,11 @@ function describeGrowthRate(
 // ---------------------------------------------------------------------------
 
 function scoreThinking(composition: CompositionEntry[]): number {
-  const totalTok = composition.reduce((s, c) => s + c.tokens, 0);
+  const totalTok = totalCompositionTokens(composition);
   if (totalTok === 0) return 100;
 
-  const thinking = composition.find((c) => c.category === "thinking");
-  const thinkingPct = thinking ? (thinking.tokens / totalTok) * 100 : 0;
+  const thinkingPct =
+    (compositionCategoryTokens(composition, "thinking") / totalTok) * 100;
 
   return lerp(thinkingPct, [
     [5, 100],
@@ -306,11 +314,10 @@ function scoreThinking(composition: CompositionEntry[]): number {
 }
 
 function describeThinking(composition: CompositionEntry[]): string {
-  const totalTok = composition.reduce((s, c) => s + c.tokens, 0);
+  const totalTok = totalCompositionTokens(composition);
   if (totalTok === 0) return "No context data.";
 
-  const thinking = composition.find((c) => c.category === "thinking");
-  const pct = thinking ? Math.round(thinking.pct) : 0;
+  const pct = compositionCategoryPct(composition, "thinking");
 
   if (pct <= 5) return "Thinking blocks are minimal.";
   if (pct <= 15) return `Thinking blocks are ${pct}% of context.`;

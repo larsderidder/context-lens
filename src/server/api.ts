@@ -144,6 +144,29 @@ function handleRequests(
         (sum, e) => sum + (e.costUsd ?? 0),
         0,
       );
+      // Token history for sparkline: main agent only, chronological (oldest → newest).
+      // Main agent = most frequent agentKey in the conversation.
+      const keyCounts = new Map<string, number>();
+      for (const e of entries) {
+        const k = e.agentKey || "_default";
+        keyCounts.set(k, (keyCounts.get(k) || 0) + 1);
+      }
+      let mainKey = "_default";
+      let maxCount = 0;
+      for (const [k, count] of keyCounts) {
+        if (count > maxCount) {
+          mainKey = k;
+          maxCount = count;
+        }
+      }
+      const tokenHistory: number[] = [];
+      for (let i = entries.length - 1; i >= 0; i--) {
+        const k = entries[i].agentKey || "_default";
+        if (k === mainKey) {
+          tokenHistory.push(entries[i].contextInfo.totalTokens);
+        }
+      }
+
       summaries.push({
         ...meta,
         entryCount: entries.length,
@@ -153,6 +176,7 @@ function handleRequests(
         contextLimit: latest.contextLimit,
         totalCost,
         healthScore: latest.healthScore,
+        tokenHistory,
       });
     }
     summaries.sort(
@@ -304,6 +328,25 @@ export function createApiHandler(
 
     if (pathname === "/api/ingest" && req.method === "POST") {
       handleIngest(store, req, res);
+      return true;
+    }
+
+    // Entry detail: full uncompacted contextInfo for a specific entry
+    const entryDetailMatch = pathname?.match(
+      /^\/api\/entries\/(\d+)\/detail$/,
+    );
+    if (entryDetailMatch && req.method === "GET") {
+      const entryId = parseInt(entryDetailMatch[1], 10);
+      const contextInfo = store.getEntryDetail(entryId);
+      if (contextInfo) {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ contextInfo }));
+      } else {
+        res.writeHead(404, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({ error: "Detail not found for this entry" }),
+        );
+      }
       return true;
     }
 
