@@ -5,6 +5,7 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    environment: npm
     permissions:
       contents: read
       id-token: write
@@ -21,9 +22,4 @@ jobs:
       - run: pnpm build
       - run: pnpm exec biome check .
       - run: pnpm test
-      - name: Publish
-        run: |
-          echo "ACTIONS_ID_TOKEN_REQUEST_URL is set: ${ACTIONS_ID_TOKEN_REQUEST_URL:+yes}"
-          echo "npm version: $(npm -v)"
-          npm config list
-          npm publish --access public --loglevel verbose
+      - run: npm publish --access public
