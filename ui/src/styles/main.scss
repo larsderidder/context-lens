@@ -13,35 +13,8 @@ html {
   text-size-adjust: 100%;
 }
 
-:root[data-density='comfortable'] {
-  --text-xs: 13px;
-  --text-sm: 14px;
-  --text-base: 16px;
-  --text-md: 17px;
-  --text-lg: 21px;
-  --text-xl: 25px;
-  --space-1: 5px;
-  --space-2: 10px;
-  --space-3: 14px;
-  --space-4: 18px;
-  --space-5: 22px;
-  --space-6: 26px;
-}
-
-:root[data-density='compact'] {
-  --text-xs: 10px;
-  --text-sm: 11px;
-  --text-base: 13px;
-  --text-md: 15px;
-  --text-lg: 18px;
-  --text-xl: 22px;
-  --space-1: 4px;
-  --space-2: 8px;
-  --space-3: 12px;
-  --space-4: 16px;
-  --space-5: 20px;
-  --space-6: 24px;
-}
+// Density modes are now defined in _tokens.scss
+// Default is comfortable, compact mode is tighter
 
 body {
   font-family: var(--font-sans);
@@ -62,7 +35,7 @@ a {
 
 // ── Selection ──
 ::selection {
-  background: rgba(94, 159, 248, 0.25);
+  background: var(--accent-blue-dim);
   color: var(--text-primary);
 }
 
@@ -152,6 +125,14 @@ a {
 }
 
 // ── Fonts ──
+// ── Floating-vue tooltip overrides ──
+.v-popper--theme-tooltip .v-popper__inner {
+  white-space: pre-line;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 // System-native sans (Inter) + monospace (system mono stack).
 // We don't load external fonts — use the system stack for speed and
 // to avoid FOUT. Inter is widely installed; if not, system sans is fine.

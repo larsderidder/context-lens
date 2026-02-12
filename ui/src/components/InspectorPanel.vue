@@ -4,6 +4,7 @@ import type { InspectorTab } from '@/stores/session'
 import OverviewTab from '@/components/OverviewTab.vue'
 import MessagesTab from '@/components/MessagesTab.vue'
 import TimelineTab from '@/components/TimelineTab.vue'
+import TurnScrubber from '@/components/TurnScrubber.vue'
 
 const store = useSessionStore()
 
@@ -12,10 +13,20 @@ const tabs: { id: InspectorTab; label: string }[] = [
   { id: 'messages', label: 'Messages' },
   { id: 'timeline', label: 'Timeline' },
 ]
+
+function onKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape' && !e.defaultPrevented) {
+    store.setView('dashboard')
+  }
+}
 </script>
 
 <template>
-  <div class="inspector">
+  <div class="inspector" @keydown="onKeydown" tabindex="-1">
+    <!-- Scrubber above tabs: global temporal context -->
+    <TurnScrubber />
+
+    <!-- Tab bar -->
     <div class="tab-bar">
       <button
         v-for="tab in tabs"
@@ -28,6 +39,7 @@ const tabs: { id: InspectorTab; label: string }[] = [
       </button>
     </div>
 
+    <!-- Tab content -->
     <div class="tab-content">
       <OverviewTab v-if="store.inspectorTab === 'overview'" />
       <MessagesTab v-else-if="store.inspectorTab === 'messages'" />
@@ -40,6 +52,9 @@ const tabs: { id: InspectorTab; label: string }[] = [
 @use '../styles/mixins' as *;
 
 .inspector {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -48,7 +63,7 @@ const tabs: { id: InspectorTab; label: string }[] = [
 
 .tab-bar {
   display: flex;
-  background: var(--bg-surface);
+  background: var(--bg-field);
   border-bottom: 1px solid var(--border-dim);
   flex-shrink: 0;
 }
@@ -75,6 +90,8 @@ const tabs: { id: InspectorTab; label: string }[] = [
 }
 
 .tab-content {
+  width: 100%;
+  min-width: 0;
   flex: 1;
   min-height: 0;
   overflow-y: auto;

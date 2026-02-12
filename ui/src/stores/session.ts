@@ -7,10 +7,12 @@ import type {
   ProjectedEntry,
   SSEEvent,
 } from '@/api-types'
+import type { ContextInfo } from '@/api-types'
 import {
   fetchRequests,
   fetchSummary,
   fetchConversation,
+  fetchEntryDetail,
   deleteConversation as apiDeleteConversation,
   resetAll as apiResetAll,
 } from '@/api'
@@ -18,6 +20,7 @@ import {
 export type ViewMode = 'inspector' | 'dashboard'
 export type InspectorTab = 'overview' | 'messages' | 'timeline'
 export type DensityMode = 'comfortable' | 'compact'
+export type SelectionMode = 'live' | 'pinned'
 
 const DENSITY_STORAGE_KEY = 'context-lens-density'
 
@@ -33,15 +36,47 @@ export const useSessionStore = defineStore('session', () => {
   const connected = ref(false)
 
   // --- UI state ---
-  const view = ref<ViewMode>('inspector')
+  const view = ref<ViewMode>('dashboard')
   const inspectorTab = ref<InspectorTab>('overview')
   const selectedSessionId = ref<string | null>(null)
-  const selectedTurnIndex = ref<number>(-1) // -1 = latest
+  const selectionMode = ref<SelectionMode>('live')
+  const selectedEntryId = ref<number | null>(null)
   const sourceFilter = ref<string>('') // '' = all sources
+  const modelFilter = ref<string>('') // '' = all models
   const density = ref<DensityMode>('comfortable')
+  const metadataPanelOpen = ref(false) // unused, kept for store shape stability
   const messageFocusCategory = ref<string | null>(null)
   const messageFocusToken = ref(0)
   const messageFocusTool = ref<string | null>(null)
+  const messageFocusIndex = ref<number | null>(null)
+  const messageFocusHighlight = ref<string | null>(null)
+
+  // Sessions that received data recently (for pulse animation)
+  const recentlyUpdated = ref<Set<string>>(new Set())
+  const _pulseTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+  function markUpdated(id: string) {
+    const next = new Set(recentlyUpdated.value)
+    next.add(id)
+    recentlyUpdated.value = next
+
+    // Clear existing timer for this id
+    const existing = _pulseTimers.get(id)
+    if (existing) clearTimeout(existing)
+
+    // Auto-clear after animation duration
+    _pulseTimers.set(id, setTimeout(() => {
+      _pulseTimers.delete(id)
+      const s = new Set(recentlyUpdated.value)
+      s.delete(id)
+      recentlyUpdated.value = s
+    }, 1500))
+  }
+
+  // Full (uncompacted) contextInfo cache, keyed by entry id
+  const entryDetailCache = new Map<number, ContextInfo>()
+  const entryDetailLoading = ref<number | null>(null)
+  const entryDetailVersion = ref(0)
 
   // --- Backwards-compatible computed ---
   // Components that use `store.conversations` get summaries cast as ConversationGroups
@@ -62,8 +97,21 @@ export const useSessionStore = defineStore('session', () => {
   const ungrouped = computed<ProjectedEntry[]>(() => [])
 
   const filteredConversations = computed(() => {
-    if (!sourceFilter.value) return conversations.value
-    return conversations.value.filter(c => c.source === sourceFilter.value)
+    let filtered = conversations.value
+    if (sourceFilter.value) {
+      filtered = filtered.filter(c => c.source === sourceFilter.value)
+    }
+    if (modelFilter.value) {
+      filtered = filtered.filter(c => {
+        const loaded = loadedConversations.value.get(c.id)
+        if (loaded && loaded.entries.length > 0) {
+          return loaded.entries[0].contextInfo.model.includes(modelFilter.value)
+        }
+        const summary = summaries.value.find(s => s.id === c.id)
+        return summary?.latestModel.includes(modelFilter.value)
+      })
+    }
+    return filtered
   })
 
   const filteredSummaries = computed(() => {
@@ -79,6 +127,14 @@ export const useSessionStore = defineStore('session', () => {
     return Array.from(set).sort()
   })
 
+  const models = computed(() => {
+    const set = new Set<string>()
+    for (const s of summaries.value) {
+      if (s.latestModel) set.add(s.latestModel)
+    }
+    return Array.from(set).sort()
+  })
+
   const selectedSession = computed((): ConversationGroup | null => {
     if (!selectedSessionId.value) return null
     return loadedConversations.value.get(selectedSessionId.value) ?? null
@@ -87,10 +143,11 @@ export const useSessionStore = defineStore('session', () => {
   const selectedEntry = computed((): ProjectedEntry | null => {
     const session = selectedSession.value
     if (!session || session.entries.length === 0) return null
-    if (selectedTurnIndex.value === -1) {
-      return session.entries[0] // entries are newest-first
+    if (selectionMode.value === 'live') {
+      return session.entries[0]
     }
-    return session.entries[selectedTurnIndex.value] ?? session.entries[0]
+    const pinned = session.entries.find((entry) => entry.id === selectedEntryId.value)
+    return pinned ?? session.entries[0]
   })
 
   const totalCost = computed(() => {
@@ -125,17 +182,17 @@ export const useSessionStore = defineStore('session', () => {
         if (!ids.has(key)) loadedConversations.value.delete(key)
       }
 
-      // Auto-select first session if none selected
-      if (!selectedSessionId.value && data.conversations.length > 0) {
+      // Auto-select first session if none selected and in inspector mode
+      if (!selectedSessionId.value && data.conversations.length > 0 && view.value === 'inspector') {
         await selectSession(data.conversations[0].id)
       }
       // Clear selection if the selected session was removed
       if (selectedSessionId.value && !ids.has(selectedSessionId.value)) {
-        if (data.conversations.length > 0) {
-          await selectSession(data.conversations[0].id)
-        } else {
-          selectedSessionId.value = null
-          selectedTurnIndex.value = -1
+        selectedSessionId.value = null
+        selectionMode.value = 'live'
+        selectedEntryId.value = null
+        if (view.value === 'inspector') {
+          view.value = 'dashboard'
         }
       }
 
@@ -174,33 +231,39 @@ export const useSessionStore = defineStore('session', () => {
       return
     }
 
+    // Mark the session as recently updated (pulse animation)
+    if (event.conversationId) {
+      markUpdated(event.conversationId)
+    }
+
     // For all mutation events, re-fetch summaries
     load()
+
+    // If the event is for the currently selected session, also refresh its entries
+    if (event.conversationId && selectedSessionId.value === event.conversationId) {
+      loadConversationEntries(event.conversationId)
+    }
   }
 
   async function selectSession(id: string) {
-    const prevId = selectedSessionId.value
-    const prevEntryId = selectedEntry.value?.id ?? null
     selectedSessionId.value = id
-    selectedTurnIndex.value = 0
+    selectionMode.value = 'live'
+    selectedEntryId.value = null
 
     // Load entries if not already cached
     if (!loadedConversations.value.has(id)) {
       await loadConversationEntries(id)
     }
-
-    // If re-selecting the same session, try to preserve the selected entry
-    if (prevId === id && prevEntryId !== null) {
-      const loaded = loadedConversations.value.get(id)
-      if (loaded) {
-        const idx = loaded.entries.findIndex(e => e.id === prevEntryId)
-        selectedTurnIndex.value = idx >= 0 ? idx : 0
-      }
-    }
   }
 
-  function selectTurn(index: number) {
-    selectedTurnIndex.value = index
+  function followLive() {
+    selectionMode.value = 'live'
+    selectedEntryId.value = null
+  }
+
+  function pinEntry(entryId: number) {
+    selectionMode.value = 'pinned'
+    selectedEntryId.value = entryId
   }
 
   function setView(v: ViewMode) {
@@ -215,16 +278,64 @@ export const useSessionStore = defineStore('session', () => {
     sourceFilter.value = source
   }
 
+  function setModelFilter(model: string) {
+    modelFilter.value = model
+  }
+
   function focusMessageCategory(category: string) {
     messageFocusCategory.value = category
     messageFocusTool.value = null
+    messageFocusIndex.value = null
+    messageFocusHighlight.value = null
     messageFocusToken.value += 1
   }
 
   function focusMessageTool(category: string, toolName: string) {
     messageFocusCategory.value = category
     messageFocusTool.value = toolName
+    messageFocusIndex.value = null
+    messageFocusHighlight.value = null
     messageFocusToken.value += 1
+  }
+
+  function focusMessageByIndex(index: number, highlight?: string) {
+    messageFocusCategory.value = null
+    messageFocusTool.value = null
+    messageFocusIndex.value = index
+    messageFocusHighlight.value = highlight ?? null
+    messageFocusToken.value += 1
+  }
+
+  /**
+   * Fetch full (uncompacted) contextInfo for an entry from the server.
+   * Returns null if the detail is not available (old entries).
+   */
+  async function loadEntryDetail(entryId: number): Promise<ContextInfo | null> {
+    if (entryDetailCache.has(entryId)) {
+      return entryDetailCache.get(entryId)!
+    }
+    entryDetailLoading.value = entryId
+    try {
+      const detail = await fetchEntryDetail(entryId)
+      if (detail) {
+        entryDetailCache.set(entryId, detail)
+        entryDetailVersion.value++
+        // Cap cache size
+        if (entryDetailCache.size > 50) {
+          const oldest = entryDetailCache.keys().next().value
+          if (oldest !== undefined) entryDetailCache.delete(oldest)
+        }
+      }
+      return detail
+    } catch {
+      return null
+    } finally {
+      entryDetailLoading.value = null
+    }
+  }
+
+  function getEntryDetail(entryId: number): ContextInfo | null {
+    return entryDetailCache.get(entryId) ?? null
   }
 
   async function deleteSession(id: string) {
@@ -238,7 +349,8 @@ export const useSessionStore = defineStore('session', () => {
           await selectSession(summaries.value[0].id)
         } else {
           selectedSessionId.value = null
-          selectedTurnIndex.value = -1
+          selectionMode.value = 'live'
+          selectedEntryId.value = null
         }
       }
     } catch (e) {
@@ -254,7 +366,8 @@ export const useSessionStore = defineStore('session', () => {
       loadedConversations.value = new Map()
       ungroupedCount.value = 0
       selectedSessionId.value = null
-      selectedTurnIndex.value = -1
+      selectionMode.value = 'live'
+      selectedEntryId.value = null
       revision.value = 0
     } catch (e) {
       error.value = e instanceof Error ? e.message : String(e)
@@ -285,10 +398,15 @@ export const useSessionStore = defineStore('session', () => {
     applyDensityToDom(mode)
   }
 
+  function toggleMetadataPanel() {
+    metadataPanelOpen.value = !metadataPanelOpen.value
+  }
+
   return {
     // State
     revision,
     summaries,
+    loadedConversations,
     conversations,
     ungrouped,
     loading,
@@ -298,17 +416,24 @@ export const useSessionStore = defineStore('session', () => {
     view,
     inspectorTab,
     selectedSessionId,
-    selectedTurnIndex,
+    selectionMode,
+    selectedEntryId,
     sourceFilter,
+    modelFilter,
     density,
+    metadataPanelOpen,
     messageFocusCategory,
     messageFocusToken,
     messageFocusTool,
+    messageFocusIndex,
+    messageFocusHighlight,
+    recentlyUpdated,
 
     // Computed
     filteredConversations,
     filteredSummaries,
     sources,
+    models,
     selectedSession,
     selectedEntry,
     totalCost,
@@ -319,14 +444,22 @@ export const useSessionStore = defineStore('session', () => {
     loadConversationEntries,
     handleSSEEvent,
     selectSession,
-    selectTurn,
+    followLive,
+    pinEntry,
     setView,
     setInspectorTab,
     setSourceFilter,
+    setModelFilter,
     focusMessageCategory,
     focusMessageTool,
+    focusMessageByIndex,
+    loadEntryDetail,
+    getEntryDetail,
+    entryDetailLoading,
+    entryDetailVersion,
     initializeDensity,
     setDensity,
+    toggleMetadataPanel,
     deleteSession,
     reset,
   }

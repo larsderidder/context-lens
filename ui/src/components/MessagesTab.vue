@@ -3,17 +3,21 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Splitpanes, Pane } from 'splitpanes'
 import { useSessionStore } from '@/stores/session'
 import { useExpandable } from '@/composables/useExpandable'
-import { fmtTokens } from '@/utils/format'
-import { groupMessagesByCategory, buildToolNameMap, extractPreview, CATEGORY_META, classifyMessageRole } from '@/utils/messages'
+import { fmtTokens, shortModel } from '@/utils/format'
+import { groupMessagesByCategory, buildToolNameMap, extractPreview, CATEGORY_META, classifyMessageRole, classifyEntries } from '@/utils/messages'
 import type { ParsedMessage } from '@/api-types'
 import DetailPane from '@/components/DetailPane.vue'
+import TreeView from '@/components/TreeView.vue'
+import type { TreeNode } from '@/components/TreeView.vue'
 
 const messageScrollByKey = new Map<string, number>()
 
 const store = useSessionStore()
 const entry = computed(() => store.selectedEntry)
+const session = computed(() => store.selectedSession)
 const { isExpanded, toggle, expand } = useExpandable()
 const msgListEl = ref<HTMLElement | null>(null)
+const viewMode = ref<'current' | 'tree'>('current')
 
 const detailOpen = ref(false)
 const detailIndex = ref(0)
@@ -21,13 +25,29 @@ const selectedMsgKey = ref<string | null>(null)
 const selectedMsgOrdinal = ref(1)
 
 const toolNameMap = computed(() => {
-  if (!entry.value) return {}
-  return buildToolNameMap(entry.value.contextInfo.messages || [])
+  return buildToolNameMap(messages.value)
 })
 
-const categorized = computed(() => {
+// Use full (uncompacted) messages when available, fall back to compacted
+const messages = computed(() => {
   if (!entry.value) return []
-  return groupMessagesByCategory(entry.value.contextInfo.messages || [])
+  // Touch reactive version to recompute when detail loads
+  void store.entryDetailVersion
+  const detail = store.getEntryDetail(entry.value.id)
+  if (detail?.messages?.length) return detail.messages
+  return entry.value.contextInfo.messages || []
+})
+
+// True when we're showing compacted (truncated) messages because no detail file exists
+const isCompactedFallback = computed(() => {
+  if (!entry.value) return false
+  void store.entryDetailVersion
+  return !store.getEntryDetail(entry.value.id) && store.entryDetailLoading !== entry.value.id
+})
+// Note: store.entryDetailLoading is unwrapped by Pinia, so no .value needed
+
+const categorized = computed(() => {
+  return groupMessagesByCategory(messages.value)
 })
 
 const flatMessages = computed(() => {
@@ -39,8 +59,7 @@ const flatMessages = computed(() => {
 })
 
 const totalMsgTokens = computed(() => {
-  if (!entry.value) return 0
-  return (entry.value.contextInfo.messages || []).reduce((s, m) => s + (m.tokens || 0), 0)
+  return messages.value.reduce((s, m) => s + (m.tokens || 0), 0)
 })
 
 const heaviestMessages = computed(() => {
@@ -89,6 +108,65 @@ const focusCategory = computed(() => {
 
 const hasCategoryFallback = computed(() => {
   return !!focusedCategory.value && !!focusCategory.value && focusedCategory.value !== focusCategory.value
+})
+
+const treeNodes = computed<TreeNode[]>(() => {
+  if (!session.value) return []
+  const ordered = classifyEntries([...session.value.entries].reverse())
+  const selectedId = store.selectedEntry?.id ?? null
+  let selectedMainId: number | null = null
+  if (selectedId != null) {
+    for (const item of ordered) {
+      if (item.isMain) selectedMainId = item.entry.id
+      if (item.entry.id === selectedId) break
+    }
+  }
+  const mainRows: TreeNode[] = []
+  let turnCounter = 0
+  for (let i = 0; i < ordered.length; i++) {
+    const item = ordered[i]
+    if (!item.isMain) continue
+    turnCounter += 1
+
+    let subagentCalls = 0
+    for (let j = i + 1; j < ordered.length; j++) {
+      if (ordered[j].isMain) break
+      subagentCalls += 1
+    }
+
+    const groups = groupMessagesByCategory(item.entry.contextInfo.messages || [])
+    const turnLabel = `Turn ${turnCounter} · ${shortModel(item.entry.contextInfo.model)}`
+    const turnMeta = subagentCalls > 0
+      ? `${fmtTokens(item.entry.contextInfo.totalTokens)} · ${subagentCalls} sub`
+      : fmtTokens(item.entry.contextInfo.totalTokens)
+
+    mainRows.push({
+      id: `turn-${item.entry.id}`,
+      label: turnLabel,
+      meta: turnMeta,
+      selectable: false,
+      children: groups.map((group) => ({
+        id: `turn-${item.entry.id}-cat-${group.category}`,
+        label: (CATEGORY_META[group.category] || { label: group.category }).label,
+        meta: `${group.items.length} · ${fmtTokens(group.tokens)}`,
+        color: (CATEGORY_META[group.category] || { color: '#4b5563' }).color,
+        selectable: false,
+        children: group.items.map((msgItem) => ({
+          id: `turn-${item.entry.id}-msg-${msgItem.origIdx}`,
+          label: extractPreview(msgItem.msg, toolNameMap.value) || '(empty)',
+          meta: fmtTokens(msgItem.msg.tokens || 0),
+          selectable: true,
+          payload: { entryId: item.entry.id, origIdx: msgItem.origIdx },
+        })),
+      })),
+    })
+  }
+  // Latest turn first in tree navigation.
+  const latestFirst = mainRows.reverse()
+  if (store.selectionMode === 'pinned' && selectedMainId != null) {
+    return latestFirst.filter((node) => node.id === `turn-${selectedMainId}`)
+  }
+  return latestFirst
 })
 
 function openDetail(flatIdx: number) {
@@ -185,6 +263,34 @@ function rowClassForToolFocus(msg: ParsedMessage): Record<string, boolean> {
 }
 
 async function applyMessageFocus() {
+  // Focus by message index (e.g. from security alert findings)
+  const focusIdx = store.messageFocusIndex
+  if (focusIdx != null) {
+    // Retry loop: the tab/data may not be ready on the first tick
+    for (let attempt = 0; attempt < 4; attempt++) {
+      await nextTick()
+      // Find which category contains this message
+      for (const group of categorized.value) {
+        const match = group.items.find(item => item.origIdx === focusIdx)
+        if (match) {
+          expand(group.category)
+          await nextTick()
+          await nextTick()
+          openDetailByOrigIndex(focusIdx)
+          await nextTick()
+          const root = msgListEl.value
+          if (root) {
+            const rows = Array.from(root.querySelectorAll('.msg-row')) as HTMLElement[]
+            const target = rows.find(row => row.classList.contains('selected'))
+            if (target) target.scrollIntoView({ block: 'center', behavior: 'smooth' })
+          }
+          return
+        }
+      }
+    }
+    return
+  }
+
   const category = focusCategory.value
   if (!category) return
 
@@ -217,6 +323,24 @@ function clearToolFilter() {
   store.focusMessageCategory(focusCategory.value || store.messageFocusCategory || 'tool_results')
 }
 
+async function openFromTree(turnEntryId: number, origIdx: number) {
+  store.pinEntry(turnEntryId)
+  store.focusMessageByIndex(origIdx)
+  await nextTick()
+  openDetailByOrigIndex(origIdx)
+}
+
+function handleTreeSelect(node: TreeNode) {
+  const entryId = Number(node.payload?.entryId)
+  const origIdx = Number(node.payload?.origIdx)
+  if (!Number.isFinite(entryId) || !Number.isFinite(origIdx)) return
+  openFromTree(entryId, origIdx)
+}
+
+function handleTreeToggle(id: string) {
+  toggle(id)
+}
+
 function handleMsgListScroll() {
   if (!msgListEl.value) return
   messageScrollByKey.set(messageScrollKey.value, msgListEl.value.scrollTop)
@@ -247,7 +371,13 @@ onBeforeUnmount(() => {
 
 watch(
   () => store.messageFocusToken,
-  async () => { await applyMessageFocus() },
+  async () => {
+    await applyMessageFocus()
+    if (store.messageFocusIndex !== null) {
+      await nextTick()
+      openDetailByOrigIndex(store.messageFocusIndex)
+    }
+  },
   { immediate: true },
 )
 
@@ -265,6 +395,17 @@ watch(
       await applyMessageFocus()
     }
   },
+)
+
+// Fetch full (uncompacted) entry detail when the selected entry changes
+watch(
+  () => entry.value?.id,
+  async (entryId) => {
+    if (entryId != null) {
+      await store.loadEntryDetail(entryId)
+    }
+  },
+  { immediate: true },
 )
 
 onMounted(async () => {
@@ -295,6 +436,12 @@ watch(
     <Splitpanes class="default-theme" :push-other-panes="false">
       <Pane :min-size="25" :size="detailOpen ? 42 : 100">
         <div ref="msgListEl" class="msg-list" @scroll.passive="handleMsgListScroll">
+          <div class="message-view-toggle">
+            <button :class="{ on: viewMode === 'current' }" @click="viewMode = 'current'">Current Context</button>
+            <button :class="{ on: viewMode === 'tree' }" @click="viewMode = 'tree'">Session Tree</button>
+          </div>
+
+          <template v-if="viewMode === 'current'">
           <div v-if="heaviestMessages.length > 0" class="heavy-strip">
             <div class="heavy-title">Top heavy messages</div>
             <div class="heavy-hint">Tip: use ↑/↓ in detail pane to move between messages, Esc to close.</div>
@@ -372,6 +519,23 @@ watch(
               </div>
             </div>
           </div>
+          </template>
+
+          <template v-else>
+            <div class="scope-note">
+              {{ store.selectionMode === 'pinned'
+                ? 'Tree scoped to pinned turn.'
+                : 'Tree scoped to session (latest turn first).' }}
+            </div>
+            <div class="tree-wrap">
+              <TreeView
+                :nodes="treeNodes"
+                :is-expanded="isExpanded"
+                @toggle="handleTreeToggle"
+                @select="handleTreeSelect"
+              />
+            </div>
+          </template>
         </div>
       </Pane>
       <Pane v-if="detailOpen" :min-size="25" :size="58">
@@ -399,6 +563,38 @@ watch(
   overflow-y: auto;
   padding: var(--space-3) 0;
   @include scrollbar-thin;
+}
+
+.message-view-toggle {
+  display: inline-flex;
+  margin: 0 var(--space-4) var(--space-3);
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+
+  button {
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+    background: var(--bg-raised);
+    border: none;
+    padding: 4px 10px;
+    cursor: pointer;
+    transition: color 0.12s, background 0.12s;
+
+    & + button {
+      border-left: 1px solid var(--border-dim);
+    }
+
+    &:hover {
+      color: var(--text-secondary);
+      background: var(--bg-hover);
+    }
+
+    &.on {
+      color: var(--accent-blue);
+      background: var(--accent-blue-dim);
+    }
+  }
 }
 
 .heavy-strip {
@@ -460,10 +656,24 @@ watch(
   }
 }
 
+.compacted-notice {
+  margin: var(--space-2) var(--space-4);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--accent-amber-dim);
+  color: var(--accent-amber);
+  font-size: var(--text-xs);
+  @include mono-text;
+}
+
 .scope-note {
   margin: 0 var(--space-4) var(--space-2);
   color: var(--text-ghost);
   font-size: var(--text-xs);
+}
+
+.tree-wrap {
+  margin: 0 var(--space-3) var(--space-2);
 }
 
 .heavy-action {
@@ -494,7 +704,7 @@ watch(
 
 .heavy-preview {
   @include truncate;
-  max-width: 280px;
+  max-width: 450px;
   color: var(--text-dim);
 }
 

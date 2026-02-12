@@ -1,17 +1,19 @@
-// Design tokens — Context Lens dark theme
+// Design tokens — Context Lens DevTools theme
 //
-// Typography: System fonts. No external font loading = instant render,
-// no FOUT, works offline. Developers already have good mono fonts.
-// The UI should feel native to the environment, like Langfuse/DevTools.
+// Pure black DevTools-inspired design with sharp edges and monospace-first typography.
+// System fonts only - instant render, no FOUT, native environment feel.
 
 :root {
   // ── Typography ──
-  // Sans: system UI stack (same approach as GitHub, Vercel, Langfuse)
-  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
-  // Mono: system mono stack — SF Mono on Mac, Cascadia on Windows, etc.
-  --font-mono: 'SF Mono', 'Cascadia Code', 'Fira Code', 'JetBrains Mono', Consolas, 'Liberation Mono', monospace;
+  // Sans: Inter with system fallback (polished, readable, widely installed)
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  // Mono: JetBrains Mono with system fallback — superior for data/numbers
+  --font-mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Code', 'Fira Code', Consolas, 'Liberation Mono', monospace;
 
-  // Type scale (minor third — 1.2)
+  // Display font for branding/large text
+  --font-display: var(--font-sans);
+
+  // Type scale (tight, DevTools-inspired)
   --text-xs: 10px;
   --text-sm: 11px;
   --text-base: 13px;
@@ -19,60 +21,59 @@
   --text-lg: 18px;
   --text-xl: 22px;
 
-  // ── Backgrounds ──
-  // Dark navy-blue. Slightly warmer than pure black.
-  --bg-deep: #0c1017;
-  --bg-field: #101520;
-  --bg-surface: #151b26;
-  --bg-raised: #1c2330;
-  --bg-hover: #212a38;
-  --bg-active: #283344;
+  // ── Backgrounds (Pure Black DevTools Theme) ──
+  --bg-deep: #0d0d0d;       // Pure black base
+  --bg-field: #1a1a1a;      // Sidebar/panels
+  --bg-surface: #242424;    // Elevated surfaces
+  --bg-raised: #2d2d2d;     // Interactive elements
+  --bg-hover: #333333;      // Hover states
+  --bg-active: #3a3a3a;     // Active states
 
-  // ── Borders ──
-  --border-dim: #1e2838;
-  --border-mid: #2a3648;
-  --border-bright: #38485e;
-  --border-focus: rgba(91, 156, 245, 0.4);
+  // ── Borders (Sharp, no blur) ──
+  --border-dim: #333333;
+  --border-mid: #3f3f3f;
+  --border-bright: #525252;
+  --border-focus: rgba(14, 165, 233, 0.5);
 
-  // ── Text ──
-  --text-primary: #e2e8f0;
-  --text-secondary: #94a3b8;
-  --text-dim: #64748b;
-  --text-muted: #475569;
-  --text-ghost: #334155;
+  // ── Text (Higher contrast on pure black) ──
+  --text-primary: #f0f0f0;
+  --text-secondary: #b4b4b4;
+  --text-dim: #8a8a8a;
+  --text-muted: #666666;
+  --text-ghost: #4a4a4a;
 
-  // ── Accent colors ──
-  --accent-blue: #5b9cf5;
-  --accent-blue-dim: rgba(91, 156, 245, 0.10);
-  --accent-blue-glow: rgba(91, 156, 245, 0.20);
+  // ── Accent colors (Brighter for pure black) ──
+  --accent-blue: #0ea5e9;     // Cyan-blue (DevTools style)
+  --accent-blue-dim: rgba(14, 165, 233, 0.15);
+  --accent-blue-glow: rgba(14, 165, 233, 0.25);
 
-  --accent-green: #34d399;
-  --accent-green-dim: rgba(52, 211, 153, 0.10);
+  --accent-green: #10b981;    // Emerald
+  --accent-green-dim: rgba(16, 185, 129, 0.15);
 
-  --accent-amber: #fbbf24;
-  --accent-amber-dim: rgba(251, 191, 36, 0.10);
+  --accent-amber: #f59e0b;    // Amber
+  --accent-amber-dim: rgba(245, 158, 11, 0.15);
 
-  --accent-red: #f87171;
-  --accent-red-dim: rgba(248, 113, 113, 0.10);
+  --accent-red: #ef4444;      // Red
+  --accent-red-dim: rgba(239, 68, 68, 0.15);
 
-  --accent-purple: #a78bfa;
-  --accent-purple-dim: rgba(167, 139, 250, 0.10);
+  --accent-purple: #a78bfa;   // Purple
+  --accent-purple-dim: rgba(167, 139, 250, 0.15);
 
-  --accent-pink: #f472b6;
-  --accent-cyan: #22d3ee;
+  --accent-pink: #ec4899;     // Pink
+  --accent-cyan: #06b6d4;     // Cyan
 
-  // ── Shadows ──
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.35);
-  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.45);
+  // ── Shadows (Minimal - DevTools has almost none) ──
+  --shadow-sm: none;
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.6);
 
-  // ── Radii ──
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 10px;
+  // ── Radii (Softened for modern polish) ──
+  --radius-sm: 3px;
+  --radius-md: 4px;
+  --radius-lg: 6px;
   --radius-full: 9999px;
 
-  // ── Spacing ──
+  // ── Spacing (Comfortable mode - default) ──
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -80,6 +81,34 @@
   --space-5: 20px;
   --space-6: 24px;
   --space-8: 32px;
+}
+
+// ── Comfortable density mode (lighter, larger text for readability) ──
+[data-density="comfortable"] {
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-base: 13px;
+  --text-md: 15px;
+
+  // Lighter text colors for better readability
+  --text-secondary: #c4c4c4;
+  --text-dim: #9a9a9a;
+  --text-muted: #767676;
+}
+
+// ── Compact density mode ──
+[data-density="compact"] {
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 12px;
+  --space-6: 16px;
+  --space-8: 24px;
+
+  --text-xs: 9px;
+  --text-sm: 10px;
+  --text-base: 11px;
 }
 
 // ── SCSS compile-time vars ──

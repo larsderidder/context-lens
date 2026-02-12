@@ -20,6 +20,14 @@ const showAll = ref(false)
 const contentEl = ref<HTMLElement | null>(null)
 const MAX_CHARS = 50000
 const MAX_LINES = 500
+const SHIKI_MAX_CHARS = 20000
+const SHIKI_MAX_LINES = 450
+type ContentKind = 'json' | 'xml' | 'markdown' | 'code' | 'text'
+let shikiHighlighter: any | null = null
+let shikiLoading: Promise<void> | null = null
+const shikiCache = new Map<string, string>()
+const shikiPending = new Set<string>()
+const shikiVersion = ref(0)
 
 const msg = computed(() => props.messages[props.selectedIndex]?.msg ?? null)
 const toolNameMap = computed(() => buildToolNameMap(props.entry.contextInfo.messages || []))
@@ -63,7 +71,16 @@ watch(() => props.selectedIndex, () => {
   tab.value = 'rendered'
   showAll.value = false
   nextTick(() => { if (contentEl.value) contentEl.value.scrollTop = 0 })
+  nextTick(() => { maybePrimeShiki() })
 })
+
+watch([tab, showAll], () => {
+  nextTick(() => { maybePrimeShiki() })
+})
+
+watch(msg, () => {
+  nextTick(() => { maybePrimeShiki() })
+}, { immediate: true })
 
 function navigate(dir: number) {
   const newIdx = props.selectedIndex + dir
@@ -93,6 +110,230 @@ function truncate(text: string): { text: string; truncated: boolean } {
   const lines = text.split('\n')
   if (lines.length > MAX_LINES) return { text: lines.slice(0, MAX_LINES).join('\n'), truncated: true }
   return { text, truncated: false }
+}
+
+function hashText(text: string): string {
+  let h = 2166136261
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i)
+    h = Math.imul(h, 16777619)
+  }
+  return (h >>> 0).toString(36)
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+function tokenReplace(
+  text: string,
+  regex: RegExp,
+  renderMatch: (match: string, index: number) => string,
+): string {
+  let out = ''
+  let last = 0
+  regex.lastIndex = 0
+  let m: RegExpExecArray | null = regex.exec(text)
+  while (m) {
+    const idx = m.index
+    const full = m[0]
+    out += escapeHtml(text.slice(last, idx))
+    out += renderMatch(full, idx)
+    last = idx + full.length
+    m = regex.exec(text)
+  }
+  out += escapeHtml(text.slice(last))
+  return out
+}
+
+function highlightJson(text: string): string {
+  const tokenRe = /"(?:\\.|[^"\\])*"(?=\s*:)?|"(?:\\.|[^"\\])*"|\btrue\b|\bfalse\b|\bnull\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g
+  return tokenReplace(text, tokenRe, (tok, idx) => {
+    if (tok.startsWith('"')) {
+      const rest = text.slice(idx + tok.length)
+      const isKey = /^\s*:/.test(rest)
+      return `<span class="${isKey ? 'syn-key' : 'syn-str'}">${escapeHtml(tok)}</span>`
+    }
+    if (tok === 'true' || tok === 'false') return `<span class="syn-bool">${tok}</span>`
+    if (tok === 'null') return `<span class="syn-null">${tok}</span>`
+    return `<span class="syn-num">${tok}</span>`
+  })
+}
+
+function highlightXml(text: string): string {
+  const tagRe = /<!--[\s\S]*?-->|<\/?[\w:.-]+(?:\s+[\w:.-]+(?:\s*=\s*(?:"[^"]*"|'[^']*'))?)*\s*\/?>/g
+  return tokenReplace(text, tagRe, (tok) => {
+    if (tok.startsWith('<!--')) return `<span class="syn-com">${escapeHtml(tok)}</span>`
+    const m = /^<(\/?)([\w:.-]+)([\s\S]*?)(\/?)>$/.exec(tok)
+    if (!m) return `<span class="syn-tag">${escapeHtml(tok)}</span>`
+    const close = m[1] ? '/' : ''
+    const name = m[2]
+    const attrs = m[3] || ''
+    const selfClose = m[4] ? '/' : ''
+    let attrOut = ''
+    const attrRe = /([\w:.-]+)(\s*=\s*)(".*?"|'.*?')/g
+    let last = 0
+    let am: RegExpExecArray | null = attrRe.exec(attrs)
+    while (am) {
+      attrOut += escapeHtml(attrs.slice(last, am.index))
+      attrOut += `<span class="syn-attr">${escapeHtml(am[1])}</span>`
+      attrOut += escapeHtml(am[2])
+      attrOut += `<span class="syn-str">${escapeHtml(am[3])}</span>`
+      last = am.index + am[0].length
+      am = attrRe.exec(attrs)
+    }
+    attrOut += escapeHtml(attrs.slice(last))
+    return `<span class="syn-punc">&lt;${close}</span><span class="syn-tag">${escapeHtml(name)}</span>${attrOut}<span class="syn-punc">${selfClose}&gt;</span>`
+  })
+}
+
+function highlightMarkdown(text: string): string {
+  const mdRe = /```[\s\S]*?```|`[^`\n]+`|^#{1,6}\s.+$|^\s*[-*+]\s.+$|^\s*\d+\.\s.+$|^>\s.+$|\*\*[^*\n]+\*\*|__[^_\n]+__|\*[^*\n]+\*|_[^_\n]+_|~~[^~\n]+~~|\[[^\]]+\]\([^)]+\)/gm
+  return tokenReplace(text, mdRe, (tok) => {
+    if (tok.startsWith('```') || tok.startsWith('`')) return `<span class="syn-code">${escapeHtml(tok)}</span>`
+    if (tok.startsWith('#')) return `<span class="syn-heading">${escapeHtml(tok)}</span>`
+    if (/^\s*[-*+]\s/.test(tok) || /^\s*\d+\.\s/.test(tok)) return `<span class="syn-list">${escapeHtml(tok)}</span>`
+    if (tok.startsWith('>')) return `<span class="syn-quote">${escapeHtml(tok)}</span>`
+    if (tok.startsWith('[')) return `<span class="syn-link">${escapeHtml(tok)}</span>`
+    return `<span class="syn-em">${escapeHtml(tok)}</span>`
+  })
+}
+
+function highlightCode(text: string): string {
+  const codeRe = /\/\/.*$|\/\*[\s\S]*?\*\/|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`|\b(?:const|let|var|function|return|if|else|for|while|switch|case|break|continue|try|catch|finally|class|extends|new|import|from|export|async|await|interface|type|public|private|protected|throw|in|of|typeof|instanceof|true|false|null|undefined)\b|-?\d+(?:\.\d+)?/gm
+  return tokenReplace(text, codeRe, (tok) => {
+    if (tok.startsWith('//') || tok.startsWith('/*')) return `<span class="syn-com">${escapeHtml(tok)}</span>`
+    if (tok.startsWith('"') || tok.startsWith('\'') || tok.startsWith('`')) return `<span class="syn-str">${escapeHtml(tok)}</span>`
+    if (/^-?\d/.test(tok)) return `<span class="syn-num">${tok}</span>`
+    if (tok === 'true' || tok === 'false') return `<span class="syn-bool">${tok}</span>`
+    if (tok === 'null' || tok === 'undefined') return `<span class="syn-null">${tok}</span>`
+    return `<span class="syn-keyword">${tok}</span>`
+  })
+}
+
+function isJsonLike(text: string): boolean {
+  const t = text.trim()
+  if (!(t.startsWith('{') || t.startsWith('['))) return false
+  try {
+    JSON.parse(t)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function isXmlLike(text: string): boolean {
+  const t = text.trim()
+  if (!t.startsWith('<')) return false
+  return /<[\w:.-]+[\s>]/.test(t) && /<\/[\w:.-]+>/.test(t)
+}
+
+function isMarkdownLike(text: string): boolean {
+  return /(^#{1,6}\s)|(^\s*[-*+]\s)|(^\s*\d+\.\s)|(```)|(`[^`\n]+`)|(\[[^\]]+\]\([^)]+\))|(^>\s)|(\*\*[^*\n]+\*\*)/m.test(text)
+}
+
+function isCodeLike(text: string): boolean {
+  return /[{}();]|(^\s*(const|let|var|function|if|for|while|class|import|export)\s)/m.test(text)
+}
+
+function contentKind(text: string, forceJson = false): ContentKind {
+  if (forceJson) return 'json'
+  if (isJsonLike(text)) return 'json'
+  if (isXmlLike(text)) return 'xml'
+  if (isMarkdownLike(text)) return 'markdown'
+  if (isCodeLike(text)) return 'code'
+  return 'text'
+}
+
+function highlightTextFallback(text: string, forceJson = false): string {
+  const kind = contentKind(text, forceJson)
+  if (kind === 'json') return highlightJson(text)
+  if (kind === 'xml') return highlightXml(text)
+  if (kind === 'markdown') return highlightMarkdown(text)
+  if (kind === 'code') return highlightCode(text)
+  return escapeHtml(text)
+}
+
+function languageFor(kind: ContentKind): string | null {
+  if (kind === 'json') return 'json'
+  if (kind === 'xml') return 'xml'
+  if (kind === 'markdown') return 'markdown'
+  if (kind === 'code') return 'typescript'
+  return null
+}
+
+function shouldUseShiki(text: string, kind: ContentKind): boolean {
+  if (kind === 'text') return false
+  if (text.length > SHIKI_MAX_CHARS) return false
+  if (text.split('\n').length > SHIKI_MAX_LINES) return false
+  return true
+}
+
+async function ensureShiki(): Promise<void> {
+  if (shikiHighlighter) return
+  if (shikiLoading) return shikiLoading
+  shikiLoading = (async () => {
+    const shiki = await import('shiki')
+    shikiHighlighter = await shiki.createHighlighter({
+      themes: ['github-dark'],
+      langs: ['json', 'xml', 'markdown', 'typescript'],
+    })
+  })()
+  await shikiLoading
+}
+
+async function queueShiki(text: string, kind: ContentKind, cacheKey: string): Promise<void> {
+  if (!shouldUseShiki(text, kind)) return
+  if (shikiCache.has(cacheKey) || shikiPending.has(cacheKey)) return
+  const lang = languageFor(kind)
+  if (!lang) return
+  shikiPending.add(cacheKey)
+  try {
+    await ensureShiki()
+    if (!shikiHighlighter) return
+    const html = shikiHighlighter.codeToHtml(text, { lang, theme: 'github-dark' })
+    shikiCache.set(cacheKey, html)
+    shikiVersion.value += 1
+  } catch {
+    // Keep fast fallback when Shiki is unavailable.
+  } finally {
+    shikiPending.delete(cacheKey)
+  }
+}
+
+function highlightText(text: string, forceJson = false): string {
+  void shikiVersion.value
+  const kind = contentKind(text, forceJson)
+  const key = `${kind}:${hashText(text)}`
+  if (shouldUseShiki(text, kind)) {
+    const cached = shikiCache.get(key)
+    if (cached) return cached
+    void queueShiki(text, kind, key)
+  }
+  return highlightTextFallback(text, forceJson)
+}
+
+function maybePrimeShiki(): void {
+  const m = msg.value
+  if (!m) return
+  if (tab.value === 'raw') {
+    const raw = JSON.stringify(msgToRawObject(m), null, 2)
+    const text = truncate(raw).text
+    const kind = contentKind(text, true)
+    void queueShiki(text, kind, `${kind}:${hashText(text)}`)
+    return
+  }
+  const blocks = getRenderedBlocks()
+  for (const block of blocks) {
+    const text = truncate(block.content).text
+    const kind = contentKind(text, block.isJson)
+    void queueShiki(text, kind, `${kind}:${hashText(text)}`)
+  }
 }
 
 function getRenderedBlocks(): { type: string; label: string; labelClass: string; content: string; isJson: boolean }[] {
@@ -187,7 +428,11 @@ const metaPairs = computed((): [string, string][] => {
         <template v-for="(block, i) in getRenderedBlocks()" :key="i">
           <hr v-if="i > 0" class="block-sep" />
           <div v-if="block.label" class="block-label" :class="block.labelClass">{{ block.label }}</div>
-          <pre class="block-content">{{ truncate(block.content).text }}</pre>
+          <div
+            class="block-content syntax rich-html"
+            :class="`kind-${contentKind(truncate(block.content).text, block.isJson)}`"
+            v-html="highlightText(truncate(block.content).text, block.isJson)"
+          ></div>
           <button v-if="truncate(block.content).truncated" class="show-more" @click="showAll = true">
             Show full content…
           </button>
@@ -200,7 +445,10 @@ const metaPairs = computed((): [string, string][] => {
             {{ copyLabel }}
           </button>
         </div>
-        <pre class="block-content">{{ JSON.stringify(msgToRawObject(msg), null, 2) }}</pre>
+        <div
+          class="block-content syntax rich-html kind-json"
+          v-html="highlightText(JSON.stringify(msgToRawObject(msg), null, 2), true)"
+        ></div>
       </template>
     </div>
 
@@ -385,6 +633,48 @@ const metaPairs = computed((): [string, string][] => {
   word-break: break-word;
   color: var(--text-secondary);
   margin: 0;
+}
+
+.syntax {
+  :deep(.syn-key) { color: #93c5fd; }
+  :deep(.syn-keyword) { color: #60a5fa; }
+  :deep(.syn-str) { color: #86efac; }
+  :deep(.syn-num) { color: #fbbf24; }
+  :deep(.syn-bool) { color: #c4b5fd; }
+  :deep(.syn-null) { color: #fda4af; }
+  :deep(.syn-com) { color: var(--text-dim); }
+  :deep(.syn-tag) { color: #60a5fa; }
+  :deep(.syn-attr) { color: #93c5fd; }
+  :deep(.syn-punc) { color: var(--text-muted); }
+  :deep(.syn-code) { color: #67e8f9; }
+  :deep(.syn-heading) { color: #f59e0b; font-weight: 600; }
+  :deep(.syn-list) { color: #38bdf8; }
+  :deep(.syn-quote) { color: #a78bfa; }
+  :deep(.syn-link) { color: #22d3ee; text-decoration: underline; }
+  :deep(.syn-em) { color: #f5d0fe; }
+}
+
+.rich-html {
+  white-space: pre-wrap;
+
+  :deep(pre.shiki) {
+    margin: 0;
+    padding: 0 !important;
+    background: transparent !important;
+    white-space: pre-wrap !important;
+    word-break: break-word;
+    overflow-x: auto;
+    font-family: var(--font-mono) !important;
+    font-size: inherit !important;
+    line-height: inherit !important;
+  }
+
+  :deep(pre.shiki code) {
+    white-space: inherit !important;
+    font-family: inherit !important;
+    font-size: inherit !important;
+    line-height: inherit !important;
+  }
 }
 
 .show-more {

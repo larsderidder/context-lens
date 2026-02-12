@@ -1,20 +1,19 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import { hierarchy, treemap as d3Treemap } from 'd3-hierarchy'
+import { computed, ref } from 'vue'
 import { useSessionStore } from '@/stores/session'
 import { useExpandable } from '@/composables/useExpandable'
 import { fmtTokens, fmtCost, fmtPct, fmtDuration, healthColor, shortModel, modelColorClass } from '@/utils/format'
-import { classifyEntries, classifyMessageRole, extractCallSummary, CATEGORY_META, SIMPLE_GROUPS, SIMPLE_META, buildToolNameMap } from '@/utils/messages'
+import { classifyEntries, extractCallSummary, CATEGORY_META } from '@/utils/messages'
 import { computeRecommendations } from '@/utils/recommendations'
 import type { ProjectedEntry } from '@/api-types'
+import CompositionTreemap from './CompositionTreemap.vue'
+import HealthFindings from './HealthFindings.vue'
 
 const store = useSessionStore()
 const { isExpanded, toggle } = useExpandable()
 
 const entry = computed(() => store.selectedEntry)
 const session = computed(() => store.selectedSession)
-const treemapMode = ref<'detailed' | 'simple'>('detailed')
-const treemapDrillKey = ref<string | null>(null)
 
 const utilization = computed(() => {
   const e = entry.value
@@ -32,7 +31,7 @@ const utilizationColor = computed(() => {
 const cacheHitRate = computed(() => {
   const e = entry.value
   if (!e?.usage) return null
-  const total = e.usage.inputTokens
+  const total = e.usage.inputTokens + e.usage.cacheReadTokens + e.usage.cacheWriteTokens
   if (total === 0) return null
   return e.usage.cacheReadTokens / total
 })
@@ -134,137 +133,6 @@ const agentBreakdown = computed(() => {
   }
 })
 
-const simpleComposition = computed((): { key: string; label: string; color: string; tokens: number }[] => {
-  const comp = entry.value?.composition || []
-  const result: { key: string; label: string; color: string; tokens: number }[] = []
-  for (const [gk, cats] of Object.entries(SIMPLE_GROUPS)) {
-    let tokens = 0
-    for (const cat of cats) {
-      const found = comp.find(c => c.category === cat)
-      if (found) tokens += found.tokens
-    }
-    if (tokens > 0) {
-      const meta = SIMPLE_META[gk]
-      result.push({ key: gk, label: meta.label, color: meta.color, tokens })
-    }
-  }
-  return result
-})
-
-interface TreemapNode {
-  key: string
-  label: string
-  color: string
-  tokens: number
-  category?: string
-  toolName?: string
-}
-
-interface TreemapLayoutNode extends TreemapNode {
-  x: number
-  y: number
-  w: number
-  h: number
-  pct: number
-}
-
-interface TreemapHierarchyDatum extends TreemapNode {
-  children?: TreemapHierarchyDatum[]
-}
-
-const topLevelTreemapNodes = computed((): TreemapNode[] => {
-  const e = entry.value
-  if (!e) return []
-  return e.composition
-    .filter((item) => item.tokens > 0)
-    .map((item) => ({
-      key: item.category,
-      label: CATEGORY_META[item.category]?.label ?? item.category,
-      color: CATEGORY_META[item.category]?.color ?? '#4b5563',
-      tokens: item.tokens,
-      category: item.category,
-    }))
-})
-
-function toolResultColor(index: number): string {
-  const palette = ['#10b981', '#34d399', '#14b8a6', '#2dd4bf', '#059669', '#06b6d4', '#0ea5e9']
-  return palette[index % palette.length]
-}
-
-const toolResultTreemapNodes = computed((): TreemapNode[] => {
-  const e = entry.value
-  if (!e) return []
-  const msgs = e.contextInfo.messages || []
-  const toolNameMap = buildToolNameMap(msgs)
-  const toolTokens = new Map<string, number>()
-
-  for (const msg of msgs) {
-    if (classifyMessageRole(msg) !== 'tool_results') continue
-    const blocks = (msg.contentBlocks || []).filter((block) => block.type === 'tool_result')
-    if (blocks.length === 0) continue
-    const split = (msg.tokens || 0) / blocks.length
-    for (const block of blocks) {
-      const toolId = block.tool_use_id || 'unknown'
-      const toolName = toolNameMap[toolId] || `tool:${toolId.slice(0, 8)}`
-      toolTokens.set(toolName, (toolTokens.get(toolName) || 0) + split)
-    }
-  }
-
-  return Array.from(toolTokens.entries())
-    .sort((a, b) => b[1] - a[1])
-    .map(([tool, tokens], index) => ({
-      key: `tool-${tool}-${index}`,
-      label: tool,
-      color: toolResultColor(index),
-      tokens: Math.max(1, Math.round(tokens)),
-      category: 'tool_results',
-      toolName: tool,
-    }))
-})
-
-const activeDetailedTreemapNodes = computed((): TreemapNode[] => {
-  if (treemapDrillKey.value === 'tool_results' && toolResultTreemapNodes.value.length > 0) {
-    return toolResultTreemapNodes.value
-  }
-  return topLevelTreemapNodes.value
-})
-
-const detailedLegendNodes = computed(() => activeDetailedTreemapNodes.value.slice(0, 8))
-
-function buildTreemapLayout(nodes: TreemapNode[]): TreemapLayoutNode[] {
-  if (nodes.length === 0) return []
-  const total = nodes.reduce((sum, node) => sum + node.tokens, 0)
-  const root = hierarchy<TreemapHierarchyDatum>({
-    key: 'root',
-    label: 'root',
-    color: '#000000',
-    tokens: 0,
-    children: nodes,
-  }).sum((node) => (node.children && node.children.length > 0 ? 0 : Math.max(0, node.tokens || 0)))
-
-  const laidOut = d3Treemap<TreemapHierarchyDatum>()
-    .size([100, 100])
-    .paddingInner(1)
-    .round(true)(root)
-
-  return laidOut.leaves().map((leaf) => {
-    const node = leaf.data
-    return {
-      key: node.key,
-      label: node.label,
-      color: node.color,
-      tokens: node.tokens,
-      category: node.category,
-      x: leaf.x0,
-      y: leaf.y0,
-      w: leaf.x1 - leaf.x0,
-      h: leaf.y1 - leaf.y0,
-      pct: total > 0 ? (node.tokens / total) * 100 : 0,
-    }
-  })
-}
-
-const detailedTreemapLayout = computed(() => buildTreemapLayout(activeDetailedTreemapNodes.value))
 
 const recommendations = computed(() => {
   const e = entry.value
@@ -354,51 +222,15 @@ function jumpToMessagesTool(toolName: string) {
   store.focusMessageTool('tool_results', toolName)
 }
 
-function handleDetailedTreemapItemClick(item: TreemapLayoutNode) {
-  if (treemapDrillKey.value === null && item.category === 'tool_results' && toolResultTreemapNodes.value.length > 1) {
-    treemapDrillKey.value = 'tool_results'
-    return
-  }
-  if (treemapDrillKey.value === 'tool_results' && item.toolName) {
-    jumpToMessagesTool(item.toolName)
-    return
-  }
-  jumpToMessagesCategory(item.category || 'tool_results')
+function handleRecClick(rec: { messageIndex?: number; highlight?: string }) {
+  if (rec.messageIndex == null) return
+  store.setInspectorTab('messages')
+  store.focusMessageByIndex(rec.messageIndex, rec.highlight)
 }
-
-function onSimpleTreemapClick(groupKey: string) {
-  const e = entry.value
-  if (!e) return
-  const cats = SIMPLE_GROUPS[groupKey] || []
-  if (cats.length === 0) return
-
-  let target = cats[0]
-  let maxTokens = -1
-  for (const cat of cats) {
-    const found = e.composition.find((item) => item.category === cat)
-    const tok = found?.tokens ?? 0
-    if (tok > maxTokens) {
-      maxTokens = tok
-      target = cat
-    }
-  }
-  jumpToMessagesCategory(target)
-}
-
-function resetTreemapDrill() {
-  treemapDrillKey.value = null
-}
-
-watch(
-  () => entry.value?.id,
-  () => {
-    treemapDrillKey.value = null
-  },
-)
 
 function modelBarColor(model: string): string {
   if (/opus/i.test(model)) return '#fb923c'
-  if (/sonnet/i.test(model)) return '#60a5fa'
+  if (/sonnet/i.test(model)) return 'var(--accent-blue)'
   if (/haiku/i.test(model)) return '#a78bfa'
   if (/gpt/i.test(model)) return '#10b981'
   return '#94a3b8'
@@ -511,80 +343,12 @@ function auditTooltip(audit: { id: string; name: string; description: string }):
     </div>
 
     <!-- ═══ Composition treemap ═══ -->
-    <section class="panel" v-if="entry.composition.length > 0">
-      <div class="panel-head">
-        <span class="panel-title">Composition</span>
-        <span class="panel-sub">Turn {{ turnNum }} · {{ fmtTokens(entry.composition.reduce((s, c) => s + c.tokens, 0)) }}</span>
-        <button
-          v-if="treemapMode === 'detailed' && treemapDrillKey"
-          class="treemap-back"
-          @click="resetTreemapDrill"
-        >
-          Back to categories
-        </button>
-        <div class="mode-toggle">
-          <button :class="{ on: treemapMode === 'detailed' }" @click="treemapMode = 'detailed'">Detail</button>
-          <button :class="{ on: treemapMode === 'simple' }" @click="treemapMode = 'simple'">Simple</button>
-        </div>
-      </div>
-      <div class="panel-body">
-        <!-- Detailed -->
-        <div v-if="treemapMode === 'detailed'" class="treemap">
-          <button
-            v-for="item in detailedTreemapLayout"
-            :key="item.key"
-            class="tm-block tm-block-2d"
-            :style="{
-              left: item.x + '%',
-              top: item.y + '%',
-              width: item.w + '%',
-              height: item.h + '%',
-              background: item.color,
-            }"
-            v-tooltip="`${item.label}: ${item.tokens.toLocaleString()} (${item.pct.toFixed(1)}%)`"
-            @click="handleDetailedTreemapItemClick(item)"
-          >
-            <template v-if="item.w >= 14 && item.h >= 12">
-              <span class="tm-label">{{ item.label }}</span>
-              <span class="tm-val">{{ fmtTokens(item.tokens) }}</span>
-            </template>
-          </button>
-        </div>
-        <!-- Simple -->
-        <div v-else class="treemap">
-          <div
-            v-for="g in simpleComposition" :key="g.key"
-            class="tm-block" :style="{ flex: g.tokens, background: g.color }"
-            v-tooltip="`${g.label}: ${g.tokens.toLocaleString()}`"
-            @click="onSimpleTreemapClick(g.key)"
-          >
-            <span class="tm-label">{{ g.label }}</span>
-            <span class="tm-val">{{ fmtTokens(g.tokens) }}</span>
-          </div>
-        </div>
-        <!-- Legend -->
-        <div class="legend">
-          <template v-if="treemapMode === 'detailed'">
-            <span v-for="item in detailedLegendNodes" :key="`legend-${item.key}`" class="legend-item">
-              <span class="legend-dot" :style="{ background: item.color }" />
-              {{ item.label }}
-            </span>
-            <span
-              v-if="activeDetailedTreemapNodes.length > detailedLegendNodes.length"
-              class="legend-item"
-            >
-              +{{ activeDetailedTreemapNodes.length - detailedLegendNodes.length }} more
-            </span>
-          </template>
-          <template v-else>
-            <span v-for="g in simpleComposition" :key="g.key" class="legend-item">
-              <span class="legend-dot" :style="{ background: g.color }" />
-              {{ g.label }}
-            </span>
-          </template>
-        </div>
-      </div>
-    </section>
+    <CompositionTreemap
+      :entry="entry"
+      :turn-num="turnNum"
+      @category-click="jumpToMessagesCategory"
+      @tool-click="jumpToMessagesTool"
+    />
 
     <!-- ═══ Agent breakdown ═══ -->
     <section class="panel" v-if="classified.length > 1">
@@ -676,34 +440,12 @@ function auditTooltip(audit: { id: string; name: string; description: string }):
     </section>
 
     <!-- ═══ Findings ═══ -->
-    <section class="panel" v-if="entry.healthScore || recommendations.length > 0">
-      <div class="panel-head">
-        <span class="panel-title">Findings</span>
-        <span class="finding-count" v-if="recommendations.length">{{ recommendations.length }}</span>
-        <span v-if="entry.healthScore" class="health-score-inline" :style="{ color: healthColor(entry.healthScore.rating) }">
-          {{ entry.healthScore.overall }}/100
-        </span>
-      </div>
-      <!-- Audit chips -->
-      <div v-if="entry.healthScore" class="audit-row">
-        <span v-for="audit in entry.healthScore.audits" :key="audit.id" class="audit-chip"
-          :class="audit.score >= 90 ? 'audit-good' : audit.score >= 50 ? 'audit-warn' : 'audit-bad'"
-          v-tooltip="auditTooltip(audit)">
-          {{ audit.name }} <b>{{ audit.score }}</b>
-        </span>
-      </div>
-      <!-- Recommendations -->
-      <div v-if="recommendations.length > 0" class="panel-body rec-list">
-        <div v-for="(r, i) in recommendations" :key="i" class="rec">
-          <span class="rec-dot" :class="`sev-${r.severity}`" />
-          <div class="rec-content">
-            <div class="rec-title">{{ r.title }}</div>
-            <div class="rec-detail">{{ r.detail }}</div>
-          </div>
-          <span class="rec-impact" :class="`sev-${r.severity}`">{{ r.impact }}</span>
-        </div>
-      </div>
-    </section>
+    <HealthFindings
+      :entry="entry"
+      :recommendations="recommendations"
+      :audit-tooltip="auditTooltip"
+      @recommendation-click="handleRecClick"
+    />
   </div>
 </template>
 
@@ -765,7 +507,7 @@ function auditTooltip(audit: { id: string; name: string; description: string }):
   border: 1px solid var(--border-dim);
   color: var(--text-secondary);
   padding: 4px 8px;
-  border-radius: var(--radius-sm);
+  border-radius: 0;
   cursor: pointer;
   transition: border-color 0.12s, color 0.12s, background 0.12s;
 
@@ -784,11 +526,14 @@ function auditTooltip(audit: { id: string; name: string; description: string }):
 }
 
 .stat-card {
-  text-align: center;
-  padding: var(--space-3) var(--space-2);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
   background: var(--bg-surface);
   border: 1px solid var(--border-dim);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
 }
 
 .stat-card--health {
@@ -822,7 +567,7 @@ function auditTooltip(audit: { id: string; name: string; description: string }):
 
 .util-track {
   margin-top: 6px;
-  height: 3px;
+  height: 2px;
   background: var(--bg-raised);
   border-radius: 2px;
   overflow: hidden;
@@ -870,132 +615,6 @@ function auditTooltip(audit: { id: string; name: string; description: string }):
 
 .panel-body {
   padding: var(--space-4);
-}
-
-// ═══ Mode toggle ═══
-.mode-toggle {
-  display: flex;
-  margin-left: auto;
-  border: 1px solid var(--border-dim);
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-
-  button {
-    font-size: var(--text-xs);
-    padding: 3px 8px;
-    background: none;
-    border: none;
-    color: var(--text-muted);
-    cursor: pointer;
-    transition: background 0.1s, color 0.1s;
-
-    &:hover { color: var(--text-secondary); }
-    &.on { background: var(--accent-blue-dim); color: var(--accent-blue); }
-    & + button { border-left: 1px solid var(--border-dim); }
-  }
-}
-
-.treemap-back {
-  font-size: var(--text-xs);
-  background: var(--bg-raised);
-  border: 1px solid var(--border-dim);
-  color: var(--text-secondary);
-  padding: 3px 8px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-
-  &:hover {
-    border-color: var(--border-mid);
-    color: var(--text-primary);
-    background: var(--bg-hover);
-  }
-}
-
-// ═══ Treemap ═══
-.treemap {
-  height: 78px;
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-  position: relative;
-  background: var(--bg-raised);
-}
-
-.treemap:not(.treemap-2d) {
-  display: flex;
-  gap: 1px;
-}
-
-.tm-block {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: filter 0.15s;
-  min-width: 0;
-
-  &:hover { filter: brightness(1.25); }
-}
-
-.tm-block-2d {
-  position: absolute;
-  border: none;
-  padding: 2px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-}
-
-.tm-label {
-  @include mono-text;
-  font-size: var(--text-xs);
-  font-weight: 500;
-  color: rgba(255, 255, 255, 0.88);
-  @include truncate;
-  max-width: 100%;
-  padding: 0 4px;
-}
-
-.tm-val {
-  @include mono-text;
-  font-size: var(--text-xs);
-  color: rgba(255, 255, 255, 0.5);
-}
-
-// Category colors
-.cat-system_prompt { background: #2563eb; }
-.cat-tool_definitions { background: #db2777; }
-.cat-tool_results { background: #059669; }
-.cat-system_injections { background: #6366f1; }
-.cat-thinking { background: #8b5cf6; }
-.cat-assistant_text { background: #d97706; }
-.cat-user_text { background: #10b981; }
-.cat-tool_calls { background: #ec4899; }
-.cat-images { background: #4b5563; }
-.cat-cache_markers { background: #6b7280; }
-.cat-other { background: #4b5563; }
-
-.legend {
-  display: flex;
-  gap: var(--space-3);
-  margin-top: var(--space-2);
-  flex-wrap: wrap;
-}
-
-.legend-item {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: var(--text-xs);
-  color: var(--text-dim);
-}
-
-.legend-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 2px;
-  flex-shrink: 0;
 }
 
 // ═══ Agent breakdown ═══
@@ -1073,7 +692,7 @@ function auditTooltip(audit: { id: string; name: string; description: string }):
   align-items: center;
   gap: var(--space-2);
   padding: 5px 6px;
-  border-radius: var(--radius-sm);
+  border-radius: 0;
   font-size: var(--text-sm);
   transition: background 0.1s;
   cursor: pointer;
@@ -1138,11 +757,11 @@ function auditTooltip(audit: { id: string; name: string; description: string }):
 
 .call-badge {
   @include mono-text;
-  font-size: 11px;
-  padding: 2px 6px;
+  font-size: 10px;
+  padding: 1px 5px;
   border-radius: 2px;
   background: var(--bg-raised);
-  min-width: 58px;
+  min-width: 52px;
   width: auto;
   text-align: center;
   flex-shrink: 0;
@@ -1180,104 +799,10 @@ function auditTooltip(audit: { id: string; name: string; description: string }):
 
 // Model colors
 .model-opus { color: #fb923c; }
-.model-sonnet { color: #60a5fa; }
+.model-sonnet { color: var(--accent-blue); }
 .model-haiku { color: #a78bfa; }
 .model-gpt { color: #10b981; }
-.model-gemini { color: #22d3ee; }
+.model-gemini { color: var(--accent-cyan); }
 .model-default { color: var(--text-dim); }
 
-// ═══ Findings ═══
-.finding-count {
-  @include mono-text;
-  font-size: var(--text-xs);
-  padding: 1px 5px;
-  border-radius: var(--radius-full);
-  background: var(--accent-blue-dim);
-  color: var(--accent-blue);
-}
-
-.health-score-inline {
-  margin-left: auto;
-  @include mono-text;
-  font-size: var(--text-sm);
-  font-weight: 700;
-}
-
-.audit-row {
-  padding: var(--space-2) var(--space-4);
-  display: flex;
-  gap: var(--space-2);
-  flex-wrap: wrap;
-  border-bottom: 1px solid var(--border-dim);
-}
-
-.audit-chip {
-  @include mono-text;
-  font-size: var(--text-xs);
-  padding: 2px 7px;
-  border-radius: var(--radius-full);
-  cursor: default;
-
-  b { font-weight: 700; margin-left: 2px; }
-
-  &.audit-good { background: rgba(16, 185, 129, 0.08); color: #6ee7b7; b { color: #10b981; } }
-  &.audit-warn { background: rgba(245, 158, 11, 0.08); color: #fbbf24; b { color: #f59e0b; } }
-  &.audit-bad { background: rgba(239, 68, 68, 0.08); color: #fca5a5; b { color: #ef4444; } }
-}
-
-.rec-list { padding: var(--space-3) var(--space-4); }
-
-.rec {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-3);
-  padding: var(--space-3) 0;
-  border-bottom: 1px solid var(--border-dim);
-
-  &:last-child { border-bottom: none; padding-bottom: 0; }
-  &:first-child { padding-top: 0; }
-}
-
-.rec-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: var(--radius-full);
-  margin-top: 5px;
-  flex-shrink: 0;
-
-  &.sev-high { background: var(--accent-red); box-shadow: 0 0 4px var(--accent-red); }
-  &.sev-med { background: var(--accent-amber); box-shadow: 0 0 4px var(--accent-amber); }
-  &.sev-low { background: var(--accent-green); }
-}
-
-.rec-content { flex: 1; min-width: 0; }
-
-.rec-title {
-  @include sans-text;
-  font-size: var(--text-sm);
-  font-weight: 500;
-  color: var(--text-secondary);
-}
-
-.rec-detail {
-  @include sans-text;
-  font-size: var(--text-xs);
-  color: var(--text-muted);
-  margin-top: 3px;
-  line-height: 1.5;
-}
-
-.rec-impact {
-  @include mono-text;
-  font-size: var(--text-xs);
-  padding: 2px 6px;
-  border-radius: var(--radius-sm);
-  white-space: nowrap;
-  flex-shrink: 0;
-  margin-top: 2px;
-
-  &.sev-high { background: var(--accent-red-dim); color: var(--accent-red); }
-  &.sev-med { background: var(--accent-amber-dim); color: var(--accent-amber); }
-  &.sev-low { background: var(--accent-green-dim); color: var(--accent-green); }
-}
 </style>
