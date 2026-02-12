@@ -14,7 +14,7 @@ export interface GroupSegment {
   pct: number
 }
 
-export interface TimelineEvent {
+interface TimelineEvent {
   type: 'compaction' | 'cache-shift' | 'subagent-burst' | 'tool-jump'
   label: string
   detail: string
@@ -24,7 +24,7 @@ export interface DiffData {
   prevTurnNum: number
   currTurnNum: number
   delta: number
-  lines: { type: 'add' | 'remove' | 'same'; text: string; category: string }[]
+  lines: { type: 'add' | 'remove' | 'same'; text: string; category: string; delta: number }[]
   topIncreases: { group: string; label: string; delta: number; category: string }[]
   topDecreases: { group: string; label: string; delta: number; category: string }[]
 }
@@ -36,13 +36,15 @@ export interface DiffData {
 export function groupedSegmentsForEntry(e: ProjectedEntry): GroupSegment[] {
   const comp = e.composition || []
   const total = comp.reduce((sum, item) => sum + item.tokens, 0)
+  const tokensByCategory = new Map<string, number>(
+    comp.map((item) => [item.category, item.tokens]),
+  )
   const segments: GroupSegment[] = []
 
   for (const [groupKey, categories] of Object.entries(SIMPLE_GROUPS)) {
     let tokens = 0
     for (const cat of categories) {
-      const found = comp.find((item) => item.category === cat)
-      if (found) tokens += found.tokens
+      tokens += tokensByCategory.get(cat) ?? 0
     }
     if (tokens > 0) {
       segments.push({
@@ -83,7 +85,7 @@ export function visibleTokens(entry: ProjectedEntry, hiddenKeys: Set<string>): n
 // Entry Navigation & Analysis
 // ══════════════════════════════════════════════════════════════════════════════
 
-export function previousMainEntry(
+function previousMainEntry(
   currentId: number,
   classified: ClassifiedEntry[]
 ): ProjectedEntry | null {
@@ -95,7 +97,7 @@ export function previousMainEntry(
   return null
 }
 
-export function subagentCallsInTurn(currentId: number, classified: ClassifiedEntry[]): number {
+function subagentCallsInTurn(currentId: number, classified: ClassifiedEntry[]): number {
   const idx = classified.findIndex((item) => item.entry.id === currentId)
   if (idx < 0) return 0
 
@@ -143,14 +145,10 @@ export function detectTimelineEvents(
       }
 
       // Cache shift detection
-      const prevTotal = prevMain.usage
-        ? prevMain.usage.inputTokens + prevMain.usage.cacheReadTokens + prevMain.usage.cacheWriteTokens
-        : 0
-      const currTotal = item.entry.usage
-        ? item.entry.usage.inputTokens + item.entry.usage.cacheReadTokens + item.entry.usage.cacheWriteTokens
-        : 0
-      const prevCache = prevTotal > 0 ? prevMain.usage!.cacheReadTokens / prevTotal : null
-      const currCache = currTotal > 0 ? item.entry.usage!.cacheReadTokens / currTotal : null
+      const prevTotal = totalInputWithCache(prevMain)
+      const currTotal = totalInputWithCache(item.entry)
+      const prevCache = prevTotal > 0 && prevMain.usage ? prevMain.usage.cacheReadTokens / prevTotal : null
+      const currCache = currTotal > 0 && item.entry.usage ? item.entry.usage.cacheReadTokens / currTotal : null
 
       if (prevCache !== null && currCache !== null) {
         const delta = currCache - prevCache
@@ -264,37 +262,42 @@ export function calculateContextDiff(
   }
 
   // Format diff lines
-  const lines: { type: 'add' | 'remove' | 'same'; text: string; category: string }[] = []
+  const lines: { type: 'add' | 'remove' | 'same'; text: string; category: string; delta: number }[] = []
   for (const diff of [...categoryDiffs].sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))) {
     if (diff.delta === 0) {
       lines.push({
         type: 'same',
         text: `  ${diff.label}: ${fmtTokens(diff.currTokens)} (unchanged)`,
         category: diff.category,
+        delta: diff.delta,
       })
     } else if (diff.prevTokens === 0) {
       lines.push({
         type: 'add',
         text: `+ ${diff.label}: ${fmtTokens(diff.currTokens)} (new)`,
         category: diff.category,
+        delta: diff.delta,
       })
     } else if (diff.currTokens === 0) {
       lines.push({
         type: 'remove',
         text: `- ${diff.label}: ${fmtTokens(diff.prevTokens)} (removed)`,
         category: diff.category,
+        delta: diff.delta,
       })
     } else if (diff.delta > 0) {
       lines.push({
         type: 'add',
         text: `+ ${diff.label}: ${fmtTokens(diff.prevTokens)} → ${fmtTokens(diff.currTokens)} (+${fmtTokens(diff.delta)})`,
         category: diff.category,
+        delta: diff.delta,
       })
     } else {
       lines.push({
         type: 'remove',
         text: `- ${diff.label}: ${fmtTokens(diff.prevTokens)} → ${fmtTokens(diff.currTokens)} (${fmtTokens(diff.delta)})`,
         category: diff.category,
+        delta: diff.delta,
       })
     }
   }
@@ -416,16 +419,21 @@ export function formatYTick(value: number, mode: 'cost' | 'tokens'): string {
 
 export function cacheHitRate(entry: ProjectedEntry): number | null {
   if (!entry.usage) return null
-  const total = entry.usage.inputTokens + entry.usage.cacheReadTokens + entry.usage.cacheWriteTokens
+  const total = totalInputWithCache(entry)
   if (total === 0) return null
   return entry.usage.cacheReadTokens / total
+}
+
+function totalInputWithCache(entry: ProjectedEntry): number {
+  if (!entry.usage) return 0
+  return entry.usage.inputTokens + entry.usage.cacheReadTokens + entry.usage.cacheWriteTokens
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
 // Turns Remaining Projection
 // ══════════════════════════════════════════════════════════════════════════════
 
-export interface TurnsProjection {
+interface TurnsProjection {
   turnsRemaining: number | null // null = not enough data or no growth
   growthPerTurn: number         // average tokens added per main turn since last compaction
   sinceCompaction: number       // how many main turns since last compaction (or session start)

@@ -52,19 +52,17 @@ interface SparkDatum {
   tokens: number
   cost: number
   model: string
-  limit: number
   utilization: number
 }
 
 const sparkData = computed((): SparkDatum[] => {
   const max = maxTokens.value
-  if (max === 0) return mainEntries.value.map(() => ({ height: 0.15, tokens: 0, cost: 0, model: '', limit: 0, utilization: 0 }))
+  if (max === 0) return mainEntries.value.map(() => ({ height: 0.15, tokens: 0, cost: 0, model: '', utilization: 0 }))
   return mainEntries.value.map((e) => ({
     height: Math.max(0.08, e.contextInfo.totalTokens / max),
     tokens: e.contextInfo.totalTokens,
     cost: e.costUsd ?? 0,
     model: shortModel(e.contextInfo.model),
-    limit: e.contextLimit,
     utilization: e.contextLimit > 0 ? e.contextInfo.totalTokens / e.contextLimit : 0,
   }))
 })
@@ -126,13 +124,11 @@ const tooltipEntry = computed(() => {
     cost: fmtCost(e.costUsd),
     model: data.model,
     subs,
-    utilization: data.utilization,
-    isSelected: hoverIndex.value === selectedTurnIndex.value,
   }
 })
 
 function selectTurn(index: number) {
-  if (index < 0 || index >= mainEntries.value.length) return
+  if (!isTurnIndexSelectable(index)) return
   store.pinEntry(mainEntries.value[index].id)
 }
 
@@ -141,13 +137,15 @@ function followLive() {
 }
 
 function goPrevTurn() {
-  if (selectedTurnIndex.value <= 0) return
-  selectTurn(selectedTurnIndex.value - 1)
+  const target = selectedTurnIndex.value - 1
+  if (!isTurnIndexSelectable(target)) return
+  selectTurn(target)
 }
 
 function goNextTurn() {
-  if (selectedTurnIndex.value < 0 || selectedTurnIndex.value >= turnCount.value - 1) return
-  selectTurn(selectedTurnIndex.value + 1)
+  const target = selectedTurnIndex.value + 1
+  if (!isTurnIndexSelectable(target)) return
+  selectTurn(target)
 }
 
 function pinCurrentTurn() {
@@ -165,19 +163,23 @@ function getIndexFromEvent(e: MouseEvent | PointerEvent): number {
   return Math.min(Math.floor(ratio * turnCount.value), turnCount.value - 1)
 }
 
+function isTurnIndexSelectable(index: number): boolean {
+  return index >= 0 && index < turnCount.value
+}
+
 function onTrackPointerDown(e: PointerEvent) {
   if (turnCount.value === 0) return
   isDragging.value = true
   const idx = getIndexFromEvent(e)
-  if (idx >= 0) selectTurn(idx)
+  if (isTurnIndexSelectable(idx)) selectTurn(idx)
   ;(e.target as HTMLElement)?.setPointerCapture?.(e.pointerId)
 }
 
 function onTrackPointerMove(e: PointerEvent) {
   const idx = getIndexFromEvent(e)
-  hoverIndex.value = idx >= 0 ? idx : null
+  hoverIndex.value = isTurnIndexSelectable(idx) ? idx : null
 
-  if (isDragging.value && idx >= 0) {
+  if (isDragging.value && isTurnIndexSelectable(idx)) {
     selectTurn(idx)
   }
 }

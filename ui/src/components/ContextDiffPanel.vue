@@ -79,6 +79,24 @@ const deltaColor = computed(() => {
   return isUp ? 'var(--accent-green)' : 'var(--accent-red)'
 })
 
+const DIFF_HOT_THRESHOLD = 2000
+
+function isHotDelta(delta: number): boolean {
+  return Math.abs(delta) >= DIFF_HOT_THRESHOLD
+}
+
+function diffToneClass(delta: number, direction: 'up' | 'down'): string {
+  if (!isHotDelta(delta)) return 'diff-tone-muted'
+  return direction === 'up' ? 'diff-tone-up' : 'diff-tone-down'
+}
+
+function diffLineClass(line: DiffData['lines'][number]): string {
+  if (line.type === 'same') return 'diff-tone-muted'
+  return line.type === 'add'
+    ? diffToneClass(line.delta, 'up')
+    : diffToneClass(line.delta, 'down')
+}
+
 function onCategoryClick(category: string) {
   emit('categoryClick', category)
 }
@@ -135,7 +153,8 @@ function onCategoryClick(category: string) {
               <button
                 v-for="inc in diffData.topIncreases"
                 :key="'inc-' + inc.group"
-                class="diff-summary-chip diff-summary-chip--up"
+                class="diff-summary-chip"
+                :class="diffToneClass(inc.delta, 'up')"
                 @click="onCategoryClick(inc.category)"
               >
                 {{ inc.label }} +{{ fmtTokens(inc.delta) }}
@@ -143,7 +162,8 @@ function onCategoryClick(category: string) {
               <button
                 v-for="dec in diffData.topDecreases"
                 :key="'dec-' + dec.group"
-                class="diff-summary-chip diff-summary-chip--down"
+                class="diff-summary-chip"
+                :class="diffToneClass(dec.delta, 'down')"
                 @click="onCategoryClick(dec.category)"
               >
                 {{ dec.label }} {{ fmtTokens(dec.delta) }}
@@ -156,7 +176,8 @@ function onCategoryClick(category: string) {
               <button
                 v-for="inc in diffData.topIncreases"
                 :key="'inc-' + inc.group"
-                class="diff-summary-chip diff-summary-chip--up"
+                class="diff-summary-chip"
+                :class="diffToneClass(inc.delta, 'up')"
                 @click="onCategoryClick(inc.category)"
               >
                 {{ inc.label }} +{{ fmtTokens(inc.delta) }}
@@ -167,7 +188,8 @@ function onCategoryClick(category: string) {
               <button
                 v-for="dec in diffData.topDecreases"
                 :key="'dec-' + dec.group"
-                class="diff-summary-chip diff-summary-chip--down"
+                class="diff-summary-chip"
+                :class="diffToneClass(dec.delta, 'down')"
                 @click="onCategoryClick(dec.category)"
               >
                 {{ dec.label }} {{ fmtTokens(dec.delta) }}
@@ -186,7 +208,7 @@ function onCategoryClick(category: string) {
           v-for="(line, i) in visibleDiffLines"
           :key="'line-' + i"
           class="diff-line"
-          :class="`diff-${line.type}`"
+          :class="['diff-' + line.type, diffLineClass(line)]"
           @click="onCategoryClick(line.category)"
         >
           {{ line.text }}
@@ -326,16 +348,22 @@ function onCategoryClick(category: string) {
   &:hover { filter: brightness(1.3); }
 }
 
-.diff-summary-chip--up {
+.diff-tone-up {
   color: var(--accent-amber);
   background: rgba(245, 158, 11, 0.08);
   border-color: rgba(245, 158, 11, 0.25);
 }
 
-.diff-summary-chip--down {
+.diff-tone-down {
   color: var(--accent-green);
   background: rgba(16, 185, 129, 0.08);
   border-color: rgba(16, 185, 129, 0.25);
+}
+
+.diff-tone-muted {
+  color: var(--text-dim);
+  background: rgba(71, 85, 105, 0.10);
+  border-color: rgba(71, 85, 105, 0.22);
 }
 
 .diff-hidden-wrap {
@@ -370,8 +398,10 @@ function onCategoryClick(category: string) {
   &:hover { filter: brightness(1.3); }
 }
 
-.diff-add { background: rgba(16, 185, 129, 0.06); color: #4ade80; }
-.diff-remove { background: rgba(240, 96, 96, 0.06); color: #f87171; }
-.diff-same { color: var(--text-ghost); }
+.diff-add,
+.diff-remove,
+.diff-same {
+  border: 1px solid transparent;
+}
 .diff-empty { @include mono-text; color: var(--text-ghost); font-size: var(--text-xs); }
 </style>

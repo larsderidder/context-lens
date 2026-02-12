@@ -14,16 +14,6 @@ function goToDashboard() {
   store.setView('dashboard')
 }
 
-function healthClass(s: ConversationSummary): string {
-  if (!s.healthScore) return 'health-none'
-  switch (s.healthScore.rating) {
-    case 'good': return 'health-good'
-    case 'needs-work': return 'health-warn'
-    case 'poor': return 'health-bad'
-    default: return 'health-none'
-  }
-}
-
 function tileTooltip(s: ConversationSummary): string {
   const model = shortModel(s.latestModel)
   const turns = s.entryCount + (s.entryCount === 1 ? ' turn' : ' turns')

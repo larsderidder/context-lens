@@ -7,7 +7,6 @@ import type { ProjectedEntry } from '@/api-types'
 import ContextDiffPanel from './ContextDiffPanel.vue'
 import {
   type GroupSegment,
-  type TimelineEvent,
   type DiffData,
   detectTimelineEvents,
   calculateContextDiff,
@@ -23,7 +22,6 @@ import {
   formatYTick,
   stackSegments,
   visibleTokens,
-  groupedSegmentsForEntry,
   cacheHitRate,
   projectTurnsRemaining,
 } from '@/utils/timeline'
@@ -80,6 +78,19 @@ const eventsByEntryId = computed(() =>
   detectTimelineEvents(filtered.value, classified.value)
 )
 
+const eventSlots = computed(() => {
+  return filtered.value.map((item, i) => {
+    const events = eventsByEntryId.value.get(item.entry.id) || []
+    const firstEvent = events[0] || null
+    const turnNum = turnNumbers.value[i] || i + 1
+    return {
+      entryId: item.entry.id,
+      firstEvent,
+      title: firstEvent ? markerTitle(events, turnNum) : '',
+    }
+  })
+})
+
 function toggleLegend(key: string) {
   const next = new Set(hiddenLegendKeys.value)
   if (next.has(key)) next.delete(key)
@@ -123,8 +134,6 @@ const labelStep = computed(() => calculateLabelStep(filtered.value.length))
 
 // ── Context limit overlay ──
 // A dashed line showing the model's context window ceiling, overlaid on the bar chart.
-
-const CHART_HEIGHT = 140
 
 // Active entry's context limit
 const contextLimit = computed(() => {
@@ -189,40 +198,59 @@ const legendGroups = computed(() => {
 
 // ── Cache hit rate overlay (SVG polyline) ──
 
-// Check if any entries have cache data
-const hasCacheData = computed(() => {
-  return filtered.value.some(item => cacheHitRate(item.entry) !== null)
+const lastMainSlotIndex = computed(() => {
+  const items = filtered.value
+  if (items.length === 0) return -1
+  if (mode.value !== 'all') return items.length - 1
+  for (let i = items.length - 1; i >= 0; i--) {
+    if (items[i].isMain) return i
+  }
+  return -1
 })
 
-// SVG polyline points for cache hit rate, scaled to bars-wrap dimensions.
-// X: each bar's center position. Y: cache rate 0=bottom, 1=top of chart.
+const hasCacheData = computed(() => {
+  const items = filtered.value
+  const last = lastMainSlotIndex.value
+  if (last < 0) return false
+  for (let i = 0; i <= last; i++) {
+    if (mode.value === 'all' && !items[i].isMain) continue
+    if (cacheHitRate(items[i].entry) !== null) return true
+  }
+  return false
+})
+
+// SVG polyline points for cache hit rate.
+// We use a viewBox whose X range matches the number of bar slots so each
+// point lands exactly on its bar center, regardless of sparse/dense mode.
+const cacheViewBox = computed(() => {
+  const count = Math.max(0, lastMainSlotIndex.value + 1)
+  if (count === 0) return '0 0 1 100'
+  return `0 0 ${count} 100`
+})
+
+const cacheOverlayWidthPct = computed(() => {
+  const totalSlots = filtered.value.length
+  const coveredSlots = Math.max(0, lastMainSlotIndex.value + 1)
+  if (totalSlots === 0 || coveredSlots === 0) return '0%'
+  return `${(coveredSlots / totalSlots) * 100}%`
+})
+
 const cacheLinePoints = computed((): string => {
   const items = filtered.value
-  if (items.length === 0) return ''
-  const count = items.length
-  const isSp = isSparse.value
-  // In sparse mode bars fill 100%, in dense mode each is 10px + 2px gap
+  const last = lastMainSlotIndex.value
+  if (items.length === 0 || last < 0) return ''
   const points: string[] = []
-  for (let i = 0; i < count; i++) {
+  for (let i = 0; i <= last; i++) {
+    if (mode.value === 'all' && !items[i].isMain) continue
     const rate = cacheHitRate(items[i].entry)
     if (rate === null) continue
-    // X: center of bar i (percentage of container width)
-    const xPct = isSp
-      ? ((i + 0.5) / count) * 100
-      : ((i * 12 + 5) / (count * 12)) * 100
+    // X: center of bar slot i (in slot units)
+    const x = i + 0.5
     // Y: inverted (0% = top, 100% = bottom)
-    const yPct = (1 - rate) * 100
-    points.push(`${xPct.toFixed(2)},${yPct.toFixed(2)}`)
+    const y = (1 - rate) * 100
+    points.push(`${x.toFixed(3)},${y.toFixed(2)}`)
   }
   return points.join(' ')
-})
-
-const cacheLineTooltip = computed(() => {
-  const e = entry.value
-  if (!e) return ''
-  const rate = cacheHitRate(e)
-  if (rate === null) return 'No cache data'
-  return `Cache hit: ${Math.round(rate * 100)}%`
 })
 
 // ── Turns remaining projection ──
@@ -342,7 +370,8 @@ watch(
               <svg
                 v-if="showCacheOverlay && cacheLinePoints"
                 class="cache-line-svg"
-                viewBox="0 0 100 100"
+                :viewBox="cacheViewBox"
+                :style="{ width: cacheOverlayWidthPct }"
                 preserveAspectRatio="none"
               >
                 <polyline
@@ -360,16 +389,16 @@ watch(
             </div>
 
             <div class="events" :class="{ sparse: isSparse }">
-              <div v-for="(item, i) in filtered" :key="'evt-' + item.entry.id" class="event-slot">
+              <div v-for="slot in eventSlots" :key="'evt-' + slot.entryId" class="event-slot">
                 <button
-                  v-if="eventsByEntryId.get(item.entry.id)?.length"
+                  v-if="slot.firstEvent"
                   class="event-marker"
-                  :class="`event-marker--${eventsByEntryId.get(item.entry.id)![0].type}`"
+                  :class="`event-marker--${slot.firstEvent.type}`"
                   type="button"
-                  :aria-label="markerTitle(eventsByEntryId.get(item.entry.id)!, turnNumbers[i] || i + 1)"
-                  v-tooltip="markerTitle(eventsByEntryId.get(item.entry.id)!, turnNumbers[i] || i + 1)"
+                  :aria-label="slot.title"
+                  v-tooltip="slot.title"
                 >
-                  {{ markerLabel(eventsByEntryId.get(item.entry.id)![0].type) }}
+                  {{ markerLabel(slot.firstEvent.type) }}
                 </button>
               </div>
             </div>
@@ -834,8 +863,8 @@ watch(
 // ── Cache hit rate line overlay ──
 .cache-line-svg {
   position: absolute;
-  inset: 0;
-  width: 100%;
+  left: 0;
+  top: 0;
   height: 100%;
   pointer-events: none;
   z-index: 2;

@@ -194,7 +194,7 @@ function resetTreemapDrill() {
   treemapDrillKey.value = null
 }
 
-const totalTokens = computed(() => props.entry?.composition?.reduce((s, c) => s + c.tokens, 0) ?? 0)
+const totalTokens = computed(() => props.entry?.contextInfo.totalTokens ?? 0)
 
 function legendPct(tokens: number): string {
   if (totalTokens.value === 0) return ''

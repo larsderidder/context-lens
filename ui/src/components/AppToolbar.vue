@@ -11,10 +11,12 @@ const sessionIdCopied = ref(false)
 const isInspector = computed(() => store.view === 'inspector' && !!store.selectedSession)
 
 const session = computed(() => store.selectedSession)
+const hasRequests = computed(() => store.totalRequests > 0)
 
 const summary = computed(() => {
-  if (!session.value) return null
-  return store.summaries.find(s => s.id === session.value!.id) ?? null
+  const id = store.selectedSessionId
+  if (!id) return null
+  return store.summaries.find(s => s.id === id) ?? null
 })
 
 function compactDir(path: string | null | undefined): string {
@@ -102,12 +104,6 @@ function sessionIdTitle(id: string): string {
   return `Session ID: ${id} (click to copy)`
 }
 
-function sessionIdClass() {
-  return {
-    copied: sessionIdCopied.value,
-  }
-}
-
 function onSessionIdKeydown(e: KeyboardEvent) {
   if (e.key === 'Enter' || e.key === ' ') {
     e.preventDefault()
@@ -119,16 +115,16 @@ function onSessionIdKeydown(e: KeyboardEvent) {
 <template>
   <header class="toolbar">
     <!-- ═══ Left: brand or back + session context ═══ -->
-    <template v-if="isInspector && session">
-      <button class="toolbar-brand toolbar-brand-btn" @click="goBack">
-        <svg class="logo-mark" width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
-          <circle cx="9" cy="9" r="7.5" fill="none" stroke="var(--accent-blue)" stroke-width="1" opacity="0.35" />
-          <circle cx="9" cy="9" r="4" fill="none" stroke="var(--accent-blue)" stroke-width="1" opacity="0.6" />
-          <circle cx="9" cy="9" r="1.5" fill="var(--accent-blue)" />
-        </svg>
-        <span class="brand-text">Context Lens</span>
-      </button>
+    <button class="toolbar-brand toolbar-brand-btn" @click="goBack">
+      <svg class="logo-mark" width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+        <circle cx="9" cy="9" r="7.5" fill="none" stroke="var(--accent-blue)" stroke-width="1" opacity="0.35" />
+        <circle cx="9" cy="9" r="4" fill="none" stroke="var(--accent-blue)" stroke-width="1" opacity="0.6" />
+        <circle cx="9" cy="9" r="1.5" fill="var(--accent-blue)" />
+      </svg>
+      <span class="brand-text">Context Lens</span>
+    </button>
 
+    <template v-if="isInspector && session">
       <span class="toolbar-sep"></span>
 
       <span class="session-badge" :class="sourceBadgeClass(session.source)">{{ session.source || '?' }}</span>
@@ -140,7 +136,7 @@ function onSessionIdKeydown(e: KeyboardEvent) {
       <span
         v-if="selectedSessionId"
         class="session-id"
-        :class="sessionIdClass()"
+        :class="{ copied: sessionIdCopied }"
         :title="sessionIdTitle(selectedSessionId)"
         role="button"
         tabindex="0"
@@ -149,14 +145,7 @@ function onSessionIdKeydown(e: KeyboardEvent) {
         @keydown="onSessionIdKeydown"
       >
         SID {{ sessionIdDisplay(selectedSessionId) }}
-        <span class="session-id-hint">
-          <template v-if="sessionIdCopied">
-            Copied
-          </template>
-          <template v-else>
-            <i class="i-carbon-copy" /> copy
-          </template>
-        </span>
+        <span v-if="sessionIdCopied" class="session-id-toast">Copied</span>
       </span>
       <span v-if="selectedSessionId" class="toolbar-sep"></span>
       <span class="session-stat">{{ summary?.entryCount ?? session.entries.length }} turns</span>
@@ -168,17 +157,6 @@ function onSessionIdKeydown(e: KeyboardEvent) {
           bad: summary.healthScore.rating === 'poor',
         }">{{ summary.healthScore.overall }}</span>
       </span>
-    </template>
-
-    <template v-else>
-      <button class="toolbar-brand toolbar-brand-btn" @click="goBack">
-        <svg class="logo-mark" width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
-          <circle cx="9" cy="9" r="7.5" fill="none" stroke="var(--accent-blue)" stroke-width="1" opacity="0.35" />
-          <circle cx="9" cy="9" r="4" fill="none" stroke="var(--accent-blue)" stroke-width="1" opacity="0.6" />
-          <circle cx="9" cy="9" r="1.5" fill="var(--accent-blue)" />
-        </svg>
-        <span class="brand-text">Context Lens</span>
-      </button>
     </template>
 
     <!-- ═══ Right: global controls ═══ -->
@@ -203,7 +181,7 @@ function onSessionIdKeydown(e: KeyboardEvent) {
         </span>
       </template>
 
-      <div class="toolbar-dropdown" v-if="store.totalRequests > 0">
+      <div v-if="hasRequests" class="toolbar-dropdown">
         <button class="toolbar-control" @click="showExportMenu = !showExportMenu">
           <i class="i-carbon-download" /> Export
         </button>
@@ -221,7 +199,7 @@ function onSessionIdKeydown(e: KeyboardEvent) {
       </div>
 
       <button
-        v-if="store.totalRequests > 0"
+        v-if="hasRequests"
         class="toolbar-control toolbar-control--danger"
         @click="handleReset"
       >
@@ -337,12 +315,12 @@ function onSessionIdKeydown(e: KeyboardEvent) {
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
-  gap: 5px;
   cursor: pointer;
   transition: color 0.12s;
   text-decoration: underline dotted transparent;
   text-underline-offset: 2px;
   user-select: all;
+  position: relative;
 
   &:hover {
     color: var(--text-secondary);
@@ -357,21 +335,22 @@ function onSessionIdKeydown(e: KeyboardEvent) {
   &:focus-visible { @include focus-ring; }
 }
 
-.session-id-hint {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  color: var(--text-ghost);
-  opacity: 0;
-  transition: opacity 0.12s, color 0.12s;
-
-  i { font-size: 10px; }
-}
-
-.session-id:hover .session-id-hint,
-.session-id:focus-visible .session-id-hint,
-.session-id.copied .session-id-hint {
-  opacity: 1;
+.session-id-toast {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 50%;
+  transform: translateX(-50%);
+  @include mono-text;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--text-primary);
+  background: var(--bg-raised);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  border-radius: var(--radius-sm);
+  padding: 3px 5px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 5;
 }
 
 // ── Right side ──
