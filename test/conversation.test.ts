@@ -121,6 +121,52 @@ describe("extractWorkingDirectory", () => {
     // The fixture doesn't have a working directory, so should be null
     assert.equal(extractWorkingDirectory(info), null);
   });
+
+  it("extracts from Gemini-style structured raw body", () => {
+    const info = {
+      systemPrompts: [],
+      messages: [],
+    } as any;
+    const rawBody = {
+      request: {
+        currentWorkingDirectory: "/home/user/gemini-project",
+      },
+    };
+    assert.equal(
+      extractWorkingDirectory(info, rawBody),
+      "/home/user/gemini-project",
+    );
+  });
+
+  it("extracts from nested workspace root in raw body", () => {
+    const info = {
+      systemPrompts: [],
+      messages: [],
+    } as any;
+    const rawBody = {
+      request: {
+        context: {
+          workspace: {
+            workspaceRoot: "/tmp/build-root",
+          },
+        },
+      },
+    };
+    assert.equal(extractWorkingDirectory(info, rawBody), "/tmp/build-root");
+  });
+
+  it("ignores non-path cwd-looking values in raw body", () => {
+    const info = {
+      systemPrompts: [],
+      messages: [],
+    } as any;
+    const rawBody = {
+      request: {
+        cwd: "project-alpha",
+      },
+    };
+    assert.equal(extractWorkingDirectory(info, rawBody), null);
+  });
 });
 
 describe("extractUserPrompt", () => {

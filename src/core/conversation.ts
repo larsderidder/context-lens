@@ -47,6 +47,7 @@ export function extractReadableText(
  */
 export function extractWorkingDirectory(
   contextInfo: ContextInfo,
+  rawBody?: Record<string, any> | null,
 ): string | null {
   const allText = [
     ...(contextInfo.systemPrompts || []).map((sp) => sp.content),
@@ -70,6 +71,92 @@ export function extractWorkingDirectory(
   match = allText.match(/\bcwd[:\s]+[`"]?([/~][^\s`"'\n]+)/);
   if (match) return match[1];
 
+  // Structured payload fallback (Gemini Code Assist and similar tools may
+  // carry cwd in JSON fields instead of prompt text).
+  const fromBody = findWorkingDirectoryInObject(rawBody ?? null);
+  if (fromBody) return fromBody;
+
+  return null;
+}
+
+function toPathCandidate(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim().replace(/^['"`]|['"`]$/g, "");
+  if (!trimmed) return null;
+  // Accept POSIX, home-relative, or Windows absolute paths.
+  if (/^(\/|~\/|[A-Za-z]:[\\/])/.test(trimmed)) return trimmed;
+  return null;
+}
+
+function findWorkingDirectoryInObject(
+  node: unknown,
+  depth = 0,
+): string | null {
+  if (!node || depth > 8) return null;
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      const found = findWorkingDirectoryInObject(item, depth + 1);
+      if (found) return found;
+    }
+    return null;
+  }
+  if (typeof node !== "object") return null;
+
+  const obj = node as Record<string, unknown>;
+  const preferredKeys = [
+    "workingDirectory",
+    "currentWorkingDirectory",
+    "working_directory",
+    "current_working_directory",
+    "cwd",
+    "workdir",
+    "workspaceRoot",
+    "workspace_root",
+    "projectRoot",
+    "project_root",
+    "rootDir",
+    "root_dir",
+    "sandboxCwd",
+    "sandbox_cwd",
+  ];
+  for (const key of preferredKeys) {
+    const candidate = toPathCandidate(obj[key]);
+    if (candidate) return candidate;
+  }
+
+  // Check common wrapper objects first.
+  const wrappers = [
+    "request",
+    "context",
+    "environment",
+    "session",
+    "workspace",
+    "project",
+    "config",
+    "client",
+    "agent",
+    "metadata",
+  ];
+  for (const key of wrappers) {
+    if (key in obj) {
+      const found = findWorkingDirectoryInObject(obj[key], depth + 1);
+      if (found) return found;
+    }
+  }
+
+  // Generic fallback: key names that strongly imply cwd.
+  for (const [key, value] of Object.entries(obj)) {
+    if (/(^|_)(cwd|workdir|working_?directory|workspace_?root|project_?root|root_dir|sandbox_?cwd)$/i.test(key)) {
+      const candidate = toPathCandidate(value);
+      if (candidate) return candidate;
+    }
+  }
+
+  // Last resort recursive walk over remaining fields.
+  for (const value of Object.values(obj)) {
+    const found = findWorkingDirectoryInObject(value, depth + 1);
+    if (found) return found;
+  }
   return null;
 }
 

@@ -210,7 +210,7 @@ export class Store {
           id: fingerprint,
           label: extractConversationLabel(contextInfo),
           source: resolvedSource || "unknown",
-          workingDirectory: extractWorkingDirectory(contextInfo),
+          workingDirectory: extractWorkingDirectory(contextInfo, rawBody ?? null),
           firstSeen: new Date().toISOString(),
           sessionId: rawSessionId,
         });
@@ -226,7 +226,7 @@ export class Store {
         }
         // Backfill working directory if first request didn't have it
         if (!convo.workingDirectory) {
-          const wd = extractWorkingDirectory(contextInfo);
+          const wd = extractWorkingDirectory(contextInfo, rawBody ?? null);
           if (wd) convo.workingDirectory = wd;
         }
       }
