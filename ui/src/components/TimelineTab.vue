@@ -666,6 +666,7 @@ watch(
 .bars-wrap {
   position: relative;
   height: 140px;
+  width: fit-content;
   min-width: min-content;
 
   &.sparse {
