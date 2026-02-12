@@ -1,6 +1,6 @@
 # LHAR Format
 
-**LHAR** (LLM HTTP Archive) is to LLM API calls what HAR is to web traffic: a structured format for recording, analyzing, and sharing context window interactions.
+**LHAR** (LLM HTTP Archive) is to LLM API calls what HAR is for web traffic: a structured format for recording, analyzing, and sharing context window interactions.
 
 Context Lens exports each session as an `.lhar` file. You can load these into other tools, build your own analyzers, or keep them as debugging artifacts.
 
@@ -20,10 +20,12 @@ For tools that need wrapped JSON, there's also `.lhar.json`:
 
 ```json
 {
-  "version": "0.1.0",
-  "creator": {...},
-  "sessions": [...],
-  "entries": [...]
+  "lhar": {
+    "version": "0.1.0",
+    "creator": { "name": "context-lens", "version": "0.2.1" },
+    "sessions": [...],
+    "entries": [...]
+  }
 }
 ```
 
@@ -38,49 +40,51 @@ Identifies the trace and declares metadata:
 ```json
 {
   "type": "session",
-  "trace_id": "550e8400-e29b-41d4-a716-446655440000",
+  "trace_id": "6590f363c1bc200989bd4ed1956b00bc",
   "started_at": "2026-02-10T12:00:00.000Z",
   "tool": "claude",
   "model": "claude-sonnet-4-20250514"
 }
 ```
 
-- `trace_id`: unique identifier for the entire conversation session
+- `trace_id`: unique identifier for the entire conversation session (SHA-256 hash of the internal conversation ID, truncated to 32 hex chars)
 - `started_at`: ISO 8601 timestamp of first API call
-- `tool`: detected tool name (claude, aider, pi, etc)
+- `tool`: detected tool name (`claude`, `aider`, `codex`, `pi`, etc.)
 - `model`: primary model used in session
 
 ### Entry Record
 
-One API call:
+One API call. Top-level fields:
 
 ```json
 {
   "type": "entry",
-  "id": "req_123",
-  "trace_id": "550e8400-e29b-41d4-a716-446655440000",
-  "span_id": "span_001",
+  "id": "4bac36b9-12b6-4abe-b503-510e09a32559",
+  "trace_id": "6590f363c1bc200989bd4ed1956b00bc",
+  "span_id": "4446237b013c705b",
   "parent_span_id": null,
   "timestamp": "2026-02-10T12:00:01.000Z",
-  "sequence": 0,
+  "sequence": 1,
   "source": {...},
   "gen_ai": {...},
+  "usage_ext": {...},
   "http": {...},
-  "context_lens": {...}
+  "timings": {...},
+  "transfer": {...},
+  "context_lens": {...},
+  "raw": {...}
 }
 ```
 
-Fields:
-
-- `id`: unique entry identifier
+- `id`: UUID for this entry
 - `trace_id`: links back to session
 - `span_id` / `parent_span_id`: OpenTelemetry-style span hierarchy for subagents
-- `timestamp`: when request was sent
-- `sequence`: turn number in conversation (0-indexed)
+- `timestamp`: when the request was captured
+- `sequence`: turn number within the conversation (1-indexed)
 
 ## Namespaces
 
-Entry data is grouped into four namespaces:
+Entry data is grouped into seven namespaces.
 
 ### `source`
 
@@ -88,24 +92,27 @@ Where the request came from:
 
 ```json
 {
-  "tool": "aider",
-  "tool_version": "0.73.1",
+  "tool": "claude",
+  "tool_version": null,
   "agent_role": "main",
   "collector": "context-lens",
-  "collector_version": "0.1.0"
+  "collector_version": "0.2.1"
 }
 ```
 
-- `agent_role`: `main`, `subagent`, or `unknown`
-- `collector`: always "context-lens" for files from this tool
+- `tool`: detected tool name
+- `tool_version`: tool version if detectable, otherwise `null`
+- `agent_role`: `main` or `subagent` (the most frequent agent key in the conversation is considered "main")
+- `collector`: always `context-lens`
+- `collector_version`: Context Lens version that captured this entry
 
 ### `gen_ai`
 
-LLM-specific fields (model, tokens, cost):
+LLM request/response metadata. Follows [OpenTelemetry GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/) where possible:
 
 ```json
 {
-  "system": "You are a helpful coding assistant...",
+  "system": "anthropic",
   "request": {
     "model": "claude-sonnet-4-20250514",
     "max_tokens": 8192,
@@ -118,110 +125,179 @@ LLM-specific fields (model, tokens, cost):
     "finish_reasons": ["end_turn"]
   },
   "usage": {
-    "input_tokens": 1234,
+    "input_tokens": 12340,
     "output_tokens": 567,
-    "cache_read_tokens": 0,
-    "cache_write_tokens": 0
-  },
-  "cost": {
-    "input": 0.00370,
-    "output": 0.00851,
-    "cache_read": 0.0,
-    "cache_write": 0.0,
-    "total": 0.01221
+    "total_tokens": 12907
   }
 }
 ```
 
-- `system`: combined system prompt (all system blocks concatenated)
-- `usage`: token counts from provider response
-- `cost`: estimated USD cost (based on published rates)
+- `system`: provider identifier (`anthropic`, `openai`, `google`, etc.)
+- `request.model`: model as requested
+- `response.model`: model as reported by the API (may differ, `null` if unavailable)
+- `usage`: standard token counts. `input_tokens` is the base input count (excluding cache tokens). `total_tokens` = `input_tokens` + `output_tokens`
+
+### `usage_ext`
+
+Provider-specific usage extensions that don't fit the standard GenAI conventions:
+
+```json
+{
+  "cache_read_tokens": 11000,
+  "cache_write_tokens": 1200,
+  "cost_usd": 0.0234
+}
+```
+
+- `cache_read_tokens`: tokens served from prompt cache
+- `cache_write_tokens`: tokens written to prompt cache
+- `cost_usd`: estimated total cost in USD based on published model pricing, or `null` if unknown
 
 ### `http`
 
-Low-level HTTP capture:
+HTTP transport metadata:
 
 ```json
 {
   "method": "POST",
   "url": "https://api.anthropic.com/v1/messages",
-  "status": 200,
-  "headers": {
-    "request": {...},
-    "response": {...}
+  "status_code": 200,
+  "api_format": "anthropic-messages",
+  "stream": true,
+  "request_headers": {
+    "content-type": "application/json",
+    "user-agent": "claude-cli/2.1.37 (external, cli)"
   },
-  "body": {
-    "request": {...},
-    "response": {...}
-  },
-  "timings": {
-    "send_ms": 12,
-    "wait_ms": 1834,
-    "receive_ms": 45,
-    "total_ms": 1891,
-    "tokens_per_second": 17.2
+  "response_headers": {
+    "content-type": "text/event-stream",
+    "request-id": "req_011CXxogyDdeg1CmKZhj3RnY"
   }
 }
 ```
 
-- Headers are redacted (no API keys)
-- Bodies are the raw JSON payloads
-- Timings track latency and throughput
+- `api_format`: detected API format (`anthropic-messages`, `openai-chat`, `openai-responses`, `google-gemini`, etc.)
+- `stream`: whether the request used streaming (SSE)
+- Headers are redacted: API keys and other sensitive headers are stripped. Controlled by the `CONTEXT_LENS_PRIVACY` setting.
 
-### `context_lens`
+### `timings`
 
-Context Lens-specific analysis:
+Request timing breakdown (top-level, not nested inside `http`):
 
 ```json
 {
-  "composition": [
-    {"category": "system_prompt", "tokens": 1523, "pct": 31.2, "count": 1},
-    {"category": "tool_definitions", "tokens": 2891, "pct": 59.3, "count": 12},
-    {"category": "user_text", "tokens": 463, "pct": 9.5, "count": 1}
-  ],
-  "findings": [
-    {
-      "type": "large_tool_result",
-      "severity": "warning",
-      "message": "Tool result 'read_file' is 45234 tokens (92% of response)",
-      "details": {...}
-    }
-  ]
+  "send_ms": 12,
+  "wait_ms": 1834,
+  "receive_ms": 2450,
+  "total_ms": 4296,
+  "tokens_per_second": 17.2
 }
 ```
 
-- `composition`: breakdown of what's in the context window (categories sorted by token count descending)
-- `findings`: detected issues: large results, unused tools, overflow risk, compaction
+- `send_ms`: time to send the request
+- `wait_ms`: time waiting for first byte
+- `receive_ms`: time receiving the response body
+- `total_ms`: end-to-end duration
+- `tokens_per_second`: output throughput (output tokens / receive time), `null` if not applicable
 
-Composition categories:
+Can be `null` if timing data wasn't captured.
 
-- `system_prompt`: system messages and instructions
-- `tool_definitions`: function/tool schemas
-- `tool_results`: outputs from tool executions
-- `tool_calls`: assistant requests to call tools
-- `assistant_text`: model-generated text
-- `user_text`: user messages
-- `thinking`: extended thinking / reasoning blocks
-- `system_injections`: dynamic system reminders (e.g. `<system-reminder>`)
-- `images`: image content blocks
-- `cache_markers`: prompt caching control blocks
-- `other`: unclassified content
+### `transfer`
+
+Wire-level transfer sizes:
+
+```json
+{
+  "request_bytes": 31456,
+  "response_bytes": 12890,
+  "compressed": false
+}
+```
+
+### `context_lens`
+
+Context Lens analysis. This namespace contains data specific to Context Lens and is not part of any standard:
+
+```json
+{
+  "window_size": 200000,
+  "utilization": 0.235,
+  "system_tokens": 1157,
+  "tools_tokens": 1252,
+  "messages_tokens": 44591,
+  "composition": [
+    {"category": "tool_definitions", "tokens": 1263, "pct": 51.9, "count": 1},
+    {"category": "system_prompt", "tokens": 1168, "pct": 48.0, "count": 2},
+    {"category": "user_text", "tokens": 4, "pct": 0.2, "count": 1}
+  ],
+  "growth": {
+    "tokens_added_this_turn": 3421,
+    "cumulative_tokens": 47000,
+    "compaction_detected": false
+  },
+  "security": {
+    "alerts": [],
+    "summary": { "high": 0, "medium": 0, "info": 0 }
+  }
+}
+```
+
+**Window metrics:**
+
+- `window_size`: context window limit for the model (tokens)
+- `utilization`: fraction of window used (0.0 to 1.0)
+- `system_tokens`, `tools_tokens`, `messages_tokens`: token breakdown by section
+
+**Composition:** breakdown of what fills the context window, sorted by token count descending:
+
+- `category`: one of `system_prompt`, `tool_definitions`, `tool_results`, `tool_calls`, `assistant_text`, `user_text`, `thinking`, `system_injections`, `images`, `cache_markers`, `other`
+- `tokens`: token count for this category
+- `pct`: percentage of total tokens
+- `count`: number of content blocks in this category
+
+**Growth:** turn-over-turn context tracking:
+
+- `tokens_added_this_turn`: delta from previous same-role entry, `null` for first turn
+- `cumulative_tokens`: total tokens at this point
+- `compaction_detected`: `true` if tokens decreased (the tool likely summarized/pruned context)
+
+**Security:** prompt injection scanning results:
+
+- `alerts[]`: detected patterns with `message_index`, `role`, `tool_name`, `severity` (`high`/`medium`/`info`), `pattern`, `match`, `offset`, `length`
+- `summary`: count of alerts by severity
+
+### `raw`
+
+Raw request/response bodies. Only populated when `CONTEXT_LENS_PRIVACY=full`:
+
+```json
+{
+  "request_body": { "model": "claude-sonnet-4-20250514", "messages": [...] },
+  "response_body": { "id": "msg_...", "content": [...] }
+}
+```
+
+Both fields are `null` under the default `standard` privacy level. `response_body` can be a string (raw SSE chunks) or an object (parsed JSON).
 
 ## OpenTelemetry Mapping
 
-LHAR is designed to map cleanly onto OpenTelemetry traces:
+LHAR is designed to map onto OpenTelemetry traces:
 
-- `trace_id` → trace ID
-- `span_id` → span ID
-- `parent_span_id` → parent span ID
-- `timestamp` → span start time
-- `http.timings.total_ms` → span duration
+| LHAR field | OpenTelemetry concept |
+|---|---|
+| `trace_id` | Trace ID |
+| `span_id` | Span ID |
+| `parent_span_id` | Parent Span ID |
+| `timestamp` | Span start time |
+| `timings.total_ms` | Span duration |
+| `gen_ai.system` | `gen_ai.system` attribute |
+| `gen_ai.request.model` | `gen_ai.request.model` attribute |
+| `gen_ai.usage.*` | `gen_ai.usage.*` metrics |
 
-This makes LHAR files compatible with observability stacks (Jaeger, Honeycomb, etc) if you write an adapter.
+The `gen_ai` namespace intentionally follows the [OpenTelemetry GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/). Provider-specific extensions (cache tokens, cost) live in `usage_ext` to keep the standard namespace clean.
 
 ## Use Cases
 
-- **Debugging context bloat:** load an `.lhar` file into a custom analyzer to find what's eating tokens
+- **Debugging context bloat:** load an `.lhar` file to find what's eating tokens
 - **Cost analysis:** aggregate costs across sessions, group by model/tool/agent
 - **Sharing repros:** send an `.lhar` file instead of pasting logs
 - **Building tools:** parse LHAR to feed data into your own visualizations or automation
@@ -233,25 +309,24 @@ The machine-readable source of truth is `schema/lhar.schema.json` (JSON Schema d
 
 ```bash
 # TypeScript
-pnpm add -g json-schema-to-typescript
-json-schema-to-typescript schema/lhar.schema.json -o lhar-types.ts
+npx json-schema-to-typescript schema/lhar.schema.json -o lhar-types.ts
 
-# Python (with dataclasses)
+# Python
 pip install datamodel-code-generator
 datamodel-codegen --input schema/lhar.schema.json --output lhar_types.py
 ```
 
-Context Lens itself uses the generated TypeScript types (`src/lhar-types.generated.ts`).
+Context Lens uses the generated TypeScript types (`src/lhar-types.generated.ts`).
 
 ## File Locations
 
 LHAR files are written to `data/` by default:
 
-- `data/state.jsonl`: combined state (all sessions, used for persistence)
-- `data/<trace_id>.lhar`: individual session exports
+- `data/<source>-<trace>.lhar`: individual session files (append-only, one per conversation)
+- `data/state.jsonl`: combined state used for persistence (not LHAR format)
 
 ## Version
 
 Current LHAR version: **0.1.0**
 
-This is early. Format may change. If you're building on LHAR, check the schema version field (`version`) and handle mismatches gracefully.
+This is early. The format may change. If you're building on LHAR, check the schema version field and handle mismatches gracefully.
