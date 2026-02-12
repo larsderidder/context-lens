@@ -11,6 +11,7 @@ export {
   extractConversationLabel,
   extractReadableText,
   extractSessionId,
+  extractToolsUsed,
   extractUserPrompt,
   extractWorkingDirectory,
 } from "./core/conversation.js";

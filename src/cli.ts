@@ -3,7 +3,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import fs from "node:fs";
 import net from "node:net";
-import { platform } from "node:os";
+import { platform, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -148,6 +148,7 @@ if (filteredArgs.length === 0) {
   let serverReady = false;
   let mitmReady = false;
   let childProcess: ChildProcess | null = null;
+  let piAgentDirToCleanup: string | null = null;
   let shouldShutdownProxy = false;
   let cleanupDidRun = false;
 
@@ -287,6 +288,12 @@ if (filteredArgs.length === 0) {
       ...toolConfig.childEnv,
     };
 
+    if (commandName === "pi") {
+      childEnv.PI_CODING_AGENT_DIR = preparePiAgentDir(
+        childEnv.PI_CODING_AGENT_DIR,
+      );
+    }
+
     // Spawn the child process with inherited stdio (interactive)
     // No shell: true. Avoids intermediate process that breaks signal delivery
     childProcess = spawn(commandName, allArgs, {
@@ -303,6 +310,80 @@ if (filteredArgs.length === 0) {
     childProcess.on("exit", (code, signal) => {
       cleanup(signal ? 128 + (signal === "SIGINT" ? 2 : 15) : code || 0);
     });
+  }
+
+  function preparePiAgentDir(targetDirEnv: string | undefined): string {
+    const dirPrefix =
+      targetDirEnv && targetDirEnv.length > 0
+        ? targetDirEnv
+        : join(tmpdir(), "context-lens-pi-agent-");
+    const targetDir = fs.mkdtempSync(dirPrefix);
+    const homeDir = process.env.HOME || "";
+    const sourceDir = join(homeDir, ".pi", "agent");
+    const sourceModelsPath = join(sourceDir, "models.json");
+    const targetModelsPath = join(targetDir, "models.json");
+
+    try {
+      // Keep temp agent dir private to this user.
+      fs.chmodSync(targetDir, 0o700);
+      piAgentDirToCleanup = targetDir;
+
+      if (fs.existsSync(sourceDir)) {
+        for (const entry of fs.readdirSync(sourceDir, { withFileTypes: true })) {
+          if (entry.name === "models.json") continue;
+          const src = join(sourceDir, entry.name);
+          const dst = join(targetDir, entry.name);
+          fs.symlinkSync(src, dst);
+        }
+      }
+
+      let modelsConfig: Record<string, unknown> = {};
+      if (fs.existsSync(sourceModelsPath)) {
+        try {
+          const parsed = JSON.parse(fs.readFileSync(sourceModelsPath, "utf8"));
+          if (parsed && typeof parsed === "object") {
+            modelsConfig = parsed as Record<string, unknown>;
+          }
+        } catch {
+          console.error(
+            "Warning: ~/.pi/agent/models.json is not valid JSON; using proxy-only overrides",
+          );
+        }
+      }
+
+      const providers =
+        modelsConfig.providers &&
+        typeof modelsConfig.providers === "object" &&
+        !Array.isArray(modelsConfig.providers)
+          ? { ...(modelsConfig.providers as Record<string, unknown>) }
+          : {};
+
+      const proxyBaseUrl = `${CLI_CONSTANTS.PROXY_URL}/pi`;
+      for (const key of [
+        "anthropic",
+        "openai",
+        "google-gemini-cli",
+        "google-antigravity",
+      ]) {
+        const existing = providers[key];
+        providers[key] =
+          existing && typeof existing === "object" && !Array.isArray(existing)
+            ? { ...(existing as Record<string, unknown>), baseUrl: proxyBaseUrl }
+            : { baseUrl: proxyBaseUrl };
+      }
+
+      fs.writeFileSync(
+        targetModelsPath,
+        `${JSON.stringify({ ...modelsConfig, providers }, null, 2)}\n`,
+      );
+      return targetDir;
+    } catch (err: unknown) {
+      console.error(
+        "Warning: failed to prepare Pi proxy config:",
+        err instanceof Error ? err.message : String(err),
+      );
+      return targetDir;
+    }
   }
 
   // Open browser (cross-platform)
@@ -331,6 +412,17 @@ if (filteredArgs.length === 0) {
 
     if (mitmProcess && !mitmProcess.killed) {
       mitmProcess.kill();
+    }
+
+    if (piAgentDirToCleanup) {
+      try {
+        fs.rmSync(piAgentDirToCleanup, { recursive: true, force: true });
+      } catch (err: unknown) {
+        console.error(
+          "Warning: failed to clean up temporary Pi config dir:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
     }
 
     if (

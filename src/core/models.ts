@@ -82,21 +82,34 @@ export const MODEL_PRICING: Record<string, [number, number]> = {
 /**
  * Estimate cost in USD for a request/response token pair using `MODEL_PRICING`.
  *
+ * Cache pricing (Anthropic):
+ * - Cache reads: 10% of base input price (0.1x)
+ * - Cache writes: 25% of base input price (0.25x)
+ *
  * @param model - Model identifier (substring matched against known keys).
- * @param inputTokens - Input/prompt tokens.
+ * @param inputTokens - Input/prompt tokens (non-cached).
  * @param outputTokens - Output/completion tokens.
+ * @param cacheReadTokens - Cache read tokens (charged at 10% for Anthropic).
+ * @param cacheWriteTokens - Cache write tokens (charged at 25% for Anthropic).
  * @returns Cost in USD, rounded to 6 decimals; `null` if the model is unknown.
  */
 export function estimateCost(
   model: string,
   inputTokens: number,
   outputTokens: number,
+  cacheReadTokens = 0,
+  cacheWriteTokens = 0,
 ): number | null {
   for (const [key, [inp, out]] of Object.entries(MODEL_PRICING)) {
     if (model.includes(key)) {
+      // Anthropic models have cache pricing (10% for reads, 25% for writes)
+      const isClaude = key.startsWith("claude-");
+      const cacheReadCost = isClaude ? cacheReadTokens * inp * 0.1 : 0;
+      const cacheWriteCost = isClaude ? cacheWriteTokens * inp * 0.25 : 0;
+
       return (
         Math.round(
-          ((inputTokens * inp + outputTokens * out) / 1_000_000) * 1_000_000,
+          ((inputTokens * inp + outputTokens * out + cacheReadCost + cacheWriteCost) / 1_000_000) * 1_000_000,
         ) / 1_000_000
       );
     }

@@ -10,6 +10,7 @@ const __dirname = dirname(__filename);
 const PROXY_URL = "http://localhost:4040";
 const MITM_PORT = 8080;
 const MITM_PROXY_URL = `http://localhost:${MITM_PORT}`;
+const PI_AGENT_DIR_PREFIX = "/tmp/context-lens-pi-agent-";
 
 const TOOL_CONFIG: Record<string, ToolConfig> = {
   claude: {
@@ -51,6 +52,16 @@ const TOOL_CONFIG: Record<string, ToolConfig> = {
     serverEnv: {},
     needsMitm: false,
   },
+  pi: {
+    // Pi ignores standard base URL env vars. We point it at a temporary agent
+    // directory where cli.ts writes a proxy-aware models.json.
+    childEnv: {
+      PI_CODING_AGENT_DIR: PI_AGENT_DIR_PREFIX,
+    },
+    extraArgs: [],
+    serverEnv: {},
+    needsMitm: false,
+  },
 };
 
 export function getToolConfig(toolName: string): ToolConfig {
@@ -72,6 +83,7 @@ export const CLI_CONSTANTS = {
   PROXY_URL,
   MITM_PORT,
   MITM_PROXY_URL,
+  PI_AGENT_DIR_PREFIX,
   // Resolved relative to compiled output (dist/ or dist-test/), matching cli.ts behavior.
   MITM_ADDON_PATH: join(__dirname, "..", "mitm_addon.py"),
 } as const;

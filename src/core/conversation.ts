@@ -206,3 +206,25 @@ export function extractConversationLabel(contextInfo: ContextInfo): string {
   }
   return "Unnamed conversation";
 }
+
+/**
+ * Extract all tool names used in a conversation's messages.
+ *
+ * Scans content blocks for tool_use blocks and collects their names.
+ *
+ * @param messages - Array of messages from one or more entries.
+ * @returns Set of tool names that were used.
+ */
+export function extractToolsUsed(messages: ParsedMessage[]): Set<string> {
+  const toolsUsed = new Set<string>();
+  for (const msg of messages) {
+    if (msg.contentBlocks) {
+      for (const block of msg.contentBlocks) {
+        if (block.type === "tool_use" && "name" in block && block.name) {
+          toolsUsed.add(block.name);
+        }
+      }
+    }
+  }
+  return toolsUsed;
+}
