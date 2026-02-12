@@ -31,6 +31,131 @@ function makeStore(opts?: Partial<{ maxSessions: number }>): {
 }
 
 describe("Store", () => {
+  it("groups turns into one conversation when session ID is stable", () => {
+    const { store, cleanup } = makeStore();
+
+    const sessionId = "session_44444444-4444-4444-4444-444444444444";
+    const body1 = {
+      model: "claude-sonnet-4",
+      metadata: { user_id: sessionId },
+      messages: [{ role: "user", content: "first prompt" }],
+    };
+    const body2 = {
+      model: "claude-sonnet-4",
+      metadata: { user_id: sessionId },
+      messages: [{ role: "user", content: "second prompt with different text" }],
+    };
+
+    const ci1 = parseContextInfo("anthropic", body1, "anthropic-messages");
+    const ci2 = parseContextInfo("anthropic", body2, "anthropic-messages");
+
+    const e1 = store.storeRequest(
+      ci1,
+      {
+        model: "claude-sonnet-4",
+        stop_reason: "end_turn",
+        usage: { input_tokens: 10, output_tokens: 3 },
+      } as any,
+      "claude",
+      body1,
+    );
+    const e2 = store.storeRequest(
+      ci2,
+      {
+        model: "claude-sonnet-4",
+        stop_reason: "end_turn",
+        usage: { input_tokens: 12, output_tokens: 4 },
+      } as any,
+      "claude",
+      body2,
+    );
+
+    assert.ok(e1.conversationId, "first turn should be grouped");
+    assert.equal(e2.conversationId, e1.conversationId);
+    assert.equal(store.getConversations().size, 1);
+    assert.equal(store.getCapturedRequests().length, 2);
+
+    cleanup();
+  });
+
+  it("groups responses turns using previous_response_id chaining", () => {
+    const { store, cleanup } = makeStore();
+
+    const body1 = {
+      model: "gpt-4o",
+      input: [{ role: "user", content: "first turn" }],
+    };
+    const body2 = {
+      model: "gpt-4o",
+      previous_response_id: "resp_abc",
+      input: [{ role: "user", content: "follow-up turn" }],
+    };
+
+    const ci1 = parseContextInfo("openai", body1, "responses");
+    const ci2 = parseContextInfo("openai", body2, "responses");
+
+    const e1 = store.storeRequest(
+      ci1,
+      {
+        id: "resp_abc",
+        model: "gpt-4o",
+        usage: { prompt_tokens: 50, completion_tokens: 10 },
+        choices: [{ finish_reason: "stop" }],
+      } as any,
+      "codex",
+      body1,
+    );
+    const e2 = store.storeRequest(
+      ci2,
+      {
+        id: "resp_def",
+        model: "gpt-4o",
+        usage: { prompt_tokens: 20, completion_tokens: 8 },
+        choices: [{ finish_reason: "stop" }],
+      } as any,
+      "codex",
+      body2,
+    );
+
+    assert.ok(e1.conversationId, "first turn should be grouped");
+    assert.equal(e2.conversationId, e1.conversationId);
+    assert.equal(store.getConversations().size, 1);
+
+    cleanup();
+  });
+
+  it("uses API usage as authoritative total tokens and computes cache-aware cost", () => {
+    const { store, cleanup } = makeStore();
+
+    const body = {
+      model: "claude-sonnet-4-20250514",
+      messages: [{ role: "user", content: "x".repeat(10_000) }],
+    };
+    const ci = parseContextInfo("anthropic", body, "anthropic-messages");
+    const entry = store.storeRequest(
+      ci,
+      {
+        model: "claude-sonnet-4-20250514",
+        stop_reason: "end_turn",
+        usage: {
+          input_tokens: 100,
+          output_tokens: 200,
+          cache_read_input_tokens: 900,
+          cache_creation_input_tokens: 400,
+        },
+      } as any,
+      "claude",
+      body,
+    );
+
+    // Authoritative context total is input + cache read + cache write.
+    assert.equal(entry.contextInfo.totalTokens, 1400);
+    // 100*$3/M + 200*$15/M + 900*$0.3/M + 400*$0.75/M = $0.00387
+    assert.equal(entry.costUsd, 0.00387);
+
+    cleanup();
+  });
+
   it("stores, compacts, and increments revision", async () => {
     const { store, cleanup } = makeStore();
 
@@ -155,6 +280,166 @@ describe("Store", () => {
     assert.ok(store2.getConversations().size >= 1);
 
     cleanup();
+  });
+
+  it("backfills totalTokens from OpenAI prompt/completion usage on loadState()", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "context-lens-test-"));
+    const dataDir = path.join(dir, "data");
+    mkdirSync(dataDir, { recursive: true });
+    const stateFile = path.join(dataDir, "state.jsonl");
+
+    const convoLine = JSON.stringify({
+      type: "conversation",
+      data: {
+        id: "openai-convo",
+        label: "openai",
+        source: "codex",
+        workingDirectory: null,
+        firstSeen: "2026-01-01T00:00:00.000Z",
+        sessionId: null,
+      },
+    });
+
+    const entryLine = JSON.stringify({
+      type: "entry",
+      data: {
+        id: 1,
+        timestamp: "2026-01-01T00:00:01.000Z",
+        contextInfo: {
+          provider: "openai",
+          apiFormat: "responses",
+          model: "gpt-4o",
+          systemTokens: 10,
+          toolsTokens: 5,
+          messagesTokens: 85,
+          totalTokens: 9999, // intentionally wrong
+          systemPrompts: [],
+          tools: [],
+          messages: [{ role: "user", content: "hello", tokens: 85, contentBlocks: null }],
+        },
+        response: {
+          model: "gpt-4o",
+          usage: { prompt_tokens: 120, completion_tokens: 30 },
+          choices: [{ finish_reason: "stop" }],
+        },
+        contextLimit: 128_000,
+        source: "codex",
+        conversationId: "openai-convo",
+        agentKey: null,
+        agentLabel: "openai",
+        httpStatus: 200,
+        timings: null,
+        requestBytes: 100,
+        responseBytes: 100,
+        targetUrl: null,
+        composition: [],
+        costUsd: null,
+        healthScore: null,
+        securityAlerts: [],
+        usage: { inputTokens: 120, outputTokens: 30, cacheReadTokens: 0, cacheWriteTokens: 0 },
+        responseModel: null,
+        stopReason: null,
+      },
+    });
+
+    writeFileSync(stateFile, convoLine + "\n" + entryLine + "\n");
+
+    const store = new Store({
+      dataDir,
+      stateFile,
+      maxSessions: 10,
+      maxCompactMessages: 60,
+    });
+    store.loadState();
+
+    const ci = store.getCapturedRequests()[0].contextInfo;
+    assert.equal(ci.totalTokens, 120); // prompt only; completion is output, not context window input
+
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {}
+  });
+
+  it("backfills totalTokens from Gemini usageMetadata on loadState()", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "context-lens-test-"));
+    const dataDir = path.join(dir, "data");
+    mkdirSync(dataDir, { recursive: true });
+    const stateFile = path.join(dataDir, "state.jsonl");
+
+    const convoLine = JSON.stringify({
+      type: "conversation",
+      data: {
+        id: "gemini-convo",
+        label: "gemini",
+        source: "gemini",
+        workingDirectory: null,
+        firstSeen: "2026-01-01T00:00:00.000Z",
+        sessionId: null,
+      },
+    });
+
+    const entryLine = JSON.stringify({
+      type: "entry",
+      data: {
+        id: 1,
+        timestamp: "2026-01-01T00:00:01.000Z",
+        contextInfo: {
+          provider: "gemini",
+          apiFormat: "gemini",
+          model: "gemini-2.0-flash",
+          systemTokens: 20,
+          toolsTokens: 10,
+          messagesTokens: 70,
+          totalTokens: 7777, // intentionally wrong
+          systemPrompts: [],
+          tools: [],
+          messages: [{ role: "user", content: "hello", tokens: 70, contentBlocks: null }],
+        },
+        response: {
+          modelVersion: "gemini-2.0-flash",
+          usageMetadata: {
+            promptTokenCount: 200,
+            candidatesTokenCount: 40,
+            cachedContentTokenCount: 50,
+          },
+          candidates: [{ finishReason: "STOP" }],
+        },
+        contextLimit: 1_048_576,
+        source: "gemini",
+        conversationId: "gemini-convo",
+        agentKey: null,
+        agentLabel: "gemini",
+        httpStatus: 200,
+        timings: null,
+        requestBytes: 100,
+        responseBytes: 100,
+        targetUrl: null,
+        composition: [],
+        costUsd: null,
+        healthScore: null,
+        securityAlerts: [],
+        usage: { inputTokens: 200, outputTokens: 40, cacheReadTokens: 50, cacheWriteTokens: 0 },
+        responseModel: null,
+        stopReason: null,
+      },
+    });
+
+    writeFileSync(stateFile, convoLine + "\n" + entryLine + "\n");
+
+    const store = new Store({
+      dataDir,
+      stateFile,
+      maxSessions: 10,
+      maxCompactMessages: 60,
+    });
+    store.loadState();
+
+    const ci = store.getCapturedRequests()[0].contextInfo;
+    assert.equal(ci.totalTokens, 250); // prompt + cached content
+
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {}
   });
 
   it("migrates inflated image token counts on loadState()", () => {
@@ -405,7 +690,7 @@ describe("Store", () => {
             },
           ],
         },
-        response: { usage: { input_tokens: 50, output_tokens: 20 } },
+        response: { usage: { input_tokens: 175, output_tokens: 20 } },
         contextLimit: 200_000,
         source: "claude",
         conversationId: "test-convo-2",
@@ -420,7 +705,7 @@ describe("Store", () => {
         costUsd: null,
         healthScore: null,
         securityAlerts: [],
-        usage: { inputTokens: 50, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0 },
+        usage: { inputTokens: 175, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0 },
         responseModel: null,
         stopReason: null,
       },

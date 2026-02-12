@@ -64,4 +64,42 @@ describe("estimateCost", () => {
     assert.equal(miniCost, 1.1); // $1.10/M
     assert.equal(fullCost, 10); // $10/M
   });
+
+  it("calculates cache read cost at 10% for Claude models", () => {
+    // Claude Sonnet 4: base input = $3/M
+    // 100K regular input @ $3/M = $0.30
+    // 900K cache read @ $0.30/M (10% of $3) = $0.27
+    // Total = $0.57
+    const cost = estimateCost("claude-sonnet-4-20250514", 100_000, 0, 900_000, 0);
+    assert.equal(cost, 0.57);
+  });
+
+  it("calculates cache write cost at 25% for Claude models", () => {
+    // Claude Sonnet 4: base input = $3/M
+    // 100K regular input @ $3/M = $0.30
+    // 400K cache write @ $0.75/M (25% of $3) = $0.30
+    // Total = $0.60
+    const cost = estimateCost("claude-sonnet-4-20250514", 100_000, 0, 0, 400_000);
+    assert.equal(cost, 0.60);
+  });
+
+  it("combines all token types correctly for Claude", () => {
+    // Claude Opus 4: input = $15/M, output = $75/M
+    // 50K regular input @ $15/M = $0.75
+    // 100K cache read @ $1.50/M (10%) = $0.15
+    // 50K cache write @ $3.75/M (25%) = $0.1875
+    // 10K output @ $75/M = $0.75
+    // Total = $1.8375
+    const cost = estimateCost("claude-opus-4-20250514", 50_000, 10_000, 100_000, 50_000);
+    assert.equal(cost, 1.8375);
+  });
+
+  it("ignores cache tokens for non-Claude models", () => {
+    // GPT-4o-mini doesn't have cache pricing in our model
+    // Should only charge for input/output, not cache
+    const cost = estimateCost("gpt-4o-mini", 100_000, 10_000, 50_000, 50_000);
+    // 100K input @ $0.15/M = $0.015, 10K output @ $0.60/M = $0.006
+    // Cache tokens should not add cost
+    assert.equal(cost, 0.021);
+  });
 });

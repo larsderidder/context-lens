@@ -27,6 +27,13 @@ describe("cli-utils", () => {
     assert.equal(codex.needsMitm, true);
     assert.equal(codex.childEnv.https_proxy, CLI_CONSTANTS.MITM_PROXY_URL);
     assert.ok(String(codex.childEnv.SSL_CERT_FILE).includes(".mitmproxy"));
+
+    const pi = getToolConfig("pi");
+    assert.equal(pi.needsMitm, false);
+    assert.equal(
+      pi.childEnv.PI_CODING_AGENT_DIR,
+      CLI_CONSTANTS.PI_AGENT_DIR_PREFIX,
+    );
   });
 
   it("falls back for unknown tools", () => {

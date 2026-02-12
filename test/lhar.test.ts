@@ -236,6 +236,102 @@ describe("analyzeComposition", () => {
       "should have images",
     );
   });
+
+  it("fuzzes mixed anthropic payloads and preserves composition invariants", () => {
+    // Deterministic pseudo-random generator to keep this test reproducible.
+    let seed = 0x1234abcd;
+    const next = (): number => {
+      seed = (1664525 * seed + 1013904223) >>> 0;
+      return seed / 0x100000000;
+    };
+    const pick = <T>(arr: T[]): T => arr[Math.floor(next() * arr.length)];
+
+    const makeBlock = (): Record<string, any> => {
+      const t = pick([
+        "text",
+        "input_text",
+        "tool_use",
+        "tool_result",
+        "thinking",
+        "image",
+      ]);
+      if (t === "text" || t === "input_text") {
+        return { type: t, text: `txt-${Math.floor(next() * 10_000)}` };
+      }
+      if (t === "tool_use") {
+        return {
+          type: "tool_use",
+          id: `toolu_${Math.floor(next() * 1000)}`,
+          name: "search_docs",
+          input: { q: "hello" },
+        };
+      }
+      if (t === "tool_result") {
+        return {
+          type: "tool_result",
+          tool_use_id: `toolu_${Math.floor(next() * 1000)}`,
+          content: [
+            { type: "text", text: "ok" },
+            ...(next() > 0.7 ? [{ type: "image" }] : []),
+          ],
+        };
+      }
+      if (t === "thinking") {
+        return { type: "thinking", thinking: "chain-of-thought marker" };
+      }
+      return { type: "image", source: { type: "base64", data: "A".repeat(32) } };
+    };
+
+    for (let i = 0; i < 75; i++) {
+      const msgCount = 1 + Math.floor(next() * 6);
+      const messages = Array.from({ length: msgCount }, () => {
+        const role = pick(["user", "assistant"]);
+        if (next() > 0.5) {
+          const n = 1 + Math.floor(next() * 4);
+          return {
+            role,
+            content: Array.from({ length: n }, makeBlock),
+          };
+        }
+        return { role, content: `plain-${Math.floor(next() * 10_000)}` };
+      });
+
+      const body = {
+        model: "claude-sonnet-4",
+        system: next() > 0.5 ? "be helpful" : [{ text: "be precise" }],
+        tools:
+          next() > 0.4
+            ? [{ name: "search_docs", description: "search docs", input_schema: { type: "object" } }]
+            : [],
+        messages,
+      };
+
+      const ci = parseContextInfo("anthropic", body, "anthropic-messages");
+      const comp = analyzeComposition(ci, body);
+
+      for (const c of comp) {
+        assert.ok(c.tokens > 0, `tokens must be > 0, got ${c.tokens}`);
+        assert.ok(c.count > 0, `count must be > 0, got ${c.count}`);
+        assert.ok(Number.isFinite(c.pct), `pct must be finite, got ${c.pct}`);
+      }
+
+      for (let j = 1; j < comp.length; j++) {
+        assert.ok(
+          comp[j].tokens <= comp[j - 1].tokens,
+          "composition must be sorted by tokens desc",
+        );
+      }
+
+      const totalTokens = comp.reduce((s, c) => s + c.tokens, 0);
+      const totalPct = comp.reduce((s, c) => s + c.pct, 0);
+      if (totalTokens > 0) {
+        assert.ok(
+          totalPct >= 98 && totalPct <= 102,
+          `percentages should sum near 100, got ${totalPct}`,
+        );
+      }
+    }
+  });
 });
 
 // --- parseResponseUsage ---
@@ -290,6 +386,26 @@ describe("parseResponseUsage", () => {
     assert.equal(usage.inputTokens, 1000);
     assert.equal(usage.outputTokens, 150);
     assert.equal(usage.cacheReadTokens, 200);
+    assert.equal(usage.model, "claude-sonnet-4-20250514");
+    assert.deepEqual(usage.finishReasons, ["end_turn"]);
+  });
+
+  it("parses streaming cache write tokens", () => {
+    const chunks = [
+      "event: message_start",
+      'data: {"type":"message_start","message":{"model":"claude-sonnet-4-20250514","usage":{"input_tokens":1000,"cache_read_input_tokens":200,"cache_creation_input_tokens":300}}}',
+      "",
+      "event: message_delta",
+      'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":150}}',
+      "",
+      "data: [DONE]",
+    ].join("\n");
+    const usage = parseResponseUsage({ streaming: true, chunks });
+    assert.equal(usage.stream, true);
+    assert.equal(usage.inputTokens, 1000);
+    assert.equal(usage.outputTokens, 150);
+    assert.equal(usage.cacheReadTokens, 200);
+    assert.equal(usage.cacheWriteTokens, 300);
     assert.equal(usage.model, "claude-sonnet-4-20250514");
     assert.deepEqual(usage.finishReasons, ["end_turn"]);
   });
