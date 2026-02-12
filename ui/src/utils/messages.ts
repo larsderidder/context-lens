@@ -1,4 +1,4 @@
-import type { ParsedMessage, ProjectedEntry, ContentBlock } from '@/api-types'
+import type { ParsedMessage, ProjectedEntry } from '@/api-types'
 
 export interface ClassifiedEntry {
   entry: ProjectedEntry
@@ -18,6 +18,14 @@ export const CATEGORY_META: Record<string, { label: string; color: string }> = {
   images: { label: 'Images', color: '#4b5563' },
   cache_markers: { label: 'Cache markers', color: '#6b7280' },
   other: { label: 'Other', color: '#4b5563' },
+}
+
+export function getCategoryLabel(category: string): string {
+  return CATEGORY_META[category]?.label ?? category
+}
+
+export function getCategoryColor(category: string, fallback = '#475569'): string {
+  return CATEGORY_META[category]?.color ?? fallback
 }
 
 /** Simple grouped categories for the treemap "simple" mode */
@@ -129,7 +137,7 @@ export function msgToRawObject(msg: ParsedMessage): Record<string, unknown> {
 }
 
 /** Category ordering for message list grouping */
-export const CATEGORY_ORDER = [
+const CATEGORY_ORDER = [
   'tool_results',
   'system_injections',
   'tool_calls',
@@ -186,89 +194,4 @@ export function classifyEntries(entries: ProjectedEntry[]): ClassifiedEntry[] {
     entry: e,
     isMain: (e.agentKey || '_default') === mainKey,
   }))
-}
-
-/** Extract a short call summary from an entry */
-export function extractCallSummary(e: ProjectedEntry): string {
-  const msgs = e.contextInfo.messages
-  if (!msgs || msgs.length === 0) return ''
-
-  // Build tool name map first
-  const toolNameMap: Record<string, string> = {}
-  for (const m of msgs) {
-    for (const b of (m.contentBlocks || [])) {
-      if (b.type === 'tool_use' && b.id && b.name) toolNameMap[b.id] = b.name
-    }
-  }
-
-  // Prefer latest tool call name with parameters
-  for (let i = msgs.length - 1; i >= 0; i--) {
-    const blocks = msgs[i].contentBlocks || []
-    for (const b of blocks) {
-      if (b.type === 'tool_use' && b.name) {
-        const name = b.name
-        // Extract key parameter for common tools
-        if (b.input && typeof b.input === 'object') {
-          const inp = b.input as Record<string, any>
-          if (name === 'bash' && inp.command) {
-            const cmd = String(inp.command).replace(/\s+/g, ' ').trim()
-            return `${name}: ${cmd.slice(0, 60)}${cmd.length > 60 ? '…' : ''}`
-          }
-          if (name === 'read' && inp.path) {
-            return `${name}: ${inp.path}`
-          }
-          if (name === 'edit' && inp.path) {
-            return `${name}: ${inp.path}`
-          }
-          if (name === 'write' && inp.path) {
-            return `${name}: ${inp.path}`
-          }
-          // Generic: show first string value
-          const firstVal = Object.values(inp).find(v => typeof v === 'string' && v.length > 0 && v.length < 200)
-          if (firstVal) {
-            const val = String(firstVal).replace(/\s+/g, ' ').trim()
-            return `${name}: ${val.slice(0, 40)}${val.length > 40 ? '…' : ''}`
-          }
-        }
-        return name
-      }
-      if (b.type === 'tool_result' && b.tool_use_id && toolNameMap[b.tool_use_id]) {
-        return toolNameMap[b.tool_use_id]
-      }
-    }
-  }
-
-  // Fallback: latest user plain text (skip JSON-like strings)
-  for (let i = msgs.length - 1; i >= 0; i--) {
-    if (msgs[i].role === 'user' && msgs[i].content) {
-      const text = msgs[i].content.replace(/\s+/g, ' ').trim()
-      // Skip JSON-like content
-      if (text.startsWith('[') || text.startsWith('{')) continue
-      if (text) return text.length > 40 ? text.slice(0, 40) + '…' : text
-    }
-  }
-  return ''
-}
-
-/** Extract input tool names from an entry's latest messages */
-export function extractInputTools(e: ProjectedEntry): string[] {
-  const msgs = e.contextInfo.messages
-  if (!msgs) return []
-  const tools: string[] = []
-  for (let i = msgs.length - 1; i >= 0 && i > msgs.length - 5; i--) {
-    const m = msgs[i]
-    if (m.contentBlocks) {
-      for (const b of m.contentBlocks) {
-        if (b.type === 'tool_result') {
-          // Try to find tool name
-          const anyBlock = b as unknown as Record<string, unknown>
-          if (anyBlock.tool_use_id) {
-            // We don't have the map here, just note it
-            tools.push(String(anyBlock.tool_use_id).slice(0, 8))
-          }
-        }
-      }
-    }
-  }
-  return tools
 }

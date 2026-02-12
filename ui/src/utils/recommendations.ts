@@ -13,7 +13,6 @@ export interface Recommendation {
 
 /**
  * Compute context-aware recommendations for an entry.
- * Ported from public/index.html renderRecommendations().
  * TODO: Move this server-side for notifications support.
  */
 export function computeRecommendations(

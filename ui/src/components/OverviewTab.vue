@@ -1,21 +1,24 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { useSessionStore } from '@/stores/session'
-import { useExpandable } from '@/composables/useExpandable'
 import { fmtTokens, fmtCost, fmtPct, fmtDuration, healthColor } from '@/utils/format'
-import { classifyEntries, CATEGORY_META, SIMPLE_GROUPS, SIMPLE_META, groupMessagesByCategory, buildToolNameMap } from '@/utils/messages'
+import { classifyEntries, SIMPLE_GROUPS, SIMPLE_META, groupMessagesByCategory, getCategoryLabel, getCategoryColor } from '@/utils/messages'
 import { computeRecommendations } from '@/utils/recommendations'
 import { calculateContextDiff, projectTurnsRemaining } from '@/utils/timeline'
+import { buildHealthNarrative } from '@/utils/overview'
 import type { ProjectedEntry } from '@/api-types'
 import CompositionTreemap from './CompositionTreemap.vue'
 import ContextDiffPanel from './ContextDiffPanel.vue'
 import HealthFindings from './HealthFindings.vue'
 
 const store = useSessionStore()
-const { isExpanded, toggle } = useExpandable()
 
 const entry = computed(() => store.selectedEntry)
 const session = computed(() => store.selectedSession)
+const chronologicalEntries = computed(() => {
+  if (!session.value) return []
+  return [...session.value.entries].reverse()
+})
 
 const utilization = computed(() => {
   const e = entry.value
@@ -39,8 +42,7 @@ const cacheHitRate = computed(() => {
 })
 
 const classified = computed(() => {
-  if (!session.value) return []
-  return classifyEntries([...session.value.entries].reverse())
+  return classifyEntries(chronologicalEntries.value)
 })
 
 const projection = computed(() => {
@@ -52,17 +54,14 @@ const turnNum = computed(() => {
   if (!e) return 0
   const allClassified = classified.value
   const idx = allClassified.findIndex(c => c.entry.id === e.id)
-  let num = 0
-  for (let k = 0; k <= Math.max(0, idx); k++) {
-    if (allClassified[k]?.isMain) num++
-  }
-  return num
+  if (idx < 0) return 0
+  return allClassified.slice(0, idx + 1).reduce((n, item) => n + (item.isMain ? 1 : 0), 0)
 })
 
 const recommendations = computed(() => {
   const e = entry.value
-  if (!e || !session.value) return []
-  const entries = [...session.value.entries].reverse()
+  if (!e) return []
+  const entries = chronologicalEntries.value
   const cl = classified.value
   return computeRecommendations(e, entries, cl)
 })
@@ -133,68 +132,47 @@ const diffData = computed(() => {
 
 // ── Messages preview ──
 const messages = computed(() => entry.value?.contextInfo.messages || [])
-const toolNameMap = computed(() => buildToolNameMap(messages.value))
 const categorizedMessages = computed(() => groupMessagesByCategory(messages.value))
 const totalMsgTokens = computed(() => categorizedMessages.value.reduce((s, g) => s + g.tokens, 0))
+const contextTotalTokens = computed(() => entry.value?.contextInfo.totalTokens ?? 0)
 
 const healthNarrative = computed(() => {
   const e = entry.value
   if (!e) return null
-
-  const utilPct = Math.round(utilization.value * 100)
-  const health = e.healthScore
-  const topComp = [...e.composition].sort((a, b) => b.tokens - a.tokens)[0]
-  const topDelta = compositionDelta.value[0]
-
-  let toneClass = 'narrative-neutral'
-  let headline = `Context is at ${utilPct}% utilization.`
-  if (health?.rating === 'poor' || utilPct >= 85) {
-    toneClass = 'narrative-advisory'
-    headline = `Turn health is elevated risk (${health ? health.overall + '/100' : utilPct + '% utilization'}).`
-  } else if (health?.rating === 'needs-work' || utilPct >= 65) {
-    toneClass = 'narrative-advisory'
-    headline = `Turn health shows moderate pressure (${health ? health.overall + '/100' : utilPct + '% utilization'}).`
-  } else if (health) {
-    headline = `Turn health is stable at ${health.overall}/100.`
-  }
-
-  const likelyDrivers: string[] = []
-  if (topComp) likelyDrivers.push(`${CATEGORY_META[topComp.category]?.label ?? topComp.category} is the largest share (${Math.round(topComp.pct)}%).`)
-  if (topDelta) {
-    const label = CATEGORY_META[topDelta.category]?.label ?? topDelta.category
-    const direction = topDelta.delta > 0 ? 'grew' : 'shrank'
-    likelyDrivers.push(`${label} ${direction} most vs previous main turn (${fmtTokens(Math.abs(topDelta.delta))}).`)
-  }
-
-  return {
-    toneClass,
-    headline,
-    detail: likelyDrivers.join(' '),
-  }
+  return buildHealthNarrative({
+    utilization: utilization.value,
+    healthScore: e.healthScore,
+    composition: e.composition,
+    topDelta: compositionDelta.value[0] ?? null,
+  })
 })
 
 function openNarrativeTarget(target: 'messages' | 'timeline') {
   store.setInspectorTab(target)
 }
 
-function jumpToMessagesCategory(category: string, openDetail = true) {
+function openMessagesTab() {
   store.setInspectorTab('messages')
+}
+
+function jumpToMessagesCategory(category: string, openDetail = true) {
+  openMessagesTab()
   store.focusMessageCategory(category, openDetail)
 }
 
 function openAllMessages() {
-  store.setInspectorTab('messages')
+  openMessagesTab()
 }
 
 function jumpToMessagesTool(toolName: string) {
-  store.setInspectorTab('messages')
+  openMessagesTab()
   store.focusMessageTool('tool_results', toolName)
 }
 
 function handleRecClick(rec: { messageIndex?: number; highlight?: string }) {
   if (rec.messageIndex == null) return
-  store.setInspectorTab('messages')
-  store.focusMessageByIndex(rec.messageIndex, rec.highlight)
+  openMessagesTab()
+  store.focusMessageByIndex(rec.messageIndex)
 }
 
 function auditTooltip(audit: { id: string; name: string; description: string }): string {
@@ -216,11 +194,19 @@ function auditTooltip(audit: { id: string; name: string; description: string }):
 }
 
 function msgCategoryLabel(cat: string): string {
-  return CATEGORY_META[cat]?.label ?? cat
+  return getCategoryLabel(cat)
 }
 
 function msgCategoryDot(cat: string): string {
-  return CATEGORY_META[cat]?.color ?? '#475569'
+  return getCategoryColor(cat)
+}
+
+function categoryPct(tokens: number): number {
+  return contextTotalTokens.value > 0 ? Math.round(tokens / contextTotalTokens.value * 100) : 0
+}
+
+function categoryWidth(tokens: number): string {
+  return contextTotalTokens.value > 0 ? `${(tokens / contextTotalTokens.value) * 100}%` : '0%'
 }
 </script>
 
@@ -367,10 +353,10 @@ function msgCategoryDot(cat: string): string {
           <span class="msg-group-name">{{ msgCategoryLabel(group.category) }}</span>
           <span class="msg-group-count">{{ group.items.length }}</span>
           <span class="msg-group-tokens">{{ fmtTokens(group.tokens) }}</span>
-          <span class="msg-group-pct">{{ totalMsgTokens > 0 ? Math.round(group.tokens / totalMsgTokens * 100) : 0 }}%</span>
+          <span class="msg-group-pct">{{ categoryPct(group.tokens) }}%</span>
           <div class="msg-group-bar">
             <div class="msg-group-bar-fill" :style="{
-              width: totalMsgTokens > 0 ? (group.tokens / totalMsgTokens * 100) + '%' : '0%',
+              width: categoryWidth(group.tokens),
               background: msgCategoryDot(group.category),
             }" />
           </div>
