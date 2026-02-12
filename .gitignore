@@ -36,6 +36,11 @@ testdata
 # UI build output and deps
 ui/dist/
 ui/node_modules/
+ui/tsconfig.tsbuildinfo
+
+# Local output
+screenshots/
+test-results/
 
 # Reference repos (cloned for study, not shipped)
 reference/
