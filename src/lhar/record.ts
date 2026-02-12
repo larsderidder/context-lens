@@ -1,5 +1,4 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { estimateCost, getContextLimit } from "../core.js";
 import { redactHeaders } from "../http/headers.js";
 import type { LharRecord, LharSessionLine } from "../lhar-types.generated.js";
 import type { CapturedEntry, Conversation, PrivacyLevel } from "../types.js";
