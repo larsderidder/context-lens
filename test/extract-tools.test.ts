@@ -17,9 +17,7 @@ describe("extractToolsUsed", () => {
         role: "assistant",
         content: "",
         tokens: 20,
-        contentBlocks: [
-          { type: "tool_use", id: "1", name: "Read", input: {} },
-        ],
+        contentBlocks: [{ type: "tool_use", id: "1", name: "Read", input: {} }],
       },
       {
         role: "user",

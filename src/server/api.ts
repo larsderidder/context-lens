@@ -151,10 +151,7 @@ function handleRequests(
         firstSeen: entries[entries.length - 1].timestamp,
       };
       const latest = entries[0];
-      const totalCost = entries.reduce(
-        (sum, e) => sum + (e.costUsd ?? 0),
-        0,
-      );
+      const totalCost = entries.reduce((sum, e) => sum + (e.costUsd ?? 0), 0);
       // Token history for sparkline: main agent only, chronological (oldest → newest).
       // Main agent = most frequent agentKey in the conversation.
       const keyCounts = new Map<string, number>();
@@ -333,9 +330,7 @@ export function createApiHandler(
     }
 
     // Entry detail: full uncompacted contextInfo for a specific entry
-    const entryDetailMatch = pathname?.match(
-      /^\/api\/entries\/(\d+)\/detail$/,
-    );
+    const entryDetailMatch = pathname?.match(/^\/api\/entries\/(\d+)\/detail$/);
     if (entryDetailMatch && req.method === "GET") {
       const entryId = parseInt(entryDetailMatch[1], 10);
       const contextInfo = store.getEntryDetail(entryId);
@@ -344,16 +339,12 @@ export function createApiHandler(
         res.end(JSON.stringify({ contextInfo }));
       } else {
         res.writeHead(404, { "Content-Type": "application/json" });
-        res.end(
-          JSON.stringify({ error: "Detail not found for this entry" }),
-        );
+        res.end(JSON.stringify({ error: "Detail not found for this entry" }));
       }
       return true;
     }
 
-    const convoMatch = pathname?.match(
-      /^\/api\/conversations\/(.+)$/,
-    );
+    const convoMatch = pathname?.match(/^\/api\/conversations\/(.+)$/);
     if (convoMatch && req.method === "DELETE") {
       const convoId = decodeURIComponent(convoMatch[1]);
       store.deleteConversation(convoId);

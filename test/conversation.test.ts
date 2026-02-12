@@ -167,6 +167,56 @@ describe("extractWorkingDirectory", () => {
     };
     assert.equal(extractWorkingDirectory(info, rawBody), null);
   });
+
+  it("extracts Windows absolute paths from raw body cwd fields", () => {
+    const info = {
+      systemPrompts: [],
+      messages: [],
+    } as any;
+    const rawBody = {
+      request: {
+        cwd: "C:\\Users\\alice\\project",
+      },
+    };
+    assert.equal(
+      extractWorkingDirectory(info, rawBody),
+      "C:\\Users\\alice\\project",
+    );
+  });
+
+  it("accepts quoted path values in raw body", () => {
+    const info = {
+      systemPrompts: [],
+      messages: [],
+    } as any;
+    const rawBody = {
+      metadata: {
+        workspace_root: '"/home/user/quoted-project"',
+      },
+    };
+    assert.equal(
+      extractWorkingDirectory(info, rawBody),
+      "/home/user/quoted-project",
+    );
+  });
+
+  it("finds cwd-like keys via generic recursive fallback", () => {
+    const info = {
+      systemPrompts: [],
+      messages: [],
+    } as any;
+    const rawBody = {
+      someOtherWrapper: {
+        nested: {
+          sandbox_cwd: "/tmp/from-generic-key-match",
+        },
+      },
+    };
+    assert.equal(
+      extractWorkingDirectory(info, rawBody),
+      "/tmp/from-generic-key-match",
+    );
+  });
 });
 
 describe("extractUserPrompt", () => {

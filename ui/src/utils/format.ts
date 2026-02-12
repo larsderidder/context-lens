@@ -1,17 +1,17 @@
-/** Format token count: 1234 → "1.2K", 800 → "800" */
+/** Format token counts with compact K/M suffixes for dashboard labels. */
 export function fmtTokens(n: number): string {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M'
   if (n >= 1000) return (n / 1000).toFixed(1) + 'K'
   return String(n)
 }
 
-/** Format cost: 0.0034 → "$0.00", 1.23 → "$1.23", null → "--" */
+/** Format USD cost with two decimals, or "--" when unavailable. */
 export function fmtCost(c: number | null | undefined): string {
   if (c == null) return '--'
   return '$' + c.toFixed(2)
 }
 
-/** Format ISO timestamp to local time: "14:32" */
+/** Format an ISO timestamp into local HH:MM time. */
 export function fmtTime(iso: string): string {
   return new Date(iso).toLocaleTimeString([], {
     hour: '2-digit',
@@ -19,26 +19,26 @@ export function fmtTime(iso: string): string {
   })
 }
 
-/** Format duration in ms: 1234 → "1.2s", 456 → "456ms" */
+/** Format a duration in milliseconds using ms/s units. */
 export function fmtDuration(ms: number): string {
   if (ms >= 1000) return (ms / 1000).toFixed(1) + 's'
   return Math.round(ms) + 'ms'
 }
 
-/** Format bytes: 1234 → "1.2 KB" */
+/** Format byte counts into B/KB/MB for quick readability. */
 export function fmtBytes(bytes: number): string {
   if (bytes >= 1_000_000) return (bytes / 1_000_000).toFixed(1) + ' MB'
   if (bytes >= 1000) return (bytes / 1000).toFixed(1) + ' KB'
   return bytes + ' B'
 }
 
-/** Format percentage: 0.456 → "45.6%", already-percentage 45.6 → "45.6%" */
+/** Format a percentage value; treats input as a ratio unless `alreadyPercent` is set. */
 export function fmtPct(value: number, alreadyPercent = false): string {
   const pct = alreadyPercent ? value : value * 100
   return pct.toFixed(1) + '%'
 }
 
-/** Shorten model name: "claude-sonnet-4-20250514" → "sonnet-4" */
+/** Collapse verbose model identifiers into short display names. */
 export function shortModel(model: string): string {
   if (!model) return '?'
   // Claude models
@@ -59,7 +59,7 @@ export function shortModel(model: string): string {
   return model
 }
 
-/** CSS class for model color: "claude-sonnet-4-..." → "model-sonnet" */
+/** Map a model id to the CSS class used for model color badges. */
 export function modelColorClass(model: string): string {
   if (/opus/i.test(model)) return 'model-opus'
   if (/sonnet/i.test(model)) return 'model-sonnet'
@@ -69,7 +69,7 @@ export function modelColorClass(model: string): string {
   return 'model-default'
 }
 
-/** CSS class for source badge */
+/** Map a source label to the CSS class used for source badges. */
 export function sourceBadgeClass(source: string): string {
   const s = (source || '').toLowerCase()
   if (s.includes('claude')) return 'badge-claude'
@@ -80,7 +80,7 @@ export function sourceBadgeClass(source: string): string {
   return 'badge-unknown'
 }
 
-/** Color for health rating */
+/** Return the hex color used for a health rating. */
 export function healthColor(rating: string): string {
   switch (rating) {
     case 'good': return '#10b981'

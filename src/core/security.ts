@@ -8,7 +8,7 @@ import type {
 } from "../types.js";
 
 // ---------------------------------------------------------------------------
-// Tier 1: Pattern matching — known injection phrases
+// Tier 1: Pattern matching for known injection phrases
 // ---------------------------------------------------------------------------
 
 interface PatternRule {
@@ -120,7 +120,7 @@ const TIER1_PATTERNS: PatternRule[] = [
 ];
 
 // ---------------------------------------------------------------------------
-// Tier 2: Heuristic analysis — structural anomalies
+// Tier 2: Heuristic analysis for structural anomalies
 // ---------------------------------------------------------------------------
 
 /**
@@ -191,7 +191,7 @@ function scanMessage(
   const content = msg.content || "";
   if (!content) return alerts;
 
-  // Skip system messages — they are authored by the developer, not injected
+  // Skip system messages; they are authored by the developer, not injected.
   if (msg.role === "system" || msg.role === "developer") return alerts;
 
   const toolName = extractToolName(msg, allMessages);

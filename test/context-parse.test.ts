@@ -88,6 +88,100 @@ describe("parseContextInfo", () => {
       assert.equal(info.systemPrompts.length, 1);
       assert.equal(info.messages.length, 1);
     });
+
+    it("parses typed responses input items into normalized message blocks", () => {
+      const body = {
+        model: "gpt-4o",
+        input: [
+          {
+            role: "developer",
+            content: [{ type: "input_text", text: "System policy" }],
+          },
+          {
+            type: "function_call",
+            call_id: "call_1",
+            name: "search_docs",
+            arguments: { q: "auth flow" },
+          },
+          {
+            type: "custom_tool_call",
+            call_id: "call_2",
+            name: "run_sql",
+            arguments: '{"sql":"select 1"}',
+          },
+          {
+            type: "function_call_output",
+            call_id: "call_1",
+            output: { text: "found 12 docs" },
+          },
+          {
+            type: "custom_tool_call_output",
+            call_id: "call_2",
+            output: "ok",
+          },
+          {
+            type: "reasoning",
+            summary: [{ text: "thinking summary" }],
+          },
+          { type: "output_text", text: "assistant answer" },
+          { type: "input_text", text: "follow-up question" },
+          { type: "unknown_event", payload: 123 },
+        ],
+      };
+
+      const info = parseContextInfo("openai", body, "responses");
+
+      assert.equal(info.systemPrompts.length, 1);
+      assert.equal(info.systemPrompts[0].content, "System policy");
+      assert.equal(info.messages.length, 8);
+
+      const call = info.messages[0].contentBlocks?.[0] as any;
+      assert.equal(call.type, "tool_use");
+      assert.equal(call.id, "call_1");
+      assert.equal(call.name, "search_docs");
+      assert.deepEqual(call.input, { q: "auth flow" });
+
+      const customCall = info.messages[1].contentBlocks?.[0] as any;
+      assert.equal(customCall.type, "tool_use");
+      assert.equal(customCall.id, "call_2");
+      assert.deepEqual(customCall.input, {});
+
+      const output = info.messages[2].contentBlocks?.[0] as any;
+      assert.equal(output.type, "tool_result");
+      assert.equal(output.tool_use_id, "call_1");
+      assert.equal(output.content, JSON.stringify({ text: "found 12 docs" }));
+
+      const customOutput = info.messages[3].contentBlocks?.[0] as any;
+      assert.equal(customOutput.type, "tool_result");
+      assert.equal(customOutput.tool_use_id, "call_2");
+      assert.equal(customOutput.content, "ok");
+
+      const thinking = info.messages[4].contentBlocks?.[0] as any;
+      assert.equal(thinking.type, "thinking");
+      assert.equal(thinking.thinking, "thinking summary");
+
+      assert.equal(info.messages[5].role, "assistant");
+      assert.equal(info.messages[5].content, "assistant answer");
+      assert.equal(info.messages[6].role, "user");
+      assert.equal(info.messages[6].content, "follow-up question");
+      assert.equal(
+        info.messages[7].content,
+        JSON.stringify({ type: "unknown_event", payload: 123 }),
+      );
+    });
+
+    it("falls back to [reasoning] when reasoning summary is absent", () => {
+      const body = {
+        model: "gpt-4o",
+        input: [{ type: "reasoning" }],
+      };
+      const info = parseContextInfo("openai", body, "responses");
+      assert.equal(info.messages.length, 1);
+      assert.equal(info.messages[0].content, "[reasoning]");
+      const thinking = info.messages[0].contentBlocks?.[0] as any;
+      assert.equal(thinking.type, "thinking");
+      assert.equal(thinking.thinking, "[reasoning]");
+    });
   });
 
   describe("openai chat completions", () => {

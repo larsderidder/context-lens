@@ -105,10 +105,7 @@ export class Store {
     this.changeListeners.delete(listener);
   }
 
-  private emitChange(
-    type: string,
-    conversationId?: string | null,
-  ): void {
+  private emitChange(type: string, conversationId?: string | null): void {
     const event: StoreChangeEvent = {
       type,
       revision: this.dataRevision,
@@ -175,6 +172,11 @@ export class Store {
       this.dataRevision = 1;
       // Loaded entries are already compact (projectEntry strips heavy data before saving).
       // Do NOT call compactEntry here. It would destroy the preserved response usage data.
+      // TODO: Consider introducing a formal versioned migration system (schema version
+      // tracking, ordered migration list, "already applied" checks) if the number of
+      // ad hoc migrations here keeps growing. For now each migration is idempotent and
+      // detects whether it needs to run by inspecting the data.
+      //
       // Order matters: image migration fixes inflated per-message tokens from base64 data
       // BEFORE the usage backfill rescales everything proportionally.
       const migrated = this.migrateImageTokenCounts();
@@ -214,7 +216,10 @@ export class Store {
           id: fingerprint,
           label: extractConversationLabel(contextInfo),
           source: resolvedSource || "unknown",
-          workingDirectory: extractWorkingDirectory(contextInfo, rawBody ?? null),
+          workingDirectory: extractWorkingDirectory(
+            contextInfo,
+            rawBody ?? null,
+          ),
           firstSeen: new Date().toISOString(),
           sessionId: rawSessionId,
         });
@@ -308,9 +313,7 @@ export class Store {
 
     // Compute health score
     const sameConvo = conversationId
-      ? this.capturedRequests.filter(
-          (e) => e.conversationId === conversationId,
-        )
+      ? this.capturedRequests.filter((e) => e.conversationId === conversationId)
       : [];
     const prevMain = sameConvo
       .filter((e) => !e.agentKey)
@@ -339,7 +342,7 @@ export class Store {
       turnCount,
     );
 
-    // Security scanning — must happen before compaction strips message content
+    // Security scanning must happen before compaction strips message content
     const securityResult = scanSecurity(contextInfo);
     entry.securityAlerts = securityResult.alerts;
 
@@ -379,7 +382,11 @@ export class Store {
         ) {
           // Remove detail file
           const detailPath = path.join(this.detailDir, `${evictEntry.id}.json`);
-          try { fs.unlinkSync(detailPath); } catch { /* may not exist */ }
+          try {
+            fs.unlinkSync(detailPath);
+          } catch {
+            /* may not exist */
+          }
           this.capturedRequests.splice(i, 1);
         }
       }
@@ -422,9 +429,15 @@ export class Store {
     try {
       const files = fs.readdirSync(this.detailDir);
       for (const f of files) {
-        try { fs.unlinkSync(path.join(this.detailDir, f)); } catch { /* ignore */ }
+        try {
+          fs.unlinkSync(path.join(this.detailDir, f));
+        } catch {
+          /* ignore */
+        }
       }
-    } catch { /* directory may not exist */ }
+    } catch {
+      /* directory may not exist */
+    }
 
     this.capturedRequests.length = 0;
     this.conversations.clear();
@@ -460,8 +473,7 @@ export class Store {
         .filter((e) => !e.agentKey)
         .sort(
           (a, b) =>
-            new Date(b.timestamp).getTime() -
-            new Date(a.timestamp).getTime(),
+            new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
         )[0];
 
       // Collect all tools used across the conversation (up to this entry)
@@ -473,8 +485,7 @@ export class Store {
       }
 
       const turnCount =
-        sameConvo.filter((e) => !e.agentKey).length +
-        (entry.agentKey ? 0 : 1);
+        sameConvo.filter((e) => !e.agentKey).length + (entry.agentKey ? 0 : 1);
 
       entry.healthScore = computeHealthScore(
         entry,
@@ -508,9 +519,7 @@ export class Store {
       }
     }
     if (fixed > 0) {
-      console.log(
-        `Fixed totalTokens from API usage for ${fixed} entries`,
-      );
+      console.log(`Fixed totalTokens from API usage for ${fixed} entries`);
     }
   }
 
@@ -567,7 +576,9 @@ export class Store {
       }
     }
     if (migrated > 0) {
-      console.log(`Migrated ${migrated} entries with inflated image token counts`);
+      console.log(
+        `Migrated ${migrated} entries with inflated image token counts`,
+      );
     }
     return migrated;
   }

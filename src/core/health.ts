@@ -131,7 +131,10 @@ function scoreToolResults(
   const totalTok = totalCompositionTokens(composition);
   if (totalTok === 0) return 100;
 
-  const toolResultTokens = compositionCategoryTokens(composition, "tool_results");
+  const toolResultTokens = compositionCategoryTokens(
+    composition,
+    "tool_results",
+  );
   const aggPct = (toolResultTokens / totalTok) * 100;
 
   const aggregateScore = lerp(aggPct, [
@@ -205,7 +208,10 @@ function scoreToolEfficiency(
   const totalTok = totalCompositionTokens(composition);
   if (totalTok === 0 || tools.length === 0) return 100;
 
-  const toolDefTokens = compositionCategoryTokens(composition, "tool_definitions");
+  const toolDefTokens = compositionCategoryTokens(
+    composition,
+    "tool_definitions",
+  );
   const overheadPct = (toolDefTokens / totalTok) * 100;
 
   const overheadScore = lerp(overheadPct, [

@@ -12,7 +12,8 @@ export interface Recommendation {
 }
 
 /**
- * Compute context-aware recommendations for an entry.
+ * Compute actionable recommendations for a single entry based on:
+ * composition ratios, conversation history, context usage, and security alerts.
  * TODO: Move this server-side for notifications support.
  */
 export function computeRecommendations(

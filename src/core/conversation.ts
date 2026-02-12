@@ -79,6 +79,9 @@ export function extractWorkingDirectory(
   return null;
 }
 
+/**
+ * Normalize and validate string values that might represent filesystem paths.
+ */
 function toPathCandidate(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim().replace(/^['"`]|['"`]$/g, "");
@@ -88,10 +91,13 @@ function toPathCandidate(value: unknown): string | null {
   return null;
 }
 
-function findWorkingDirectoryInObject(
-  node: unknown,
-  depth = 0,
-): string | null {
+/**
+ * Recursive search for cwd-like fields in structured request payloads.
+ *
+ * Traversal is depth-limited and prioritizes common wrapper keys first to
+ * find useful candidates quickly before falling back to a full walk.
+ */
+function findWorkingDirectoryInObject(node: unknown, depth = 0): string | null {
   if (!node || depth > 8) return null;
   if (Array.isArray(node)) {
     for (const item of node) {
@@ -146,7 +152,11 @@ function findWorkingDirectoryInObject(
 
   // Generic fallback: key names that strongly imply cwd.
   for (const [key, value] of Object.entries(obj)) {
-    if (/(^|_)(cwd|workdir|working_?directory|workspace_?root|project_?root|root_dir|sandbox_?cwd)$/i.test(key)) {
+    if (
+      /(^|_)(cwd|workdir|working_?directory|workspace_?root|project_?root|root_dir|sandbox_?cwd)$/i.test(
+        key,
+      )
+    ) {
       const candidate = toPathCandidate(value);
       if (candidate) return candidate;
     }

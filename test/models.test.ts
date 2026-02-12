@@ -70,7 +70,13 @@ describe("estimateCost", () => {
     // 100K regular input @ $3/M = $0.30
     // 900K cache read @ $0.30/M (10% of $3) = $0.27
     // Total = $0.57
-    const cost = estimateCost("claude-sonnet-4-20250514", 100_000, 0, 900_000, 0);
+    const cost = estimateCost(
+      "claude-sonnet-4-20250514",
+      100_000,
+      0,
+      900_000,
+      0,
+    );
     assert.equal(cost, 0.57);
   });
 
@@ -79,8 +85,14 @@ describe("estimateCost", () => {
     // 100K regular input @ $3/M = $0.30
     // 400K cache write @ $0.75/M (25% of $3) = $0.30
     // Total = $0.60
-    const cost = estimateCost("claude-sonnet-4-20250514", 100_000, 0, 0, 400_000);
-    assert.equal(cost, 0.60);
+    const cost = estimateCost(
+      "claude-sonnet-4-20250514",
+      100_000,
+      0,
+      0,
+      400_000,
+    );
+    assert.equal(cost, 0.6);
   });
 
   it("combines all token types correctly for Claude", () => {
@@ -90,7 +102,13 @@ describe("estimateCost", () => {
     // 50K cache write @ $3.75/M (25%) = $0.1875
     // 10K output @ $75/M = $0.75
     // Total = $1.8375
-    const cost = estimateCost("claude-opus-4-20250514", 50_000, 10_000, 100_000, 50_000);
+    const cost = estimateCost(
+      "claude-opus-4-20250514",
+      50_000,
+      10_000,
+      100_000,
+      50_000,
+    );
     assert.equal(cost, 1.8375);
   });
 

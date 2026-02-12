@@ -39,7 +39,10 @@ function stripImageData(val: unknown): unknown {
 
   // Image block: return a lightweight placeholder
   if (isImageBlock(val)) {
-    return { type: (val as Record<string, unknown>).type || "image", _image: true };
+    return {
+      type: (val as Record<string, unknown>).type || "image",
+      _image: true,
+    };
   }
 
   const obj = val as Record<string, unknown>;

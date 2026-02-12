@@ -1,9 +1,11 @@
-import type {
-  LharJsonWrapper,
-} from "../lhar-types.generated.js";
+import type { LharJsonWrapper } from "../lhar-types.generated.js";
 import type { CapturedEntry, Conversation, PrivacyLevel } from "../types.js";
 import { VERSION } from "../version.generated.js";
-import { buildLharRecord, buildSessionLine, traceIdFromConversation } from "./record.js";
+import {
+  buildLharRecord,
+  buildSessionLine,
+  traceIdFromConversation,
+} from "./record.js";
 
 const COLLECTOR_NAME = "context-lens";
 const COLLECTOR_VERSION = VERSION;
@@ -59,7 +61,9 @@ export function toLharJson(
     (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
   );
 
-  const records = sorted.map((entry) => buildLharRecord(entry, entries, privacy));
+  const records = sorted.map((entry) =>
+    buildLharRecord(entry, entries, privacy),
+  );
 
   // Build sessions from conversations map
   const sessions: LharJsonWrapper["lhar"]["sessions"] = [];

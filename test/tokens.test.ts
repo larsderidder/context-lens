@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-
-import { estimateTokens } from "../src/core.js";
 import { rescaleContextTokens } from "../src/core/tokens.js";
+import { estimateTokens } from "../src/core.js";
 import type { ContextInfo } from "../src/types.js";
 
 function makeContextInfo(overrides: Partial<ContextInfo> = {}): ContextInfo {
@@ -46,7 +45,11 @@ describe("estimateTokens", () => {
   it("uses fixed estimate for Anthropic image blocks", () => {
     const imageBlock = {
       type: "image",
-      source: { type: "base64", media_type: "image/png", data: "A".repeat(1_000_000) },
+      source: {
+        type: "base64",
+        media_type: "image/png",
+        data: "A".repeat(1_000_000),
+      },
     };
     const tokens = estimateTokens(imageBlock);
     // Should be ~1,600 (fixed estimate), not ~250,000 (1M/4)
@@ -57,7 +60,7 @@ describe("estimateTokens", () => {
   it("uses fixed estimate for OpenAI image_url blocks", () => {
     const imageBlock = {
       type: "image_url",
-      image_url: { url: "data:image/png;base64," + "A".repeat(500_000) },
+      image_url: { url: `data:image/png;base64,${"A".repeat(500_000)}` },
     };
     const tokens = estimateTokens(imageBlock);
     assert.ok(tokens < 5_000, `Expected <5,000 but got ${tokens}`);
@@ -66,7 +69,14 @@ describe("estimateTokens", () => {
   it("handles content arrays with mixed text and images", () => {
     const content = [
       { type: "text", text: "Here is a screenshot:" },
-      { type: "image", source: { type: "base64", media_type: "image/png", data: "A".repeat(2_000_000) } },
+      {
+        type: "image",
+        source: {
+          type: "base64",
+          media_type: "image/png",
+          data: "A".repeat(2_000_000),
+        },
+      },
       { type: "text", text: "What do you see?" },
     ];
     const tokens = estimateTokens(content);
@@ -82,7 +92,14 @@ describe("estimateTokens", () => {
         tool_use_id: "toolu_123",
         content: [
           { type: "text", text: "Read image file [image/png]" },
-          { type: "image", source: { type: "base64", media_type: "image/png", data: "A".repeat(3_000_000) } },
+          {
+            type: "image",
+            source: {
+              type: "base64",
+              media_type: "image/png",
+              data: "A".repeat(3_000_000),
+            },
+          },
         ],
       },
     ];
@@ -94,8 +111,22 @@ describe("estimateTokens", () => {
 
   it("counts multiple images separately", () => {
     const content = [
-      { type: "image", source: { type: "base64", media_type: "image/png", data: "A".repeat(1_000_000) } },
-      { type: "image", source: { type: "base64", media_type: "image/png", data: "B".repeat(1_000_000) } },
+      {
+        type: "image",
+        source: {
+          type: "base64",
+          media_type: "image/png",
+          data: "A".repeat(1_000_000),
+        },
+      },
+      {
+        type: "image",
+        source: {
+          type: "base64",
+          media_type: "image/png",
+          data: "B".repeat(1_000_000),
+        },
+      },
     ];
     const tokens = estimateTokens(content);
     // Should be ~3,200 (2 * 1,600) plus small overhead, not ~500,000

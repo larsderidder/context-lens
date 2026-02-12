@@ -329,7 +329,9 @@ if (filteredArgs.length === 0) {
       piAgentDirToCleanup = targetDir;
 
       if (fs.existsSync(sourceDir)) {
-        for (const entry of fs.readdirSync(sourceDir, { withFileTypes: true })) {
+        for (const entry of fs.readdirSync(sourceDir, {
+          withFileTypes: true,
+        })) {
           if (entry.name === "models.json") continue;
           const src = join(sourceDir, entry.name);
           const dst = join(targetDir, entry.name);
@@ -368,7 +370,10 @@ if (filteredArgs.length === 0) {
         const existing = providers[key];
         providers[key] =
           existing && typeof existing === "object" && !Array.isArray(existing)
-            ? { ...(existing as Record<string, unknown>), baseUrl: proxyBaseUrl }
+            ? {
+                ...(existing as Record<string, unknown>),
+                baseUrl: proxyBaseUrl,
+              }
             : { baseUrl: proxyBaseUrl };
       }
 

@@ -1,5 +1,5 @@
 // Copied from src/types.ts and src/lhar-types.generated.ts
-// Keep in sync manually — these types change rarely.
+// Keep in sync manually; these types change rarely.
 
 // --- Providers & formats ---
 

@@ -32,6 +32,11 @@ describe("detectProvider", () => {
     assert.equal(detectProvider("/chat/completions", {}), "openai");
   });
 
+  it("detects openai from /models and /embeddings paths", () => {
+    assert.equal(detectProvider("/v1/models", {}), "openai");
+    assert.equal(detectProvider("/v1/embeddings", {}), "openai");
+  });
+
   it("detects openai from Bearer sk- header", () => {
     assert.equal(
       detectProvider("/anything", { authorization: "Bearer sk-abc123" }),
@@ -123,6 +128,26 @@ describe("extractSource", () => {
     const result = extractSource("/my%20tool/v1/messages");
     assert.equal(result.source, "my tool");
   });
+
+  it("rejects encoded path traversal in source prefix", () => {
+    const slash = extractSource("/tool%2Fname/v1/messages");
+    assert.equal(slash.source, null);
+    assert.equal(slash.cleanPath, "/tool%2Fname/v1/messages");
+
+    const backslash = extractSource("/tool%5Cname/v1/messages");
+    assert.equal(backslash.source, null);
+    assert.equal(backslash.cleanPath, "/tool%5Cname/v1/messages");
+
+    const dotdot = extractSource("/my%2e%2etool/v1/messages");
+    assert.equal(dotdot.source, null);
+    assert.equal(dotdot.cleanPath, "/my%2e%2etool/v1/messages");
+  });
+
+  it("handles malformed URI encoding in source prefix", () => {
+    const result = extractSource("/bad%zz/v1/messages");
+    assert.equal(result.source, "bad%zz");
+    assert.equal(result.cleanPath, "/v1/messages");
+  });
 });
 
 describe("resolveTargetUrl", () => {
@@ -171,6 +196,16 @@ describe("resolveTargetUrl", () => {
       upstreams,
     );
     assert.equal(result.targetUrl, "https://custom.api.com/v1/messages");
+  });
+
+  it("appends path/query when x-target-url is a non-http base", () => {
+    const headers = { "x-target-url": "upstream-proxy" };
+    const result = resolveTargetUrl(
+      { pathname: "/responses", search: "?x=1" },
+      headers,
+      upstreams,
+    );
+    assert.equal(result.targetUrl, "upstream-proxy/responses?x=1");
   });
 
   it("preserves query string in target URL", () => {

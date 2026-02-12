@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
@@ -43,7 +43,9 @@ describe("Store", () => {
     const body2 = {
       model: "claude-sonnet-4",
       metadata: { user_id: sessionId },
-      messages: [{ role: "user", content: "second prompt with different text" }],
+      messages: [
+        { role: "user", content: "second prompt with different text" },
+      ],
     };
 
     const ci1 = parseContextInfo("anthropic", body1, "anthropic-messages");
@@ -166,7 +168,10 @@ describe("Store", () => {
         {
           name: "search",
           description: "Search things",
-          input_schema: { type: "object", properties: { q: { type: "string" } } },
+          input_schema: {
+            type: "object",
+            properties: { q: { type: "string" } },
+          },
         },
       ],
       messages: [
@@ -210,11 +215,11 @@ describe("Store", () => {
     // (note: messages are compacted, so we read from the detail file)
     const detail = store.getEntryDetail(entry.id);
     assert.ok(detail, "detail file should exist");
-    const msgSum = detail!.messages.reduce((s, m) => s + m.tokens, 0);
+    const msgSum = detail?.messages.reduce((s, m) => s + m.tokens, 0);
     assert.equal(
-      detail!.messagesTokens,
+      detail?.messagesTokens,
       msgSum,
-      `messagesTokens (${detail!.messagesTokens}) !== sum of msg.tokens (${msgSum})`,
+      `messagesTokens (${detail?.messagesTokens}) !== sum of msg.tokens (${msgSum})`,
     );
 
     cleanup();
@@ -230,7 +235,10 @@ describe("Store", () => {
         {
           name: "bash",
           description: "Run commands",
-          input_schema: { type: "object", properties: { cmd: { type: "string" } } },
+          input_schema: {
+            type: "object",
+            properties: { cmd: { type: "string" } },
+          },
         },
       ],
       messages: [
@@ -244,7 +252,11 @@ describe("Store", () => {
         {
           role: "user",
           content: [
-            { type: "tool_result", tool_use_id: "t1", content: "file1.txt\nfile2.txt" },
+            {
+              type: "tool_result",
+              tool_use_id: "t1",
+              content: "file1.txt\nfile2.txt",
+            },
           ],
         },
       ],
@@ -436,7 +448,9 @@ describe("Store", () => {
           totalTokens: 9999, // intentionally wrong
           systemPrompts: [],
           tools: [],
-          messages: [{ role: "user", content: "hello", tokens: 85, contentBlocks: null }],
+          messages: [
+            { role: "user", content: "hello", tokens: 85, contentBlocks: null },
+          ],
         },
         response: {
           model: "gpt-4o",
@@ -457,13 +471,18 @@ describe("Store", () => {
         costUsd: null,
         healthScore: null,
         securityAlerts: [],
-        usage: { inputTokens: 120, outputTokens: 30, cacheReadTokens: 0, cacheWriteTokens: 0 },
+        usage: {
+          inputTokens: 120,
+          outputTokens: 30,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        },
         responseModel: null,
         stopReason: null,
       },
     });
 
-    writeFileSync(stateFile, convoLine + "\n" + entryLine + "\n");
+    writeFileSync(stateFile, `${convoLine}\n${entryLine}\n`);
 
     const store = new Store({
       dataDir,
@@ -529,7 +548,9 @@ describe("Store", () => {
           totalTokens: 7777, // intentionally wrong
           systemPrompts: [],
           tools: [],
-          messages: [{ role: "user", content: "hello", tokens: 70, contentBlocks: null }],
+          messages: [
+            { role: "user", content: "hello", tokens: 70, contentBlocks: null },
+          ],
         },
         response: {
           modelVersion: "gemini-2.0-flash",
@@ -554,13 +575,18 @@ describe("Store", () => {
         costUsd: null,
         healthScore: null,
         securityAlerts: [],
-        usage: { inputTokens: 200, outputTokens: 40, cacheReadTokens: 50, cacheWriteTokens: 0 },
+        usage: {
+          inputTokens: 200,
+          outputTokens: 40,
+          cacheReadTokens: 50,
+          cacheWriteTokens: 0,
+        },
         responseModel: null,
         stopReason: null,
       },
     });
 
-    writeFileSync(stateFile, convoLine + "\n" + entryLine + "\n");
+    writeFileSync(stateFile, `${convoLine}\n${entryLine}\n`);
 
     const store = new Store({
       dataDir,
@@ -618,7 +644,7 @@ describe("Store", () => {
             { role: "user", content: "hello", tokens: 2, contentBlocks: null },
             {
               role: "user",
-              content: "[{\"type\":\"tool_result\"...",
+              content: '[{"type":"tool_result"...',
               // Inflated token count from base64 image
               tokens: 750_000,
               contentBlocks: [
@@ -632,7 +658,12 @@ describe("Store", () => {
                 },
               ],
             },
-            { role: "assistant", content: "I see an image", tokens: 4, contentBlocks: null },
+            {
+              role: "assistant",
+              content: "I see an image",
+              tokens: 4,
+              contentBlocks: null,
+            },
           ],
         },
         response: { usage: { input_tokens: 100, output_tokens: 50 } },
@@ -650,13 +681,18 @@ describe("Store", () => {
         costUsd: null,
         healthScore: null,
         securityAlerts: [],
-        usage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 0, cacheWriteTokens: 0 },
+        usage: {
+          inputTokens: 100,
+          outputTokens: 50,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        },
         responseModel: null,
         stopReason: null,
       },
     });
 
-    writeFileSync(stateFile, convoLine + "\n" + entryLine + "\n");
+    writeFileSync(stateFile, `${convoLine}\n${entryLine}\n`);
 
     const store = new Store({
       dataDir,
@@ -740,7 +776,12 @@ describe("Store", () => {
           tools: [],
           messages: [
             { role: "user", content: "hello", tokens: 2, contentBlocks: null },
-            { role: "assistant", content: "hi there", tokens: 3, contentBlocks: null },
+            {
+              role: "assistant",
+              content: "hi there",
+              tokens: 3,
+              contentBlocks: null,
+            },
           ],
         },
         response: { usage: { input_tokens: 100, output_tokens: 50 } },
@@ -758,13 +799,18 @@ describe("Store", () => {
         costUsd: null,
         healthScore: null,
         securityAlerts: [],
-        usage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 0, cacheWriteTokens: 0 },
+        usage: {
+          inputTokens: 100,
+          outputTokens: 50,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        },
         responseModel: null,
         stopReason: null,
       },
     });
 
-    writeFileSync(stateFile, convoLine + "\n" + entryLine + "\n");
+    writeFileSync(stateFile, `${convoLine}\n${entryLine}\n`);
 
     const store = new Store({
       dataDir,
@@ -833,14 +879,28 @@ describe("Store", () => {
           systemPrompts: [],
           tools: [],
           messages: [
-            { role: "user", content: "hello there friend", tokens: 5, contentBlocks: null },
-            { role: "assistant", content: "hi back to you my friend", tokens: 7, contentBlocks: null },
+            {
+              role: "user",
+              content: "hello there friend",
+              tokens: 5,
+              contentBlocks: null,
+            },
+            {
+              role: "assistant",
+              content: "hi back to you my friend",
+              tokens: 7,
+              contentBlocks: null,
+            },
             {
               role: "user",
               content: "tool result text",
               tokens: 13,
               contentBlocks: [
-                { type: "tool_result", tool_use_id: "t1", content: "some tool output text here" },
+                {
+                  type: "tool_result",
+                  tool_use_id: "t1",
+                  content: "some tool output text here",
+                },
               ],
             },
           ],
@@ -860,13 +920,18 @@ describe("Store", () => {
         costUsd: null,
         healthScore: null,
         securityAlerts: [],
-        usage: { inputTokens: 175, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0 },
+        usage: {
+          inputTokens: 175,
+          outputTokens: 20,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        },
         responseModel: null,
         stopReason: null,
       },
     });
 
-    writeFileSync(stateFile, convoLine + "\n" + entryLine + "\n");
+    writeFileSync(stateFile, `${convoLine}\n${entryLine}\n`);
 
     const store = new Store({
       dataDir,

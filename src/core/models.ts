@@ -109,7 +109,12 @@ export function estimateCost(
 
       return (
         Math.round(
-          ((inputTokens * inp + outputTokens * out + cacheReadCost + cacheWriteCost) / 1_000_000) * 1_000_000,
+          ((inputTokens * inp +
+            outputTokens * out +
+            cacheReadCost +
+            cacheWriteCost) /
+            1_000_000) *
+            1_000_000,
         ) / 1_000_000
       );
     }

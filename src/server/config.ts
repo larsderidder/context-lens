@@ -35,7 +35,9 @@ export function loadServerConfig(baseDir: string): ServerConfig {
   const allowTargetOverride =
     process.env.CONTEXT_LENS_ALLOW_TARGET_OVERRIDE === "1";
 
-  const privacyEnv = (process.env.CONTEXT_LENS_PRIVACY || "standard").toLowerCase();
+  const privacyEnv = (
+    process.env.CONTEXT_LENS_PRIVACY || "standard"
+  ).toLowerCase();
   const privacy: PrivacyLevel =
     privacyEnv === "minimal" || privacyEnv === "full" ? privacyEnv : "standard";
 

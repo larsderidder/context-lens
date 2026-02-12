@@ -5,7 +5,7 @@ export interface ClassifiedEntry {
   isMain: boolean
 }
 
-/** Category metadata — labels and colors matching the treemap */
+/** Per-category labels and colors shared with the composition treemap. */
 export const CATEGORY_META: Record<string, { label: string; color: string }> = {
   system_prompt: { label: 'System prompt', color: '#2563eb' },
   tool_definitions: { label: 'Tool definitions', color: '#db2777' },
@@ -28,7 +28,7 @@ export function getCategoryColor(category: string, fallback = '#475569'): string
   return CATEGORY_META[category]?.color ?? fallback
 }
 
-/** Simple grouped categories for the treemap "simple" mode */
+/** Group map used by the treemap "simple" mode. */
 export const SIMPLE_GROUPS: Record<string, string[]> = {
   system: ['system_prompt', 'system_injections'],
   tools: ['tool_definitions', 'tool_calls', 'tool_results'],
@@ -43,7 +43,7 @@ export const SIMPLE_META: Record<string, { label: string; color: string }> = {
   other: { label: 'Other', color: '#4b5563' },
 }
 
-/** Classify a message into a composition category */
+/** Classify a parsed message into one of the composition categories. */
 export function classifyMessageRole(msg: ParsedMessage): string {
   const role = msg.role || 'user'
   const content = msg.content || ''
@@ -64,7 +64,7 @@ export function classifyMessageRole(msg: ParsedMessage): string {
   return 'other'
 }
 
-/** Build a map of tool_use_id → tool name from messages */
+/** Build a map from `tool_use` block id to tool name. */
 export function buildToolNameMap(msgs: ParsedMessage[]): Record<string, string> {
   const map: Record<string, string> = {}
   for (const m of msgs) {
@@ -79,7 +79,7 @@ export function buildToolNameMap(msgs: ParsedMessage[]): Record<string, string> 
   return map
 }
 
-/** Extract a preview string for a message */
+/** Build a short, human-readable preview for a message row. */
 export function extractPreview(msg: ParsedMessage, toolNameMap: Record<string, string> = {}): string {
   const blocks = msg.contentBlocks
   if (blocks && Array.isArray(blocks)) {
@@ -105,7 +105,7 @@ export function extractPreview(msg: ParsedMessage, toolNameMap: Record<string, s
   return (msg.content || '').slice(0, 80)
 }
 
-/** Extract full text content from a message (for copy) */
+/** Convert a message into full plain text for clipboard/export actions. */
 export function extractFullText(msg: ParsedMessage): string {
   if (msg.contentBlocks && msg.contentBlocks.length > 0) {
     return msg.contentBlocks.map((b) => {
@@ -120,7 +120,7 @@ export function extractFullText(msg: ParsedMessage): string {
   return msg.content || ''
 }
 
-/** Convert a message to a raw JSON object (for raw view) */
+/** Convert a parsed message into a raw-object view payload. */
 export function msgToRawObject(msg: ParsedMessage): Record<string, unknown> {
   const obj: Record<string, unknown> = { role: msg.role }
   if (msg.contentBlocks && msg.contentBlocks.length > 0) {
@@ -136,7 +136,7 @@ export function msgToRawObject(msg: ParsedMessage): Record<string, unknown> {
   return obj
 }
 
-/** Category ordering for message list grouping */
+/** Fixed category ordering used by the message list UI. */
 const CATEGORY_ORDER = [
   'tool_results',
   'system_injections',
@@ -146,7 +146,7 @@ const CATEGORY_ORDER = [
   'user_text',
 ]
 
-/** Group messages by category, maintaining category order */
+/** Group messages by category while preserving the UI category order. */
 export function groupMessagesByCategory(msgs: ParsedMessage[]): {
   category: string
   items: { msg: ParsedMessage; origIdx: number }[]
@@ -178,7 +178,7 @@ export function groupMessagesByCategory(msgs: ParsedMessage[]): {
     }))
 }
 
-/** Classify entries into main/sub based on agent key frequency */
+/** Mark entries as main/sub by picking the most frequent `agentKey` as main. */
 export function classifyEntries(entries: ProjectedEntry[]): ClassifiedEntry[] {
   const keyCounts = new Map<string, number>()
   for (const e of entries) {

@@ -62,7 +62,7 @@ export function createStaticHandler(
           return;
         }
       } catch {
-        // File not found — fall through to SPA fallback
+        // File not found; fall through to SPA fallback
       }
 
       // SPA fallback: serve index.html for unmatched routes

@@ -434,17 +434,19 @@ function totalInputWithCache(entry: ProjectedEntry): number {
 // ══════════════════════════════════════════════════════════════════════════════
 
 interface TurnsProjection {
-  turnsRemaining: number | null // null = not enough data or no growth
-  growthPerTurn: number         // average tokens added per main turn since last compaction
-  sinceCompaction: number       // how many main turns since last compaction (or session start)
+  // Null when there is not enough history or growth is non-positive.
+  turnsRemaining: number | null
+  // Average token growth per main turn in the current post-compaction window.
+  growthPerTurn: number
+  // Count of main turns included in the post-compaction window.
+  sinceCompaction: number
   contextLimit: number
   currentTokens: number
 }
 
 /**
- * Estimate turns remaining before hitting the context limit.
- * Only considers main turns since the last compaction event (or session start).
- * Requires at least 2 data points to compute a growth rate.
+ * Estimate main turns remaining before context limit exhaustion.
+ * Uses only the most recent post-compaction window and requires at least two main turns.
  */
 export function projectTurnsRemaining(
   classified: ClassifiedEntry[],

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 
 import { parseContextInfo } from "../src/core.js";
+import { normalizeComposition } from "../src/lhar/composition.js";
 import {
   analyzeComposition,
   buildLharRecord,
@@ -13,8 +14,11 @@ import {
   toLharJson,
   toLharJsonl,
 } from "../src/lhar.js";
-import { normalizeComposition } from "../src/lhar/composition.js";
-import type { CapturedEntry, CompositionEntry, Conversation } from "../src/types.js";
+import type {
+  CapturedEntry,
+  CompositionEntry,
+  Conversation,
+} from "../src/types.js";
 
 const fixturesDir = join(process.cwd(), "test", "fixtures");
 const anthropicBasic = JSON.parse(
@@ -280,7 +284,10 @@ describe("analyzeComposition", () => {
       if (t === "thinking") {
         return { type: "thinking", thinking: "chain-of-thought marker" };
       }
-      return { type: "image", source: { type: "base64", data: "A".repeat(32) } };
+      return {
+        type: "image",
+        source: { type: "base64", data: "A".repeat(32) },
+      };
     };
 
     for (let i = 0; i < 75; i++) {
@@ -302,7 +309,13 @@ describe("analyzeComposition", () => {
         system: next() > 0.5 ? "be helpful" : [{ text: "be precise" }],
         tools:
           next() > 0.4
-            ? [{ name: "search_docs", description: "search docs", input_schema: { type: "object" } }]
+            ? [
+                {
+                  name: "search_docs",
+                  description: "search docs",
+                  input_schema: { type: "object" },
+                },
+              ]
             : [],
         messages,
       };
@@ -383,7 +396,10 @@ describe("normalizeComposition", () => {
     normalizeComposition(comp, 300);
     assert.equal(comp[0].tokens, 150);
     assert.equal(comp[1].tokens, 150);
-    assert.equal(comp.reduce((s, c) => s + c.tokens, 0), 300);
+    assert.equal(
+      comp.reduce((s, c) => s + c.tokens, 0),
+      300,
+    );
   });
 
   it("fixes rounding residual on the largest entry", () => {
@@ -394,7 +410,11 @@ describe("normalizeComposition", () => {
     ];
     normalizeComposition(comp, 100);
     const total = comp.reduce((s, c) => s + c.tokens, 0);
-    assert.equal(total, 100, `sum must be exactly 100 after normalization, got ${total}`);
+    assert.equal(
+      total,
+      100,
+      `sum must be exactly 100 after normalization, got ${total}`,
+    );
   });
 
   it("recomputes pct fields after scaling", () => {
