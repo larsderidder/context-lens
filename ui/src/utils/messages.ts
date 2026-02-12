@@ -1,5 +1,10 @@
 import type { ParsedMessage, ProjectedEntry, ContentBlock } from '@/api-types'
 
+export interface ClassifiedEntry {
+  entry: ProjectedEntry
+  isMain: boolean
+}
+
 /** Category metadata — labels and colors matching the treemap */
 export const CATEGORY_META: Record<string, { label: string; color: string }> = {
   system_prompt: { label: 'System prompt', color: '#2563eb' },
@@ -166,7 +171,7 @@ export function groupMessagesByCategory(msgs: ParsedMessage[]): {
 }
 
 /** Classify entries into main/sub based on agent key frequency */
-export function classifyEntries(entries: ProjectedEntry[]): { entry: ProjectedEntry; isMain: boolean }[] {
+export function classifyEntries(entries: ProjectedEntry[]): ClassifiedEntry[] {
   const keyCounts = new Map<string, number>()
   for (const e of entries) {
     const k = e.agentKey || '_default'

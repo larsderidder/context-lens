@@ -1,15 +1,37 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useSessionStore } from '@/stores/session'
 import { fmtTokens, fmtCost, shortModel } from '@/utils/format'
-import { classifyEntries, CATEGORY_META, SIMPLE_GROUPS, SIMPLE_META } from '@/utils/messages'
+import { classifyEntries, SIMPLE_META } from '@/utils/messages'
 import type { ProjectedEntry } from '@/api-types'
+import {
+  type GroupSegment,
+  type TimelineEvent,
+  type DiffData,
+  detectTimelineEvents,
+  calculateContextDiff,
+  barColor,
+  barTooltip,
+  segmentTooltip,
+  markerLabel,
+  markerTitle,
+  calculateBarHeight,
+  calculateYTicks,
+  calculateLabelStep,
+  calculateTurnNumbers,
+  formatYTick,
+  stackSegments,
+  visibleTokens,
+  groupedSegmentsForEntry,
+} from '@/utils/timeline'
 
 const store = useSessionStore()
 
 type TimelineMode = 'all' | 'main' | 'cost'
 const mode = ref<TimelineMode>('all')
 const hiddenLegendKeys = ref(new Set<string>())
+const chartScrollEl = ref<HTMLElement | null>(null)
+const showLimitOverlay = ref(true)
 
 const session = computed(() => store.selectedSession)
 const entry = computed(() => store.selectedEntry)
@@ -24,45 +46,6 @@ const filtered = computed(() => {
   return classified.value
 })
 
-interface GroupSegment {
-  key: string
-  label: string
-  color: string
-  tokens: number
-  pct: number
-}
-
-interface TimelineEvent {
-  type: 'compaction' | 'cache-shift' | 'subagent-burst' | 'tool-jump'
-  label: string
-  detail: string
-}
-
-function groupedSegmentsForEntry(e: ProjectedEntry): GroupSegment[] {
-  const comp = e.composition || []
-  const total = comp.reduce((sum, item) => sum + item.tokens, 0)
-  const segments: GroupSegment[] = []
-
-  for (const [groupKey, categories] of Object.entries(SIMPLE_GROUPS)) {
-    let tokens = 0
-    for (const cat of categories) {
-      const found = comp.find((item) => item.category === cat)
-      if (found) tokens += found.tokens
-    }
-    if (tokens > 0) {
-      segments.push({
-        key: groupKey,
-        label: SIMPLE_META[groupKey]?.label ?? groupKey,
-        color: SIMPLE_META[groupKey]?.color ?? '#4b5563',
-        tokens,
-        pct: total > 0 ? (tokens / total) * 100 : 0,
-      })
-    }
-  }
-
-  return segments.sort((a, b) => b.tokens - a.tokens)
-}
-
 const maxVal = computed(() => {
   let max = 0
   for (const item of filtered.value) {
@@ -74,127 +57,13 @@ const maxVal = computed(() => {
 
 const isSparse = computed(() => filtered.value.length <= 40)
 
-const yTicks = computed(() => {
-  const max = maxVisibleVal.value
-  if (max === 0) return [0]
-  const count = 4
-  const step = max / count
-  const magnitude = Math.pow(10, Math.floor(Math.log10(step)))
-  const niceStep = Math.ceil(step / magnitude) * magnitude
-  const ticks: number[] = []
-  for (let i = 0; i <= count; i++) {
-    const v = i * niceStep
-    if (v <= max * 1.1) ticks.push(v)
-  }
-  return ticks
-})
+const yTicks = computed(() => calculateYTicks(maxVisibleVal.value))
 
-const turnNumbers = computed(() => {
-  let mainNum = 0
-  return filtered.value.map(item => {
-    if (item.isMain) mainNum++
-    return item.isMain ? mainNum : 0
-  })
-})
+const turnNumbers = computed(() => calculateTurnNumbers(filtered.value))
 
-function previousMainEntry(currentId: number): ProjectedEntry | null {
-  const idx = classified.value.findIndex((item) => item.entry.id === currentId)
-  if (idx <= 0) return null
-  for (let i = idx - 1; i >= 0; i--) {
-    if (classified.value[i].isMain) return classified.value[i].entry
-  }
-  return null
-}
-
-function subagentCallsInTurn(currentId: number): number {
-  const idx = classified.value.findIndex((item) => item.entry.id === currentId)
-  if (idx < 0) return 0
-  let mainStart = idx
-  for (let i = idx; i >= 0; i--) {
-    if (classified.value[i].isMain) { mainStart = i; break }
-  }
-  let count = 0
-  for (let i = mainStart + 1; i < classified.value.length; i++) {
-    if (classified.value[i].isMain) break
-    count++
-  }
-  return count
-}
-
-function markerLabel(type: TimelineEvent['type']): string {
-  if (type === 'compaction') return 'C'
-  if (type === 'cache-shift') return 'H'
-  if (type === 'subagent-burst') return 'S'
-  return 'T'
-}
-
-function markerTitle(events: TimelineEvent[], turnNum: number): string {
-  const summary = events.map((event) => `${event.label}: ${event.detail}`).join(' | ')
-  return `Turn ${turnNum}: ${summary}`
-}
-
-const eventsByEntryId = computed(() => {
-  const map = new Map<number, TimelineEvent[]>()
-  const toolJumpThreshold = 1800
-
-  for (const item of filtered.value) {
-    const events: TimelineEvent[] = []
-    const prevMain = previousMainEntry(item.entry.id)
-
-    if (prevMain && item.isMain) {
-      const prevTokens = prevMain.contextInfo.totalTokens
-      const currTokens = item.entry.contextInfo.totalTokens
-      if (prevTokens > 0 && currTokens < prevTokens * 0.75) {
-        events.push({
-          type: 'compaction',
-          label: 'Compaction',
-          detail: `${fmtTokens(prevTokens)} → ${fmtTokens(currTokens)} total tokens`,
-        })
-      }
-
-      const prevCache = prevMain.usage && prevMain.usage.inputTokens > 0
-        ? prevMain.usage.cacheReadTokens / prevMain.usage.inputTokens
-        : null
-      const currCache = item.entry.usage && item.entry.usage.inputTokens > 0
-        ? item.entry.usage.cacheReadTokens / item.entry.usage.inputTokens
-        : null
-      if (prevCache !== null && currCache !== null) {
-        const delta = currCache - prevCache
-        if (Math.abs(delta) >= 0.2) {
-          events.push({
-            type: 'cache-shift',
-            label: 'Cache shift',
-            detail: `${Math.round(prevCache * 100)}% → ${Math.round(currCache * 100)}% hit rate`,
-          })
-        }
-      }
-
-      const prevTool = prevMain.composition.find((comp) => comp.category === 'tool_results')?.tokens ?? 0
-      const currTool = item.entry.composition.find((comp) => comp.category === 'tool_results')?.tokens ?? 0
-      if (currTool - prevTool >= toolJumpThreshold) {
-        events.push({
-          type: 'tool-jump',
-          label: 'Tool jump',
-          detail: `tool results +${fmtTokens(currTool - prevTool)}`,
-        })
-      }
-    }
-
-    if (item.isMain) {
-      const subCalls = subagentCallsInTurn(item.entry.id)
-      if (subCalls >= 3) {
-        events.push({
-          type: 'subagent-burst',
-          label: 'Subagent burst',
-          detail: `${subCalls} subagent calls in this turn`,
-        })
-      }
-    }
-
-    if (events.length > 0) map.set(item.entry.id, events)
-  }
-  return map
-})
+const eventsByEntryId = computed(() =>
+  detectTimelineEvents(filtered.value, classified.value)
+)
 
 function toggleLegend(key: string) {
   const next = new Set(hiddenLegendKeys.value)
@@ -203,152 +72,80 @@ function toggleLegend(key: string) {
   hiddenLegendKeys.value = next
 }
 
-function visibleTokens(item: { entry: ProjectedEntry }): number {
-  if (mode.value === 'cost') return 0
-  const hidden = hiddenLegendKeys.value
-  if (hidden.size === 0) return item.entry.contextInfo.totalTokens
-  const segments = groupedSegmentsForEntry(item.entry)
-  return segments.filter(s => !hidden.has(s.key)).reduce((sum, s) => sum + s.tokens, 0)
-}
-
 const maxVisibleVal = computed(() => {
   if (hiddenLegendKeys.value.size === 0) return maxVal.value
   let max = 0
   for (const item of filtered.value) {
-    const val = mode.value === 'cost' ? (item.entry.costUsd ?? 0) : visibleTokens(item)
+    const val = mode.value === 'cost' ? (item.entry.costUsd ?? 0) : visibleTokens(item.entry, hiddenLegendKeys.value)
     if (val > max) max = val
   }
   return max
 })
 
-function barHeight(item: { entry: ProjectedEntry }): number {
-  const val = mode.value === 'cost' ? (item.entry.costUsd ?? 0) : visibleTokens(item)
-  const max = maxVisibleVal.value
-  if (max === 0) return 3
-  return Math.max(3, Math.round((val / max) * 100))
+function getBarHeight(item: { entry: ProjectedEntry }): number {
+  const val = mode.value === 'cost' ? (item.entry.costUsd ?? 0) : visibleTokens(item.entry, hiddenLegendKeys.value)
+  return calculateBarHeight(val, maxVisibleVal.value)
 }
 
-function stackSegments(item: { entry: ProjectedEntry }): GroupSegment[] {
+function getStackSegments(item: { entry: ProjectedEntry }): GroupSegment[] {
   if (mode.value === 'cost') return []
-  const segments = groupedSegmentsForEntry(item.entry)
-  const hidden = hiddenLegendKeys.value
-  if (hidden.size === 0) return segments
-  const visible = segments.filter(s => !hidden.has(s.key))
-  // Recalculate percentages relative to visible total
-  const total = visible.reduce((sum, s) => sum + s.tokens, 0)
-  return visible.map(s => ({
-    ...s,
-    pct: total > 0 ? (s.tokens / total) * 100 : 0,
-  }))
-}
-
-function barColor(model: string, isMain: boolean): string {
-  const alpha = isMain ? '0.85' : '0.35'
-  if (/opus/i.test(model)) return `rgba(251, 146, 60, ${alpha})`
-  if (/sonnet/i.test(model)) return `rgba(96, 165, 250, ${alpha})`
-  if (/haiku/i.test(model)) return `rgba(167, 139, 250, ${alpha})`
-  if (/gpt/i.test(model)) return `rgba(16, 185, 129, ${alpha})`
-  return `rgba(148, 163, 184, ${alpha})`
-}
-
-function barTooltip(item: { entry: ProjectedEntry; isMain: boolean }): string {
-  const e = item.entry
-  const prefix = item.isMain ? '' : 'Sub '
-  return `${prefix}${shortModel(e.contextInfo.model)}: ${fmtTokens(e.contextInfo.totalTokens)} / ${fmtCost(e.costUsd)}`
-}
-
-function segmentTooltip(item: { entry: ProjectedEntry }, segment: GroupSegment): string {
-  return `${segment.label}: ${fmtTokens(segment.tokens)} (${segment.pct.toFixed(1)}%)`
+  return stackSegments(item.entry, hiddenLegendKeys.value)
 }
 
 function selectTurn(entry: ProjectedEntry) {
-  const idx = session.value?.entries.findIndex(e => e.id === entry.id) ?? -1
-  if (idx >= 0) store.selectTurn(idx)
+  store.pinEntry(entry.id)
 }
 
-function fmtYTick(v: number): string {
-  return mode.value === 'cost' ? fmtCost(v) : fmtTokens(v)
+function jumpToCategory(category: string) {
+  store.setInspectorTab('messages')
+  store.focusMessageCategory(category)
 }
 
-const labelStep = computed(() => {
-  const len = filtered.value.length
-  return len > 30 ? Math.ceil(len / 15) : 1
+const labelStep = computed(() => calculateLabelStep(filtered.value.length))
+
+// ── Context limit overlay ──
+// A dashed line showing the model's context window ceiling, overlaid on the bar chart.
+
+const CHART_HEIGHT = 140
+
+// Active entry's context limit
+const contextLimit = computed(() => {
+  const e = entry.value
+  if (e && e.contextLimit > 0) return e.contextLimit
+  const entries = filtered.value
+  if (entries.length > 0) return entries[entries.length - 1].entry.contextLimit
+  return 0
 })
 
-// Context diff
-const diffData = computed(() => {
+// Chart Y ceiling: account for context limit when overlay is on (not in cost mode)
+const chartMaxWithLimit = computed(() => {
+  const base = maxVisibleVal.value
+  if (!showLimitOverlay.value || mode.value === 'cost') return base
+  return Math.max(base, contextLimit.value)
+})
+
+// Context limit as percentage from top (for CSS positioning)
+const limitPct = computed(() => {
+  const max = chartMaxWithLimit.value
+  const limit = contextLimit.value
+  if (max === 0 || limit === 0) return -1
+  return (1 - limit / max) * 100
+})
+
+// Bar height scaled to the (potentially expanded) ceiling
+function getBarHeightWithLimit(item: { entry: ProjectedEntry }): number {
+  if (!showLimitOverlay.value) return getBarHeight(item)
+  const val = mode.value === 'cost' ? (item.entry.costUsd ?? 0) : visibleTokens(item.entry, hiddenLegendKeys.value)
+  return calculateBarHeight(val, chartMaxWithLimit.value)
+}
+
+// Y ticks adjusted when limit overlay changes the ceiling
+const yTicksWithLimit = computed(() => calculateYTicks(chartMaxWithLimit.value))
+
+const diffData = computed((): DiffData | null => {
   const e = entry.value
   if (!e) return null
-  const allClassified = classified.value
-  const idx = allClassified.findIndex(c => c.entry.id === e.id)
-  if (idx < 0) return null
-
-  let prevEntry: ProjectedEntry | null = null
-  for (let i = idx - 1; i >= 0; i--) {
-    if (allClassified[i].isMain) { prevEntry = allClassified[i].entry; break }
-  }
-  if (!prevEntry) return null
-
-  const prevComp = prevEntry.composition || []
-  const currComp = e.composition || []
-  const prevTotal = prevComp.reduce((s, c) => s + c.tokens, 0)
-  const currTotal = currComp.reduce((s, c) => s + c.tokens, 0)
-  const delta = currTotal - prevTotal
-
-  const allCats = new Set<string>()
-  for (const c of prevComp) allCats.add(c.category)
-  for (const c of currComp) allCats.add(c.category)
-
-  const categoryDiffs: { category: string; label: string; delta: number; prevTokens: number; currTokens: number }[] = []
-  for (const cat of allCats) {
-    const prev = prevComp.find(c => c.category === cat)
-    const curr = currComp.find(c => c.category === cat)
-    const prevTok = prev ? prev.tokens : 0
-    const currTok = curr ? curr.tokens : 0
-    const d = currTok - prevTok
-    const meta = CATEGORY_META[cat] || { label: cat }
-    categoryDiffs.push({ category: cat, label: meta.label, delta: d, prevTokens: prevTok, currTokens: currTok })
-  }
-
-  const lines: { type: 'add' | 'remove' | 'same'; text: string }[] = []
-  for (const diff of [...categoryDiffs].sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))) {
-    if (diff.delta === 0) lines.push({ type: 'same', text: `  ${diff.label}: ${fmtTokens(diff.currTokens)} (unchanged)` })
-    else if (diff.prevTokens === 0) lines.push({ type: 'add', text: `+ ${diff.label}: ${fmtTokens(diff.currTokens)} (new)` })
-    else if (diff.currTokens === 0) lines.push({ type: 'remove', text: `- ${diff.label}: ${fmtTokens(diff.prevTokens)} (removed)` })
-    else if (diff.delta > 0) lines.push({ type: 'add', text: `+ ${diff.label}: ${fmtTokens(diff.prevTokens)} → ${fmtTokens(diff.currTokens)} (+${fmtTokens(diff.delta)})` })
-    else lines.push({ type: 'remove', text: `- ${diff.label}: ${fmtTokens(diff.prevTokens)} → ${fmtTokens(diff.currTokens)} (${fmtTokens(diff.delta)})` })
-  }
-
-  const categoryToGroup = new Map<string, string>()
-  for (const [group, categories] of Object.entries(SIMPLE_GROUPS)) {
-    for (const cat of categories) categoryToGroup.set(cat, group)
-  }
-  const groupedDelta = new Map<string, number>()
-  for (const diff of categoryDiffs) {
-    const group = categoryToGroup.get(diff.category) ?? 'other'
-    groupedDelta.set(group, (groupedDelta.get(group) ?? 0) + diff.delta)
-  }
-
-  const groupedSummary = Array.from(groupedDelta.entries())
-    .map(([group, groupDelta]) => ({
-      group,
-      label: SIMPLE_META[group]?.label ?? group,
-      delta: groupDelta,
-    }))
-    .filter((item) => item.delta !== 0)
-    .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
-
-  const topIncreases = groupedSummary.filter((item) => item.delta > 0).slice(0, 3)
-  const topDecreases = groupedSummary.filter((item) => item.delta < 0).slice(0, 3)
-
-  let prevTurnNum = 0, currTurnNum = 0, mainCount = 0
-  for (const c of allClassified) {
-    if (c.isMain) mainCount++
-    if (c.entry.id === prevEntry.id) prevTurnNum = mainCount
-    if (c.entry.id === e.id) currTurnNum = mainCount
-  }
-
-  return { prevTurnNum, currTurnNum, delta, lines, topIncreases, topDecreases }
+  return calculateContextDiff(e, classified.value)
 })
 
 const legendModels = computed(() => {
@@ -367,6 +164,33 @@ const legendGroups = computed(() => {
     color: meta.color,
   }))
 })
+
+function scrollChartToLatest() {
+  nextTick(() => {
+    if (!chartScrollEl.value) return
+    chartScrollEl.value.scrollLeft = chartScrollEl.value.scrollWidth
+  })
+}
+
+onMounted(() => {
+  scrollChartToLatest()
+})
+
+watch(
+  () => session.value?.id,
+  () => {
+    scrollChartToLatest()
+  },
+)
+
+watch(
+  () => filtered.value.length,
+  (next, prev) => {
+    if ((prev ?? 0) === 0 && next > 0) {
+      scrollChartToLatest()
+    }
+  },
+)
 </script>
 
 <template>
@@ -375,6 +199,15 @@ const legendGroups = computed(() => {
     <section class="panel">
       <div class="panel-head">
         <span class="panel-title">Timeline</span>
+        <button
+          v-if="mode !== 'cost'"
+          class="overlay-toggle"
+          :class="{ on: showLimitOverlay }"
+          @click="showLimitOverlay = !showLimitOverlay"
+        >
+          <span class="legend-dot legend-dot--dashed" />
+          Limit
+        </button>
         <div class="mode-toggle">
           <button v-for="m in (['all', 'main', 'cost'] as TimelineMode[])" :key="m"
             :class="{ on: mode === m }" @click="mode = m">
@@ -385,29 +218,39 @@ const legendGroups = computed(() => {
       <div class="panel-body">
         <div class="chart-container">
           <div class="y-axis">
-            <span v-for="tick in [...yTicks].reverse()" :key="tick">{{ fmtYTick(tick) }}</span>
+            <span v-for="tick in [...(showLimitOverlay ? yTicksWithLimit : yTicks)].reverse()" :key="tick">{{ formatYTick(tick, mode === 'cost' ? 'cost' : 'tokens') }}</span>
           </div>
-          <div class="chart-scroll">
-            <div class="bars" :class="{ sparse: isSparse }">
-              <div
-                v-for="(item, i) in filtered" :key="item.entry.id"
-                class="bar" :class="{ active: entry?.id === item.entry.id }"
-                :style="{ height: barHeight(item) + '%' }"
-                v-tooltip="mode === 'cost' ? barTooltip(item) : ''"
-                @click="selectTurn(item.entry)"
-              >
-                <div v-if="mode === 'cost'" class="bar-cost" :style="{ background: barColor(item.entry.contextInfo.model, item.isMain) }" />
-                <template v-else>
-                  <div
-                    v-for="segment in stackSegments(item)"
-                    :key="item.entry.id + '-' + segment.key"
-                    class="bar-segment"
-                    :style="{ height: segment.pct + '%', background: segment.color }"
-                    v-tooltip="segmentTooltip(item, segment)"
-                  />
-                </template>
+          <div ref="chartScrollEl" class="chart-scroll">
+            <div class="bars-wrap" :class="{ sparse: isSparse }">
+              <div class="bars" :class="{ sparse: isSparse }">
+                <div
+                  v-for="(item, i) in filtered" :key="item.entry.id"
+                  class="bar" :class="{ active: entry?.id === item.entry.id }"
+                  :style="{ height: getBarHeightWithLimit(item) + '%' }"
+                  v-tooltip="mode === 'cost' ? barTooltip(item.entry, item.isMain) : ''"
+                  @click="selectTurn(item.entry)"
+                >
+                  <div v-if="mode === 'cost'" class="bar-cost" :style="{ background: barColor(item.entry.contextInfo.model, item.isMain) }" />
+                  <template v-else>
+                    <div
+                      v-for="segment in getStackSegments(item)"
+                      :key="item.entry.id + '-' + segment.key"
+                      class="bar-segment"
+                      :style="{ height: segment.pct + '%', background: segment.color }"
+                      v-tooltip="segmentTooltip(item.entry, segment)"
+                    />
+                  </template>
+                </div>
               </div>
+
+              <!-- Context limit line overlay -->
+              <div
+                v-if="showLimitOverlay && mode !== 'cost' && limitPct >= 0"
+                class="limit-line"
+                :style="{ top: limitPct + '%' }"
+              />
             </div>
+
             <div class="events" :class="{ sparse: isSparse }">
               <div v-for="(item, i) in filtered" :key="'evt-' + item.entry.id" class="event-slot">
                 <button
@@ -465,21 +308,21 @@ const legendGroups = computed(() => {
         >
           <div class="diff-summary-group" v-if="diffData.topIncreases.length > 0">
             <span class="diff-summary-label">Growth drivers</span>
-            <span v-for="item in diffData.topIncreases" :key="'inc-' + item.group" class="diff-summary-chip diff-summary-chip--up">
+            <button v-for="item in diffData.topIncreases" :key="'inc-' + item.group" class="diff-summary-chip diff-summary-chip--up" @click="jumpToCategory(item.category)">
               {{ item.label }} +{{ fmtTokens(item.delta) }}
-            </span>
+            </button>
           </div>
           <div class="diff-summary-group" v-if="diffData.topDecreases.length > 0">
             <span class="diff-summary-label">Shrink drivers</span>
-            <span v-for="item in diffData.topDecreases" :key="'dec-' + item.group" class="diff-summary-chip diff-summary-chip--down">
+            <button v-for="item in diffData.topDecreases" :key="'dec-' + item.group" class="diff-summary-chip diff-summary-chip--down" @click="jumpToCategory(item.category)">
               {{ item.label }} {{ fmtTokens(item.delta) }}
-            </span>
+            </button>
           </div>
         </div>
 
-        <div v-for="(line, i) in diffData.lines" :key="i" class="diff-line" :class="`diff-${line.type}`">
+        <button v-for="(line, i) in diffData.lines" :key="i" class="diff-line" :class="`diff-${line.type}`" @click="jumpToCategory(line.category)">
           {{ line.text }}
-        </div>
+        </button>
       </div>
     </section>
     <section class="panel" v-else-if="entry">
@@ -517,6 +360,26 @@ const legendGroups = computed(() => {
 .panel-title { @include section-label; }
 .panel-sub { font-size: var(--text-xs); color: var(--text-ghost); }
 .panel-body { padding: var(--space-4); }
+
+// ── Limit overlay toggle ──
+.overlay-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  margin-right: var(--space-2);
+  font-size: var(--text-xs);
+  padding: 2px 7px;
+  background: none;
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
+
+  &:hover { color: var(--text-secondary); border-color: var(--border-mid); }
+  &.on { background: var(--accent-red-dim); color: var(--accent-red); border-color: rgba(239, 68, 68, 0.3); }
+}
 
 // ── Mode toggle ──
 .mode-toggle {
@@ -568,6 +431,17 @@ const legendGroups = computed(() => {
   min-width: 0;
   overflow-x: auto;
   @include scrollbar-thin;
+}
+
+// Wrapper provides positioning context for the limit line overlay
+.bars-wrap {
+  position: relative;
+  height: 140px;
+  min-width: min-content;
+
+  &.sparse {
+    min-width: 100%;
+  }
 }
 
 .bars {
@@ -723,6 +597,31 @@ const legendGroups = computed(() => {
   transition: background 0.15s;
 }
 
+// ── Context limit overlay ──
+.limit-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  border-top: 1px dashed var(--accent-red);
+  opacity: 0.5;
+  pointer-events: none;
+  z-index: 1;
+}
+
+
+
+.legend-dot--dashed {
+  width: 10px;
+  height: 2px;
+  border-radius: 0;
+  background: none;
+  border-top: 2px dashed var(--accent-red);
+  opacity: 0.5;
+}
+
+
+
 // ── Diff ──
 .diff-delta {
   margin-left: auto;
@@ -762,6 +661,11 @@ const legendGroups = computed(() => {
   border-radius: var(--radius-sm);
   padding: 2px 6px;
   border: 1px solid transparent;
+  cursor: pointer;
+  background: none;
+  transition: filter 0.12s;
+
+  &:hover { filter: brightness(1.3); }
 }
 
 .diff-summary-chip--up {
@@ -782,6 +686,15 @@ const legendGroups = computed(() => {
   padding: 2px 6px;
   border-radius: 2px;
   margin-bottom: 1px;
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  display: block;
+  transition: filter 0.12s;
+
+  &:hover { filter: brightness(1.3); }
 }
 
 .diff-add { background: rgba(16, 185, 129, 0.06); color: #4ade80; }
