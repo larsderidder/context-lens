@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Context Lens — Mockup 5: Lens Ring</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ══════════════════════════════════════════
+   DIRECTION: LENS RING
+   The concentric-circle logo becomes a UI motif.
+   Ring gauges replace flat bars. Arc indicators
+   create hierarchy. The "lens" is the identity.
+   ══════════════════════════════════════════ */
+
+:root {
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
+
+  --bg-deep: #0a0a0a;
+  --bg-field: #141414;
+  --bg-surface: #1e1e1e;
+  --bg-raised: #282828;
+  --bg-hover: #333333;
+
+  --border-dim: #2a2a2a;
+  --border-mid: #3a3a3a;
+  --border-bright: #4a4a4a;
+
+  --text-primary: #f0f0f0;
+  --text-secondary: #b8b8b8;
+  --text-dim: #888888;
+  --text-muted: #5e5e5e;
+  --text-ghost: #3e3e3e;
+
+  --accent-blue: #0ea5e9;
+  --accent-blue-dim: rgba(14, 165, 233, 0.12);
+  --accent-blue-glow: rgba(14, 165, 233, 0.25);
+  --accent-green: #10b981;
+  --accent-green-dim: rgba(16, 185, 129, 0.12);
+  --accent-amber: #f59e0b;
+  --accent-amber-dim: rgba(245, 158, 11, 0.12);
+  --accent-red: #ef4444;
+  --accent-red-dim: rgba(239, 68, 68, 0.12);
+  --accent-purple: #a78bfa;
+
+  --radius-sm: 3px;
+  --radius-md: 4px;
+  --radius-lg: 6px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+}
+
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: var(--font-sans);
+  background: var(--bg-deep);
+  color: var(--text-primary);
+  font-size: 13px;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Layout ── */
+.app { display: grid; grid-template-rows: 44px 1fr; height: 100vh; }
+.app-body { display: flex; min-height: 0; }
+
+/* ── Toolbar ── */
+.toolbar {
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-dim);
+  display: flex; align-items: center;
+  padding: 0 var(--space-4); gap: var(--space-2);
+}
+.toolbar-brand { display: flex; align-items: center; gap: var(--space-2); }
+.brand-text { font-weight: 600; font-size: 13px; letter-spacing: -0.01em; }
+.toolbar-sep { width: 1px; height: 16px; background: var(--border-dim); margin: 0 var(--space-1); }
+.toolbar-meta { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); }
+.toolbar-meta .green { color: var(--accent-green); }
+.toolbar-right { margin-left: auto; display: flex; gap: var(--space-3); align-items: center; }
+.connection { display: flex; align-items: center; gap: 5px; font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); }
+.connection-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent-green); box-shadow: 0 0 6px var(--accent-green); }
+.toolbar-btn {
+  font-size: 11px; background: var(--bg-raised); border: 1px solid var(--border-dim);
+  color: var(--text-secondary); padding: 4px 10px; border-radius: var(--radius-sm); cursor: pointer;
+}
+.toolbar-btn:hover { border-color: var(--border-mid); color: var(--text-primary); }
+
+/* ── Session Rail ── */
+.session-rail {
+  width: 72px; background: var(--bg-field); border-right: 1px solid var(--border-dim);
+  display: flex; flex-direction: column; align-items: center; padding: 6px 0; gap: 3px;
+}
+.rail-back {
+  width: 54px; height: 28px; display: flex; align-items: center; justify-content: center;
+  background: none; border: 1px solid var(--border-dim); border-radius: var(--radius-sm);
+  color: var(--text-dim); cursor: pointer; font-size: 14px;
+}
+.rail-back:hover { border-color: var(--border-mid); color: var(--text-primary); background: var(--bg-raised); }
+.rail-label { font-size: 8px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-ghost); margin: 6px 0 4px; }
+.rail-scroll { flex: 1; overflow-y: auto; display: flex; flex-direction: column; align-items: center; gap: 3px; width: 100%; }
+.rail-tile {
+  width: 54px; min-height: 50px; border-radius: var(--radius-md); display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 3px; cursor: pointer; border: 1.5px solid transparent;
+  background: var(--bg-surface); padding: 6px 3px 5px; transition: all 0.12s; position: relative;
+}
+.rail-tile:hover { background: var(--bg-raised); border-color: var(--border-mid); }
+.rail-tile.active { border-color: var(--accent-blue); background: var(--accent-blue-dim); }
+.tile-source { font-family: var(--font-mono); font-size: 9px; font-weight: 600; }
+.tile-source.claude { color: #fb923c; }
+.tile-source.codex { color: #34d399; }
+.tile-source.pi { color: var(--accent-purple); }
+.tile-turns { font-family: var(--font-mono); font-size: 9px; color: var(--text-muted); }
+
+/* ── Ring gauge in rail tile (signature motif) ── */
+.tile-ring {
+  width: 28px; height: 28px; position: relative;
+}
+.tile-ring svg { display: block; }
+.tile-ring-pct {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono); font-size: 8px; font-weight: 700; color: var(--text-dim);
+}
+
+/* ── Inspector ── */
+.inspector { flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--bg-deep); }
+
+/* ── Scrubber ── */
+.scrubber {
+  display: flex; align-items: center; gap: 8px; padding: 4px 10px;
+  background: var(--bg-surface); border-bottom: 1px solid var(--border-dim); height: 36px;
+}
+.scrub-controls { display: flex; align-items: center; gap: 4px; }
+.scrub-btn {
+  width: 20px; height: 20px; display: flex; align-items: center; justify-content: center;
+  background: none; border: 1px solid transparent; border-radius: var(--radius-sm);
+  color: var(--text-dim); cursor: pointer; font-size: 11px;
+}
+.scrub-btn:hover { color: var(--text-primary); background: var(--bg-hover); border-color: var(--border-dim); }
+.scrub-readout {
+  display: flex; align-items: center; gap: 3px;
+  font-family: var(--font-mono); font-size: 11px; min-width: 42px; justify-content: center;
+}
+.scrub-readout .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent-green); box-shadow: 0 0 5px rgba(16,185,129,0.6); }
+.scrub-readout .num { color: var(--text-primary); font-weight: 600; }
+.scrub-readout .sep { color: var(--text-ghost); }
+.scrub-readout .total { color: var(--text-muted); }
+.scrub-track {
+  flex: 1; height: 28px; position: relative; border-radius: var(--radius-sm);
+  background: var(--bg-deep); border: 1px solid var(--border-dim); overflow: hidden; cursor: pointer;
+}
+.spark-bars { display: flex; align-items: flex-end; height: 100%; padding: 2px 1px; gap: 1px; }
+.spark-bar { flex: 1; min-width: 2px; border-radius: 1px 1px 0 0; background: var(--accent-blue); opacity: 0.4; transition: opacity 0.1s; }
+.spark-bar.active { opacity: 1; }
+.spark-bar:nth-child(8) { opacity: 1; }
+.scrub-action {
+  display: flex; align-items: center; gap: 3px; font-family: var(--font-mono); font-size: 11px;
+  padding: 3px 7px; border-radius: var(--radius-sm); border: 1px solid rgba(16,185,129,0.3);
+  background: rgba(16,185,129,0.08); color: var(--accent-green); cursor: pointer;
+}
+
+/* ── Tab bar ── */
+.tab-bar {
+  display: flex; background: var(--bg-field); border-bottom: 1px solid var(--border-dim);
+}
+.tab-btn {
+  font-size: 12px; font-weight: 500; color: var(--text-muted); padding: 10px 18px;
+  cursor: pointer; border: none; border-bottom: 2px solid transparent; background: none;
+  transition: color 0.12s, border-color 0.12s;
+}
+.tab-btn:hover { color: var(--text-secondary); }
+.tab-btn.active { color: var(--accent-blue); border-bottom-color: var(--accent-blue); }
+
+/* ── Tab content ── */
+.tab-content { flex: 1; overflow-y: auto; }
+.tab-content::-webkit-scrollbar { width: 5px; }
+.tab-content::-webkit-scrollbar-thumb { background: var(--border-mid); border-radius: 3px; }
+
+/* ══════════════════════════════════════════
+   OVERVIEW TAB — Lens Ring Treatment
+   ══════════════════════════════════════════ */
+.overview { padding: var(--space-5); display: flex; flex-direction: column; gap: var(--space-4); }
+
+/* ── Health Narrative ── */
+.narrative {
+  display: flex; align-items: center; gap: var(--space-4);
+  border: 1px solid rgba(94,159,248,0.25); border-radius: var(--radius-md);
+  background: var(--bg-surface); padding: var(--space-3) var(--space-4);
+}
+.narrative.advisory { border-color: rgba(245,158,11,0.35); background: rgba(245,158,11,0.04); }
+.narrative-copy { flex: 1; }
+.narrative-title { font-size: 12px; font-weight: 600; color: var(--text-primary); }
+.narrative-detail { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+.narrative-actions { display: flex; gap: var(--space-2); }
+.narrative-btn {
+  font-size: 11px; padding: 4px 10px; border: 1px solid var(--border-dim); border-radius: var(--radius-sm);
+  background: var(--bg-raised); color: var(--text-secondary); cursor: pointer;
+  transition: all 0.12s;
+}
+.narrative-btn:hover { border-color: var(--border-mid); color: var(--text-primary); background: var(--bg-hover); }
+
+/* ══ HERO STAT: Ring Gauge (Signature) ══
+   The primary metric gets a large ring gauge
+   that echoes the logo. Secondary stats are smaller. */
+
+.stats-row { display: flex; gap: var(--space-4); align-items: stretch; }
+
+/* Primary: Context Utilization with LARGE ring */
+.stat-hero {
+  flex: 0 0 200px; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: var(--space-5); background: var(--bg-surface); border: 1px solid var(--border-dim);
+  border-radius: var(--radius-md); position: relative; overflow: hidden;
+}
+/* Subtle concentric ring background pattern */
+.stat-hero::before {
+  content: ''; position: absolute; inset: 0; opacity: 0.03; pointer-events: none;
+  background: radial-gradient(circle at center, transparent 30px, var(--accent-blue) 31px, transparent 32px),
+              radial-gradient(circle at center, transparent 50px, var(--accent-blue) 51px, transparent 52px),
+              radial-gradient(circle at center, transparent 70px, var(--accent-blue) 71px, transparent 72px);
+}
+
+.hero-ring { position: relative; width: 96px; height: 96px; }
+.hero-ring svg { display: block; filter: drop-shadow(0 0 8px rgba(14,165,233,0.15)); }
+.hero-ring-inner {
+  position: absolute; inset: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+}
+.hero-pct {
+  font-family: var(--font-mono); font-size: 22px; font-weight: 700;
+  letter-spacing: -0.03em; line-height: 1;
+}
+.hero-label-text {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim);
+  margin-top: 4px; font-weight: 600;
+}
+.hero-detail {
+  font-family: var(--font-mono); font-size: 10px; color: var(--text-ghost); margin-top: 8px;
+}
+
+/* Secondary stats: small ring + number */
+.stats-secondary { flex: 1; display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-3); }
+
+.stat-card {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: var(--space-4); background: var(--bg-surface); border: 1px solid var(--border-dim);
+  border-radius: var(--radius-md); gap: 4px;
+}
+.stat-mini-ring { position: relative; width: 44px; height: 44px; }
+.stat-mini-ring svg { display: block; }
+.stat-mini-ring-val {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono); font-size: 11px; font-weight: 700;
+}
+.stat-readout {
+  font-family: var(--font-mono); font-size: 16px; font-weight: 700; letter-spacing: -0.02em;
+  line-height: 1;
+}
+.stat-readout.green { color: var(--accent-green); }
+.stat-label {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim);
+  font-weight: 600;
+}
+.stat-detail { font-family: var(--font-mono); font-size: 10px; color: var(--text-ghost); }
+
+/* ── Meta row ── */
+.meta-row { font-size: 11px; color: var(--text-muted); display: flex; gap: var(--space-4); }
+
+/* ══ PANELS — unified structure ══ */
+.panel {
+  background: var(--bg-surface); border: 1px solid var(--border-dim);
+  border-radius: var(--radius-md); overflow: hidden;
+}
+.panel-head {
+  padding: var(--space-2) var(--space-4); border-bottom: 1px solid var(--border-dim);
+  display: flex; align-items: center; gap: var(--space-2);
+}
+.panel-title {
+  font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim);
+}
+.panel-count {
+  font-family: var(--font-mono); font-size: 10px; padding: 1px 5px; border-radius: var(--radius-sm);
+  background: var(--accent-blue-dim); color: var(--accent-blue);
+}
+.panel-sub { font-size: 11px; color: var(--text-dim); }
+.panel-body { padding: var(--space-4); }
+
+/* ── Mode toggle (unified across all tabs) ── */
+.mode-toggle {
+  display: flex; margin-left: auto; border: 1px solid var(--border-dim);
+  border-radius: var(--radius-sm); overflow: hidden;
+}
+.mode-toggle button {
+  font-size: 11px; padding: 3px 8px; background: none; border: none;
+  color: var(--text-muted); cursor: pointer; transition: background 0.1s, color 0.1s;
+}
+.mode-toggle button + button { border-left: 1px solid var(--border-dim); }
+.mode-toggle button:hover { color: var(--text-secondary); }
+.mode-toggle button.on { background: var(--accent-blue-dim); color: var(--accent-blue); }
+
+/* ── Composition treemap ── */
+.treemap { height: 78px; border-radius: var(--radius-sm); overflow: hidden; position: relative; background: var(--bg-raised); display: flex; gap: 1px; }
+.tm-block {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  cursor: pointer; transition: filter 0.15s; min-width: 0;
+}
+.tm-block:hover { filter: brightness(1.25); }
+.tm-label { font-family: var(--font-mono); font-size: 10px; font-weight: 600; color: rgba(255,255,255,0.9); text-shadow: 0 1px 2px rgba(0,0,0,0.4); }
+.tm-val { font-family: var(--font-mono); font-size: 10px; color: rgba(255,255,255,0.65); }
+.legend { display: flex; gap: var(--space-3); margin-top: var(--space-2); flex-wrap: wrap; }
+.legend-item { display: flex; align-items: center; gap: 4px; font-size: 10px; color: var(--text-dim); }
+.legend-dot { width: 6px; height: 6px; border-radius: 2px; }
+
+/* ── Audit chips ── */
+.audit-row { padding: var(--space-2) var(--space-4); display: flex; gap: var(--space-2); flex-wrap: wrap; border-bottom: 1px solid var(--border-dim); }
+.audit-chip {
+  font-family: var(--font-mono); font-size: 10px; padding: 2px 7px; border-radius: var(--radius-sm); cursor: default;
+}
+.audit-chip b { font-weight: 700; margin-left: 2px; }
+.audit-good { background: rgba(16,185,129,0.08); color: #6ee7b7; }
+.audit-good b { color: var(--accent-green); }
+.audit-warn { background: rgba(245,158,11,0.08); color: #fbbf24; }
+.audit-warn b { color: var(--accent-amber); }
+
+/* ── Recommendations ── */
+.rec { display: flex; align-items: flex-start; gap: var(--space-3); padding: var(--space-3) 0; border-bottom: 1px solid var(--border-dim); }
+.rec:last-child { border-bottom: none; padding-bottom: 0; }
+.rec:first-child { padding-top: 0; }
+.rec-dot { width: 6px; height: 6px; border-radius: var(--radius-sm); margin-top: 5px; flex-shrink: 0; }
+.rec-dot.sev-high { background: var(--accent-red); box-shadow: 0 0 4px var(--accent-red); }
+.rec-dot.sev-med { background: var(--accent-amber); box-shadow: 0 0 4px var(--accent-amber); }
+.rec-dot.sev-low { background: var(--accent-green); }
+.rec-content { flex: 1; }
+.rec-title { font-size: 12px; font-weight: 500; color: var(--text-secondary); }
+.rec-detail { font-size: 11px; color: var(--text-muted); margin-top: 3px; line-height: 1.5; }
+.rec-impact {
+  font-family: var(--font-mono); font-size: 10px; padding: 1px 5px; border-radius: var(--radius-sm);
+  white-space: nowrap; flex-shrink: 0; margin-top: 2px;
+}
+.rec-impact.sev-high { background: var(--accent-red-dim); color: var(--accent-red); }
+.rec-impact.sev-med { background: var(--accent-amber-dim); color: var(--accent-amber); }
+.rec-impact.sev-low { background: var(--accent-green-dim); color: var(--accent-green); }
+
+/* ═══════════════════════════════
+   MESSAGES TAB (shown inline)
+   ═══════════════════════════════ */
+.messages-section { padding: var(--space-3); }
+
+.msg-group + .msg-group { margin-top: 1px; }
+.group-head {
+  display: flex; align-items: center; gap: 6px; padding: 6px var(--space-4);
+  cursor: pointer; transition: background 0.1s;
+}
+.group-head:hover { background: var(--bg-hover); }
+.group-arrow { color: var(--text-ghost); width: 10px; font-size: 10px; }
+.group-dot { width: 8px; height: 8px; border-radius: 2px; }
+.group-name { font-size: 12px; font-weight: 500; color: var(--text-secondary); }
+.group-stats { margin-left: auto; color: var(--text-ghost); font-size: 10px; white-space: nowrap; }
+.group-bar-track { width: 48px; height: 3px; background: var(--bg-raised); border-radius: 2px; overflow: hidden; margin-left: var(--space-2); }
+.group-bar-fill { height: 100%; border-radius: 2px; }
+
+.group-items {
+  margin-left: 18px; border-left: 1px solid var(--border-dim); padding-left: var(--space-2);
+}
+.msg-row {
+  display: flex; align-items: center; gap: 5px; padding: 3px var(--space-3);
+  font-size: 12px; cursor: pointer; transition: background 0.1s; border-bottom: 1px solid rgba(28,37,53,0.3);
+}
+.msg-row:hover { background: var(--bg-hover); }
+.msg-row:last-child { border-bottom: none; }
+.msg-role { font-family: var(--font-mono); color: var(--text-ghost); width: 10px; font-size: 10px; }
+.msg-preview { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); flex: 1; }
+.msg-tok { font-family: var(--font-mono); color: var(--text-ghost); font-size: 10px; white-space: nowrap; }
+.msg-tok.hot { color: var(--accent-amber); }
+
+/* ═══════════════════════════════
+   TIMELINE TAB (shown inline)
+   ═══════════════════════════════ */
+.timeline-section { padding: var(--space-5); display: flex; flex-direction: column; gap: var(--space-4); }
+
+.chart-container { display: flex; }
+.y-axis {
+  display: flex; flex-direction: column; justify-content: space-between;
+  height: 140px; padding-right: 6px; font-family: var(--font-mono); font-size: 10px;
+  color: var(--text-ghost); text-align: right; min-width: 32px;
+}
+.chart-bars {
+  flex: 1; display: flex; align-items: flex-end; gap: 2px; height: 140px;
+}
+.chart-bar {
+  flex: 1; border-radius: 2px 2px 0 0; cursor: pointer; transition: filter 0.12s;
+  min-width: 6px; max-width: 24px; display: flex; flex-direction: column; justify-content: flex-end; overflow: hidden;
+}
+.chart-bar:hover { filter: brightness(1.3); }
+.chart-bar.active { box-shadow: 0 0 0 1.5px var(--accent-blue), 0 0 6px rgba(14,165,233,0.25); }
+.bar-segment { width: 100%; }
+
+.diff-line {
+  font-family: var(--font-mono); font-size: 10px; padding: 2px 6px; border-radius: 2px; margin-bottom: 1px;
+}
+.diff-add { background: rgba(16,185,129,0.06); color: #4ade80; }
+.diff-remove { background: rgba(240,96,96,0.06); color: #f87171; }
+.diff-same { color: var(--text-ghost); }
+.diff-delta { margin-left: auto; font-family: var(--font-mono); font-size: 10px; font-weight: 700; }
+
+/* Animations */
+@keyframes ring-draw {
+  from { stroke-dashoffset: 240; }
+}
+.hero-ring .ring-fill { animation: ring-draw 0.8s ease-out; }
+.stat-mini-ring .ring-fill { animation: ring-draw 0.6s ease-out; }
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-ring .ring-fill,
+  .stat-mini-ring .ring-fill { animation: none; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- Toolbar -->
+  <header class="toolbar">
+    <div class="toolbar-brand">
+      <svg width="18" height="18" viewBox="0 0 18 18">
+        <circle cx="9" cy="9" r="7.5" fill="none" stroke="var(--accent-blue)" stroke-width="1" opacity="0.35"/>
+        <circle cx="9" cy="9" r="4" fill="none" stroke="var(--accent-blue)" stroke-width="1" opacity="0.6"/>
+        <circle cx="9" cy="9" r="1.5" fill="var(--accent-blue)"/>
+      </svg>
+      <span class="brand-text">Context Lens</span>
+    </div>
+    <span class="toolbar-sep"></span>
+    <span class="toolbar-meta" style="color:#fb923c;background:rgba(251,146,60,0.15);padding:2px 5px;border-radius:3px;font-weight:600;font-size:10px;">claude</span>
+    <span class="toolbar-meta">sonnet-4</span>
+    <span class="toolbar-sep"></span>
+    <span class="toolbar-meta">42 turns</span>
+    <span class="toolbar-meta green">$1.84</span>
+    <div class="toolbar-right">
+      <span class="connection"><span class="connection-dot"></span> Live</span>
+      <button class="toolbar-btn">Export</button>
+    </div>
+  </header>
+
+  <div class="app-body">
+    <!-- Session Rail with ring gauges -->
+    <nav class="session-rail">
+      <button class="rail-back">←</button>
+      <span class="rail-label">SESSIONS</span>
+      <div class="rail-scroll">
+        <!-- Active tile with ring gauge -->
+        <button class="rail-tile active">
+          <span class="tile-source claude">claude</span>
+          <div class="tile-ring">
+            <svg viewBox="0 0 28 28">
+              <circle cx="14" cy="14" r="11" fill="none" stroke="var(--border-dim)" stroke-width="2" stroke-linecap="round"
+                stroke-dasharray="55 14" transform="rotate(135 14 14)"/>
+              <circle cx="14" cy="14" r="11" fill="none" stroke="var(--accent-blue)" stroke-width="2" stroke-linecap="round"
+                stroke-dasharray="40 29" transform="rotate(135 14 14)"/>
+            </svg>
+            <span class="tile-ring-pct" style="color:var(--accent-blue)">58%</span>
+          </div>
+        </button>
+        <button class="rail-tile">
+          <span class="tile-source claude">claude</span>
+          <div class="tile-ring">
+            <svg viewBox="0 0 28 28">
+              <circle cx="14" cy="14" r="11" fill="none" stroke="var(--border-dim)" stroke-width="2" stroke-linecap="round"
+                stroke-dasharray="55 14" transform="rotate(135 14 14)"/>
+              <circle cx="14" cy="14" r="11" fill="none" stroke="var(--accent-amber)" stroke-width="2" stroke-linecap="round"
+                stroke-dasharray="48 21" transform="rotate(135 14 14)"/>
+            </svg>
+            <span class="tile-ring-pct" style="color:var(--accent-amber)">82%</span>
+          </div>
+        </button>
+        <button class="rail-tile">
+          <span class="tile-source pi">pi</span>
+          <div class="tile-ring">
+            <svg viewBox="0 0 28 28">
+              <circle cx="14" cy="14" r="11" fill="none" stroke="var(--border-dim)" stroke-width="2" stroke-linecap="round"
+                stroke-dasharray="55 14" transform="rotate(135 14 14)"/>
+              <circle cx="14" cy="14" r="11" fill="none" stroke="var(--accent-green)" stroke-width="2" stroke-linecap="round"
+                stroke-dasharray="20 49" transform="rotate(135 14 14)"/>
+            </svg>
+            <span class="tile-ring-pct" style="color:var(--accent-green)">29%</span>
+          </div>
+        </button>
+        <button class="rail-tile">
+          <span class="tile-source codex">codex</span>
+          <div class="tile-ring">
+            <svg viewBox="0 0 28 28">
+              <circle cx="14" cy="14" r="11" fill="none" stroke="var(--border-dim)" stroke-width="2" stroke-linecap="round"
+                stroke-dasharray="55 14" transform="rotate(135 14 14)"/>
+              <circle cx="14" cy="14" r="11" fill="none" stroke="var(--accent-red)" stroke-width="2" stroke-linecap="round"
+                stroke-dasharray="52 17" transform="rotate(135 14 14)"/>
+            </svg>
+            <span class="tile-ring-pct" style="color:var(--accent-red)">91%</span>
+          </div>
+        </button>
+      </div>
+    </nav>
+
+    <!-- Inspector -->
+    <div class="inspector">
+      <!-- Scrubber -->
+      <div class="scrubber">
+        <div class="scrub-controls">
+          <button class="scrub-btn">‹</button>
+          <span class="scrub-readout">
+            <span class="dot"></span>
+            <span class="num">8</span>
+            <span class="sep">/</span>
+            <span class="total">12</span>
+          </span>
+          <button class="scrub-btn">›</button>
+        </div>
+        <div class="scrub-track">
+          <div class="spark-bars">
+            <div class="spark-bar" style="height:15%"></div>
+            <div class="spark-bar" style="height:22%"></div>
+            <div class="spark-bar" style="height:35%"></div>
+            <div class="spark-bar" style="height:42%"></div>
+            <div class="spark-bar" style="height:55%"></div>
+            <div class="spark-bar" style="height:48%"></div>
+            <div class="spark-bar" style="height:65%"></div>
+            <div class="spark-bar active" style="height:72%"></div>
+            <div class="spark-bar" style="height:58%;opacity:0.15"></div>
+            <div class="spark-bar" style="height:80%;opacity:0.15"></div>
+            <div class="spark-bar" style="height:85%;opacity:0.15"></div>
+            <div class="spark-bar" style="height:92%;opacity:0.15"></div>
+          </div>
+        </div>
+        <button class="scrub-action">
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 5H8M8 5L5.5 2.5M8 5L5.5 7.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+          Live
+        </button>
+      </div>
+
+      <!-- Tabs -->
+      <div class="tab-bar">
+        <button class="tab-btn active">Overview</button>
+        <button class="tab-btn">Messages</button>
+        <button class="tab-btn">Timeline</button>
+      </div>
+
+      <!-- Overview Content -->
+      <div class="tab-content">
+        <div class="overview">
+          <!-- Narrative -->
+          <div class="narrative advisory">
+            <div class="narrative-copy">
+              <div class="narrative-title">Turn health shows moderate pressure (72/100).</div>
+              <div class="narrative-detail">Tool results is the largest share (38%). Tool results grew most vs previous turn (+12.4k).</div>
+            </div>
+            <div class="narrative-actions">
+              <button class="narrative-btn">Review Messages</button>
+              <button class="narrative-btn">View Timeline Diff</button>
+            </div>
+          </div>
+
+          <!-- ══ HERO STAT ROW: Large ring + secondary cards ══ -->
+          <div class="stats-row">
+            <div class="stat-hero">
+              <div class="hero-ring">
+                <svg viewBox="0 0 96 96">
+                  <!-- Track (270° arc) -->
+                  <circle cx="48" cy="48" r="40" fill="none" stroke="var(--border-dim)" stroke-width="5"
+                    stroke-dasharray="188 63" stroke-linecap="round" transform="rotate(135 48 48)"/>
+                  <!-- Fill -->
+                  <circle class="ring-fill" cx="48" cy="48" r="40" fill="none" stroke="var(--accent-blue)" stroke-width="5"
+                    stroke-dasharray="109 142" stroke-linecap="round" transform="rotate(135 48 48)"
+                    style="transition:stroke-dasharray 0.6s ease"/>
+                  <!-- Outer faint ring (lens motif) -->
+                  <circle cx="48" cy="48" r="46" fill="none" stroke="var(--accent-blue)" stroke-width="0.5" opacity="0.15"/>
+                </svg>
+                <div class="hero-ring-inner">
+                  <span class="hero-pct" style="color:var(--accent-blue)">58%</span>
+                  <span class="hero-label-text">Context</span>
+                </div>
+              </div>
+              <div class="hero-detail">87.2k / 150k tokens</div>
+            </div>
+
+            <div class="stats-secondary">
+              <!-- Cost with mini ring -->
+              <div class="stat-card">
+                <div class="stat-readout green">$0.12</div>
+                <div class="stat-label">Turn Cost</div>
+                <div class="stat-detail">$1.84 session</div>
+              </div>
+              <!-- Output -->
+              <div class="stat-card">
+                <div class="stat-readout">2.1k</div>
+                <div class="stat-label">Output</div>
+                <div class="stat-detail">1.2s</div>
+              </div>
+              <!-- Health with mini ring gauge -->
+              <div class="stat-card">
+                <div class="stat-mini-ring">
+                  <svg viewBox="0 0 44 44">
+                    <circle cx="22" cy="22" r="17" fill="none" stroke="var(--border-dim)" stroke-width="3"
+                      stroke-dasharray="80 27" stroke-linecap="round" transform="rotate(135 22 22)"/>
+                    <circle class="ring-fill" cx="22" cy="22" r="17" fill="none" stroke="var(--accent-amber)" stroke-width="3"
+                      stroke-dasharray="58 49" stroke-linecap="round" transform="rotate(135 22 22)"/>
+                  </svg>
+                  <span class="stat-mini-ring-val" style="color:var(--accent-amber)">72</span>
+                </div>
+                <div class="stat-label">Health</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Meta -->
+          <div class="meta-row">
+            <span>48 messages</span>
+            <span>cache 34% hit (12.4kr / 3.2kw)</span>
+            <span>stop: end_turn</span>
+          </div>
+
+          <!-- Composition -->
+          <div class="panel">
+            <div class="panel-head">
+              <span class="panel-title">Composition</span>
+              <span class="panel-sub">Turn 8 · 87.2k</span>
+              <div class="mode-toggle">
+                <button class="on">Detail</button>
+                <button>Simple</button>
+              </div>
+            </div>
+            <div class="panel-body">
+              <div class="treemap">
+                <div class="tm-block" style="flex:38;background:#10b981"><span class="tm-label">Tool results</span><span class="tm-val">33.1k</span></div>
+                <div class="tm-block" style="flex:22;background:#3b82f6"><span class="tm-label">System</span><span class="tm-val">19.2k</span></div>
+                <div class="tm-block" style="flex:18;background:#ec4899"><span class="tm-label">Tool defs</span><span class="tm-val">15.7k</span></div>
+                <div class="tm-block" style="flex:12;background:#f59e0b"><span class="tm-label">Assistant</span><span class="tm-val">10.4k</span></div>
+                <div class="tm-block" style="flex:6;background:#06b6d4"><span class="tm-val">User</span></div>
+                <div class="tm-block" style="flex:4;background:#8b5cf6"></div>
+              </div>
+              <div class="legend">
+                <span class="legend-item"><span class="legend-dot" style="background:#10b981"></span>Tool results</span>
+                <span class="legend-item"><span class="legend-dot" style="background:#3b82f6"></span>System</span>
+                <span class="legend-item"><span class="legend-dot" style="background:#ec4899"></span>Tool defs</span>
+                <span class="legend-item"><span class="legend-dot" style="background:#f59e0b"></span>Assistant</span>
+                <span class="legend-item"><span class="legend-dot" style="background:#06b6d4"></span>User</span>
+                <span class="legend-item"><span class="legend-dot" style="background:#8b5cf6"></span>Thinking</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Findings -->
+          <div class="panel">
+            <div class="panel-head">
+              <span class="panel-title">Findings</span>
+              <span class="panel-count">3</span>
+            </div>
+            <div class="audit-row">
+              <span class="audit-chip audit-good">Utilization <b>92</b></span>
+              <span class="audit-chip audit-warn">Growth <b>65</b></span>
+              <span class="audit-chip audit-good">Diversity <b>88</b></span>
+              <span class="audit-chip audit-good">Cache <b>85</b></span>
+            </div>
+            <div class="panel-body">
+              <div class="rec">
+                <span class="rec-dot sev-med"></span>
+                <div class="rec-content">
+                  <div class="rec-title">Tool result bloat detected</div>
+                  <div class="rec-detail">3 tool results exceed 4k tokens each. Consider truncating or summarizing outputs.</div>
+                </div>
+                <span class="rec-impact sev-med">~12.4k</span>
+              </div>
+              <div class="rec">
+                <span class="rec-dot sev-med"></span>
+                <div class="rec-content">
+                  <div class="rec-title">Context growth accelerating</div>
+                  <div class="rec-detail">Context grew 18% vs previous turn (compared to 6% average). Rate may cause premature truncation.</div>
+                </div>
+                <span class="rec-impact sev-med">+14.2k</span>
+              </div>
+              <div class="rec">
+                <span class="rec-dot sev-low"></span>
+                <div class="rec-content">
+                  <div class="rec-title">Cache utilization is healthy</div>
+                  <div class="rec-detail">34% cache hit rate is above the 25% threshold. No action needed.</div>
+                </div>
+                <span class="rec-impact sev-low">OK</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
