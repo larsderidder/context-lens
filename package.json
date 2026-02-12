@@ -27,9 +27,10 @@
     "schema/",
     "mitm_addon.py",
     "screenshot-overview.png",
-    "findings-screenshot.png",
-    "diff.png",
-    "overview-sidebar.png"
+    "sessions-screenshot.png",
+    "messages-screenshot.png",
+    "timeline-screenshot.png",
+    "findings-screenshot.png"
   ],
   "keywords": [
     "llm",
