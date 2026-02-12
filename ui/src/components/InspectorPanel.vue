@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useSessionStore } from '@/stores/session'
 import type { InspectorTab } from '@/stores/session'
 import OverviewTab from '@/components/OverviewTab.vue'
@@ -13,6 +14,23 @@ const tabs: { id: InspectorTab; label: string; icon: string }[] = [
   { id: 'messages', label: 'Messages', icon: 'i-carbon-chat' },
   { id: 'timeline', label: 'Timeline', icon: 'i-carbon-activity' },
 ]
+
+const tabComponents = {
+  overview: OverviewTab,
+  messages: MessagesTab,
+  timeline: TimelineTab,
+} satisfies Record<InspectorTab, unknown>
+
+const activeTabComponent = computed(() => tabComponents[store.inspectorTab])
+
+function onTabClick(tab: InspectorTab) {
+  // Direct Messages tab clicks should open in neutral state (chrono/top),
+  // not replay a stale programmatic focus from prior deep links.
+  if (tab === 'messages') {
+    store.clearMessageFocus()
+  }
+  store.setInspectorTab(tab)
+}
 
 function onKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape' && !e.defaultPrevented) {
@@ -33,7 +51,7 @@ function onKeydown(e: KeyboardEvent) {
         :key="tab.id"
         class="tab-btn"
         :class="{ active: store.inspectorTab === tab.id }"
-        @click="store.setInspectorTab(tab.id)"
+        @click="onTabClick(tab.id)"
       >
         <i :class="tab.icon" />
         {{ tab.label }}
@@ -42,9 +60,7 @@ function onKeydown(e: KeyboardEvent) {
 
     <!-- Tab content -->
     <div class="tab-content">
-      <OverviewTab v-if="store.inspectorTab === 'overview'" />
-      <MessagesTab v-else-if="store.inspectorTab === 'messages'" />
-      <TimelineTab v-else-if="store.inspectorTab === 'timeline'" />
+      <component :is="activeTabComponent" :key="store.inspectorTab" />
     </div>
   </div>
 </template>

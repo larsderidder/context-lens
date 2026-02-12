@@ -10,6 +10,7 @@ import EmptyState from '@/components/EmptyState.vue'
 
 const store = useSessionStore()
 const syncingFromHash = ref(false)
+const appReady = ref(false)
 const HASH_SESSIONS = '#sessions'
 let refreshInterval: ReturnType<typeof setInterval> | null = null
 
@@ -106,20 +107,24 @@ watch(
 )
 
 onMounted(async () => {
-  store.initializeDensity()
-  await store.load()
-  if (!window.location.hash) {
-    window.location.hash = HASH_SESSIONS
-  }
-  await applyHashRoute()
-  window.addEventListener('hashchange', onHashChange)
-
-  // Periodic refresh to catch any missed SSE events or handle disconnections
-  refreshInterval = setInterval(() => {
-    if (!document.hidden) {
-      store.load()
+  try {
+    store.initializeDensity()
+    await store.load()
+    if (!window.location.hash) {
+      window.location.hash = HASH_SESSIONS
     }
-  }, 5000) // Refresh every 5 seconds when tab is visible
+    await applyHashRoute()
+    window.addEventListener('hashchange', onHashChange)
+
+    // Periodic refresh to catch any missed SSE events or handle disconnections
+    refreshInterval = setInterval(() => {
+      if (!document.hidden) {
+        store.load()
+      }
+    }, 5000) // Refresh every 5 seconds when tab is visible
+  } finally {
+    appReady.value = true
+  }
 })
 
 onUnmounted(() => {
@@ -135,6 +140,10 @@ onUnmounted(() => {
   <div class="app">
     <AppToolbar />
     <div class="app-body">
+      <div v-if="!appReady" class="app-loading">
+        <div class="loading-spinner"></div>
+      </div>
+      <template v-else>
       <!-- Session rail: transitions in/out with inspector view -->
       <Transition name="rail-slide">
         <SessionRail v-if="store.view === 'inspector'" />
@@ -153,6 +162,7 @@ onUnmounted(() => {
           <EmptyState v-else key="empty" />
         </Transition>
       </div>
+      </template>
     </div>
   </div>
 </template>
@@ -170,6 +180,14 @@ onUnmounted(() => {
   overflow: hidden;
   display: flex;
   flex-direction: row;
+}
+
+.app-loading {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-deep);
 }
 
 .main-content {

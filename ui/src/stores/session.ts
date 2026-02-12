@@ -44,12 +44,10 @@ export const useSessionStore = defineStore('session', () => {
   const sourceFilter = ref<string>('') // '' = all sources
   const modelFilter = ref<string>('') // '' = all models
   const density = ref<DensityMode>('comfortable')
-  const metadataPanelOpen = ref(false) // unused, kept for store shape stability
   const messageFocusCategory = ref<string | null>(null)
   const messageFocusToken = ref(0)
   const messageFocusTool = ref<string | null>(null)
   const messageFocusIndex = ref<number | null>(null)
-  const messageFocusHighlight = ref<string | null>(null)
   const messageFocusOpenDetail = ref(false)
 
   // Timeline tab persistent state
@@ -294,7 +292,6 @@ export const useSessionStore = defineStore('session', () => {
     messageFocusCategory.value = category
     messageFocusTool.value = null
     messageFocusIndex.value = null
-    messageFocusHighlight.value = null
     messageFocusOpenDetail.value = openDetail
     messageFocusToken.value += 1
   }
@@ -303,16 +300,21 @@ export const useSessionStore = defineStore('session', () => {
     messageFocusCategory.value = category
     messageFocusTool.value = toolName
     messageFocusIndex.value = null
-    messageFocusHighlight.value = null
     messageFocusToken.value += 1
   }
 
-  function focusMessageByIndex(index: number, highlight?: string) {
+  function focusMessageByIndex(index: number) {
     messageFocusCategory.value = null
     messageFocusTool.value = null
     messageFocusIndex.value = index
-    messageFocusHighlight.value = highlight ?? null
     messageFocusToken.value += 1
+  }
+
+  function clearMessageFocus() {
+    messageFocusCategory.value = null
+    messageFocusTool.value = null
+    messageFocusIndex.value = null
+    messageFocusOpenDetail.value = false
   }
 
   /**
@@ -407,10 +409,6 @@ export const useSessionStore = defineStore('session', () => {
     applyDensityToDom(mode)
   }
 
-  function toggleMetadataPanel() {
-    metadataPanelOpen.value = !metadataPanelOpen.value
-  }
-
   return {
     // State
     revision,
@@ -430,12 +428,10 @@ export const useSessionStore = defineStore('session', () => {
     sourceFilter,
     modelFilter,
     density,
-    metadataPanelOpen,
     messageFocusCategory,
     messageFocusToken,
     messageFocusTool,
     messageFocusIndex,
-    messageFocusHighlight,
     messageFocusOpenDetail,
     timelineMode,
     timelineStackMode,
@@ -468,13 +464,13 @@ export const useSessionStore = defineStore('session', () => {
     focusMessageCategory,
     focusMessageTool,
     focusMessageByIndex,
+    clearMessageFocus,
     loadEntryDetail,
     getEntryDetail,
     entryDetailLoading,
     entryDetailVersion,
     initializeDensity,
     setDensity,
-    toggleMetadataPanel,
     deleteSession,
     reset,
   }

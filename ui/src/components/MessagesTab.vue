@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { Splitpanes, Pane } from 'splitpanes'
 import { useSessionStore } from '@/stores/session'
 import { useExpandable } from '@/composables/useExpandable'
@@ -7,8 +7,6 @@ import { fmtTokens } from '@/utils/format'
 import { groupMessagesByCategory, buildToolNameMap, extractPreview, CATEGORY_META, classifyMessageRole } from '@/utils/messages'
 import type { ParsedMessage } from '@/api-types'
 import DetailPane from '@/components/DetailPane.vue'
-
-const messageScrollByKey = new Map<string, number>()
 
 const store = useSessionStore()
 const entry = computed(() => store.selectedEntry)
@@ -35,14 +33,6 @@ const messages = computed(() => {
   if (detail?.messages?.length) return detail.messages
   return entry.value.contextInfo.messages || []
 })
-
-// True when we're showing compacted (truncated) messages because no detail file exists
-const isCompactedFallback = computed(() => {
-  if (!entry.value) return false
-  void store.entryDetailVersion
-  return !store.getEntryDetail(entry.value.id) && store.entryDetailLoading !== entry.value.id
-})
-// Note: store.entryDetailLoading is unwrapped by Pinia, so no .value needed
 
 // Latest (live) entry's messages, used to show "future" messages grayed out
 const latestEntry = computed(() => {
@@ -148,9 +138,10 @@ const chronoCumTokens = computed(() => {
   return sums
 })
 
-const totalMsgTokens = computed(() => {
-  return messages.value.reduce((s, m) => s + (m.tokens || 0), 0)
-})
+// Authoritative total for the entire context window (system + tools + messages).
+// Used as the denominator for all percentage calculations so numbers match
+// the Overview tab, DetailPane, and utilization displays.
+const contextTotalTokens = computed(() => entry.value?.contextInfo.totalTokens ?? 0)
 
 const heaviestMessages = computed(() => {
   const ranked: { origIdx: number; category: string; preview: string; tokens: number }[] = []
@@ -170,7 +161,6 @@ const heaviestMessages = computed(() => {
     .slice(0, 3)
 })
 
-const messageScrollKey = computed(() => `${store.selectedSessionId || '__no_session__'}:messages`)
 const focusedToolName = computed(() => store.messageFocusTool)
 const focusedCategory = computed(() => store.messageFocusCategory)
 
@@ -456,42 +446,10 @@ function clearToolFilter() {
   store.focusMessageCategory(focusCategory.value || store.messageFocusCategory || 'tool_results')
 }
 
-function handleMsgListScroll() {
-  if (!msgListEl.value) return
-  messageScrollByKey.set(messageScrollKey.value, msgListEl.value.scrollTop)
-}
-
-function restoreMsgListScroll(key: string) {
-  nextTick(() => {
-    if (!msgListEl.value) return
-    msgListEl.value.scrollTop = messageScrollByKey.get(key) ?? 0
-  })
-}
-
-watch(
-  messageScrollKey,
-  (newKey, oldKey) => {
-    if (oldKey && msgListEl.value) {
-      messageScrollByKey.set(oldKey, msgListEl.value.scrollTop)
-    }
-    restoreMsgListScroll(newKey)
-  },
-  { immediate: true },
-)
-
-onBeforeUnmount(() => {
-  if (!msgListEl.value) return
-  messageScrollByKey.set(messageScrollKey.value, msgListEl.value.scrollTop)
-})
-
 watch(
   () => store.messageFocusToken,
   async () => {
     await applyMessageFocus()
-    if (store.messageFocusIndex !== null) {
-      await nextTick()
-      openDetailByOrigIndex(store.messageFocusIndex)
-    }
   },
   { immediate: true },
 )
@@ -561,7 +519,7 @@ watch(
   <div v-if="entry" class="messages-tab" @keydown="onMessagesKeydown">
     <Splitpanes class="default-theme" :push-other-panes="false">
       <Pane :min-size="25" :size="detailOpen ? 42 : 100">
-        <div ref="msgListEl" class="msg-list" @scroll.passive="handleMsgListScroll">
+        <div ref="msgListEl" class="msg-list">
           <div class="message-view-toggle">
             <button :class="{ on: viewMode === 'chrono' }" @click="viewMode = 'chrono'">Chronological</button>
             <button :class="{ on: viewMode === 'category' }" @click="viewMode = 'category'">By Category</button>
@@ -611,13 +569,13 @@ watch(
                 <span class="group-sep">·</span>
                 {{ fmtTokens(group.tokens) }}
                 <span class="group-sep">·</span>
-                {{ totalMsgTokens > 0 ? Math.round(group.tokens / totalMsgTokens * 100) : 0 }}%
+                {{ contextTotalTokens > 0 ? Math.round(group.tokens / contextTotalTokens * 100) : 0 }}%
               </span>
               <div class="group-bar-track">
                 <div
                   class="group-bar-fill"
                   :style="{
-                    width: (totalMsgTokens > 0 ? Math.round(group.tokens / totalMsgTokens * 100) : 0) + '%',
+                    width: (contextTotalTokens > 0 ? Math.round(group.tokens / contextTotalTokens * 100) : 0) + '%',
                     background: (CATEGORY_META[group.category] || { color: '#4b5563' }).color,
                   }"
                 />
@@ -669,7 +627,7 @@ watch(
                 >
                   <span
                     class="chrono-gutter"
-                    v-tooltip="item.future ? 'Click to jump to this turn' : `Cumulative: ${fmtTokens(chronoCumTokens[i])} of ${fmtTokens(totalMsgTokens)}`"
+                    v-tooltip="item.future ? 'Click to jump to this turn' : `Cumulative: ${fmtTokens(chronoCumTokens[i])} of ${fmtTokens(contextTotalTokens)}`"
                   >
                     {{ item.future ? '' : fmtTokens(chronoCumTokens[i]) }}
                   </span>
@@ -796,16 +754,6 @@ watch(
     border-color: var(--border-mid);
     background: var(--bg-hover);
   }
-}
-
-.compacted-notice {
-  margin: var(--space-2) var(--space-4);
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-sm);
-  background: var(--accent-amber-dim);
-  color: var(--accent-amber);
-  font-size: var(--text-xs);
-  @include mono-text;
 }
 
 .heavy-action {
