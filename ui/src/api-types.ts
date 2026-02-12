@@ -233,6 +233,8 @@ export interface ConversationSummary extends Conversation {
   contextLimit: number;
   totalCost: number;
   healthScore: HealthScore | null;
+  /** Per-entry totalTokens in chronological order (oldest → newest), for sparkline rendering */
+  tokenHistory: number[];
 }
 
 export interface ApiSummaryResponse {

@@ -7,6 +7,8 @@ export interface Recommendation {
   title: string
   detail: string
   impact: string
+  messageIndex?: number
+  highlight?: string
 }
 
 /**
@@ -132,13 +134,6 @@ export function computeRecommendations(
       detail: `${fmtTokens(ci.totalTokens)} of ${fmtTokens(entry.contextLimit)} tokens used.`,
       impact: 'Monitor',
     })
-  } else {
-    recs.push({
-      severity: 'low',
-      title: `Context utilization healthy: ${utilPct}%`,
-      detail: `${fmtTokens(ci.totalTokens)} of ${fmtTokens(entry.contextLimit)} tokens. Safe range.`,
-      impact: 'OK',
-    })
   }
 
   // Compaction detection
@@ -181,6 +176,8 @@ export function computeRecommendations(
       title: `⚠ ${a.pattern.replace(/_/g, ' ')} in ${where} (msg ${a.messageIndex + 1})`,
       detail: a.match,
       impact: a.severity,
+      messageIndex: a.messageIndex,
+      highlight: a.match,
     })
   }
 
