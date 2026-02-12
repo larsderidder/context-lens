@@ -231,51 +231,6 @@ const projection = computed(() => {
   return projectTurnsRemaining(classified.value)
 })
 
-// Projected dashed extension on the token timeline: a line from the last bar
-// angling toward the context limit.  We draw from the last bar's top-right
-// corner to the right edge of the chart, at the slope implied by the growth
-// rate, capped at the limit line.
-const projectionLinePct = computed((): { x1: number; y1: number; x2: number; y2: number } | null => {
-  const p = projection.value
-  if (p.turnsRemaining === null || p.turnsRemaining <= 0 || p.growthPerTurn <= 0) return null
-  if (stackMode.value === 'normalized') return null
-
-  const items = filtered.value
-  if (items.length === 0) return null
-  const count = items.length
-  const isSp = isSparse.value
-  const max = showLimitOverlay.value ? chartMaxWithLimit.value : maxVisibleVal.value
-  if (max === 0) return null
-
-  // Start: center of last bar
-  const x1 = isSp
-    ? ((count - 0.5) / count) * 100
-    : (((count - 1) * 12 + 5) / (count * 12)) * 100
-  const y1 = (1 - p.currentTokens / max) * 100
-
-  // End: right edge of chart, at projected token level
-  // Growth per bar-width in Y% terms
-  const barWidthPct = isSp ? (1 / count) * 100 : (12 / (count * 12)) * 100
-  const growthYPerBar = (p.growthPerTurn / max) * 100
-  // How many bar-widths from x1 to x=100%
-  const barsToEdge = (100 - x1) / barWidthPct
-  const projectedTokensAtEdge = p.currentTokens + p.growthPerTurn * barsToEdge
-  // Cap at context limit
-  const cappedTokens = Math.min(projectedTokensAtEdge, p.contextLimit)
-  const x2End = 100
-  const y2End = (1 - cappedTokens / max) * 100
-
-  // If the limit is reached before the right edge, shorten the line
-  if (projectedTokensAtEdge > p.contextLimit && growthYPerBar > 0) {
-    const barsToLimit = (p.contextLimit - p.currentTokens) / p.growthPerTurn
-    const x2 = x1 + barsToLimit * barWidthPct
-    const y2 = (1 - p.contextLimit / max) * 100
-    return { x1, y1, x2: Math.min(x2, 100), y2: Math.max(y2, 0) }
-  }
-
-  return { x1, y1, x2: x2End, y2: Math.max(y2End, 0) }
-})
-
 function scrollToLatest(el: HTMLElement | null) {
   if (!el) return
   el.scrollLeft = el.scrollWidth
@@ -402,25 +357,6 @@ watch(
                 />
               </svg>
 
-              <!-- Turns remaining projection line -->
-              <svg
-                v-if="stackMode === 'absolute' && projectionLinePct"
-                class="projection-line-svg"
-                viewBox="0 0 100 100"
-                preserveAspectRatio="none"
-              >
-                <line
-                  :x1="projectionLinePct.x1"
-                  :y1="projectionLinePct.y1"
-                  :x2="projectionLinePct.x2"
-                  :y2="projectionLinePct.y2"
-                  stroke="var(--accent-amber)"
-                  stroke-width="1.5"
-                  stroke-dasharray="4 3"
-                  vector-effect="non-scaling-stroke"
-                  opacity="0.5"
-                />
-              </svg>
             </div>
 
             <div class="events" :class="{ sparse: isSparse }">
@@ -903,16 +839,6 @@ watch(
   height: 100%;
   pointer-events: none;
   z-index: 2;
-}
-
-// ── Projection line overlay ──
-.projection-line-svg {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  z-index: 1;
 }
 
 // ── Projection badge ──
