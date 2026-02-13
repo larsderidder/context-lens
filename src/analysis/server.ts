@@ -8,13 +8,14 @@
  * the Web UI and API.
  */
 
-import http from "node:http";
+import fs from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { serve } from "@hono/node-server";
 
 import { Store } from "../server/store.js";
-import { createWebUIHandler, loadHtmlUI } from "../server/webui.js";
+import { createApp, loadHtmlUI } from "../server/webui.js";
 import type { PrivacyLevel } from "../types.js";
 import { ingestCapture } from "./ingest.js";
 import { CaptureWatcher } from "./watcher.js";
@@ -39,10 +40,9 @@ const privacy: PrivacyLevel =
 
 // Data directory: check for explicit env, then legacy location, then new default.
 // Pre-split installs stored data in <project>/data/ next to dist/.
-import fs from "node:fs";
-
 function resolveDataDir(): string {
-  if (process.env.CONTEXT_LENS_DATA_DIR) return process.env.CONTEXT_LENS_DATA_DIR;
+  if (process.env.CONTEXT_LENS_DATA_DIR)
+    return process.env.CONTEXT_LENS_DATA_DIR;
 
   // Legacy location: <project>/data/ (sibling of dist/)
   const legacyDir = path.resolve(__dirname, "..", "..", "data");
@@ -101,36 +101,32 @@ watcher.start();
 
 // --- Web UI server ---
 
-// baseDir for webui: the analysis server lives in dist/analysis/,
-// so project root is two levels up
 const projectDistDir = path.resolve(__dirname, "..");
 const htmlUI = loadHtmlUI();
-const webUIServer = http.createServer(
-  createWebUIHandler(store, htmlUI, projectDistDir),
-);
+const app = createApp(store, htmlUI, projectDistDir);
 
-webUIServer.on("error", (err: NodeJS.ErrnoException) => {
+const server = serve({ fetch: app.fetch, hostname: bindHost, port }, (info) => {
+  console.log(
+    `🌐 Context Lens Analysis running on http://${info.address}:${info.port}`,
+  );
+  console.log(`📁 Watching captures → ${captureDir}`);
+  console.log(`💾 Data → ${dataDir}`);
+});
+
+server.on("error", (err: NodeJS.ErrnoException) => {
   if (err.code === "EADDRINUSE") {
-    console.log(
-      `🌐 Context Lens Analysis already running on port ${port}`,
-    );
+    console.log(`🌐 Context Lens Analysis already running on port ${port}`);
     watcher.stop();
     process.exit(0);
   }
   throw err;
 });
 
-webUIServer.listen(port, bindHost, () => {
-  console.log(`🌐 Context Lens Analysis running on http://${bindHost}:${port}`);
-  console.log(`📁 Watching captures → ${captureDir}`);
-  console.log(`💾 Data → ${dataDir}`);
-});
-
 // --- Graceful shutdown ---
 
 function shutdown(): void {
   watcher.stop();
-  webUIServer.close();
+  server.close();
 }
 
 process.on("SIGINT", shutdown);

@@ -19,9 +19,8 @@ flowchart TD
     Ingest --> CoreFacade["Core Facade<br/>src/core.ts"]
     Ingest --> Store["State Store<br/>src/server/store.ts"]
 
-    AServer --> WebUI["Web UI Handler<br/>src/server/webui.ts"]
-    WebUI --> API["API Handler<br/>src/server/api.ts"]
-    WebUI --> Static["Static Handler<br/>src/server/static.ts"]
+    AServer --> WebUI["Hono App<br/>src/server/webui.ts"]
+    WebUI --> API["API Routes<br/>src/server/api.ts"]
     API --> Store
   end
 

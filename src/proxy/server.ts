@@ -46,9 +46,7 @@ const server = http.createServer(
 
 server.on("error", (err: NodeJS.ErrnoException) => {
   if (err.code === "EADDRINUSE") {
-    console.log(
-      `🔍 Context Lens Proxy already running on port ${config.port}`,
-    );
+    console.log(`🔍 Context Lens Proxy already running on port ${config.port}`);
     process.exit(0);
   }
   throw err;

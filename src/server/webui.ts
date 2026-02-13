@@ -1,9 +1,9 @@
 import fs from "node:fs";
-import type http from "node:http";
 import path from "node:path";
+import { serveStatic } from "@hono/node-server/serve-static";
+import { Hono } from "hono";
 
-import { createApiHandler } from "./api.js";
-import { createStaticHandler } from "./static.js";
+import { createApiApp } from "./api.js";
 import type { Store } from "./store.js";
 
 export function loadHtmlUI(): string {
@@ -24,15 +24,21 @@ export function loadHtmlUI(): string {
 </html>`;
 }
 
-export function createWebUIHandler(
+/**
+ * Create the combined Hono app: API routes + static file serving.
+ */
+export function createApp(
   store: Store,
   htmlUI: string,
   baseDir?: string,
-): (req: http.IncomingMessage, res: http.ServerResponse) => void {
-  const handleApi = createApiHandler(store);
+): Hono {
+  const app = new Hono();
+
+  // Mount API routes
+  const apiApp = createApiApp(store);
+  app.route("/", apiApp);
 
   // Check for ui/dist/ directory (new Vue UI)
-  // baseDir is the `dist/` output dir; project root is one level up
   let uiDir: string | null = null;
   if (baseDir) {
     const candidate = path.join(baseDir, "..", "ui", "dist");
@@ -40,16 +46,25 @@ export function createWebUIHandler(
       uiDir = candidate;
     }
   }
-  const handleStatic = createStaticHandler(uiDir, htmlUI);
 
-  return function handleWebUI(
-    req: http.IncomingMessage,
-    res: http.ServerResponse,
-  ): void {
-    // Try API routes first
-    if (handleApi(req, res)) return;
+  if (uiDir) {
+    // Serve static files from ui/dist/
+    app.use("/*", serveStatic({ root: uiDir, rewriteRequestPath: (p) => p }));
+    // SPA fallback: serve index.html for unmatched routes
+    app.get("*", (c) => {
+      const indexPath = path.join(uiDir!, "index.html");
+      try {
+        const content = fs.readFileSync(indexPath, "utf8");
+        return c.html(content);
+      } catch {
+        return c.text("Not Found", 404);
+      }
+    });
+  } else {
+    // Fallback: serve legacy HTML UI
+    app.get("/", (c) => c.html(htmlUI));
+    app.get("/index.html", (c) => c.html(htmlUI));
+  }
 
-    // Fall through to static file serving
-    handleStatic(req, res);
-  };
+  return app;
 }
