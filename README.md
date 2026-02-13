@@ -31,13 +31,15 @@ npx context-lens ...
 ## Quick Start
 
 ```bash
-npx context-lens claude "your prompt"
-npx context-lens codex "your prompt"
-npx context-lens gemini "your prompt"
-npx context-lens aider --model claude-sonnet-4
-npx context-lens pi
-npx context-lens -- python my_agent.py
+context-lens claude "your prompt"
+context-lens codex "your prompt"
+context-lens gemini "your prompt"
+context-lens aider --model claude-sonnet-4
+context-lens pi
+context-lens -- python my_agent.py
 ```
+
+Or without installing: replace `context-lens` with `npx context-lens`.
 
 This starts the proxy (port 4040), opens the web UI (http://localhost:4041), sets the right env vars, and runs your command. Multiple tools can share one proxy; just open more terminals.
 
@@ -111,7 +113,7 @@ Pi ignores standard base-URL environment variables. `context-lens pi` works by c
 Your real `~/.pi/agent/models.json` is never modified, and the temporary directory is removed when the command exits.
 
 ```bash
-npx context-lens pi
+context-lens pi
 ```
 
 Pi config paths:
@@ -144,7 +146,7 @@ Codex with a ChatGPT subscription needs mitmproxy for HTTPS interception (Cloudf
 
 ```bash
 pipx install mitmproxy
-npx context-lens codex "your prompt"
+context-lens codex "your prompt"
 ```
 
 If Codex fails with certificate trust errors, install/trust the mitmproxy CA certificate (`~/.mitmproxy/mitmproxy-ca-cert.pem`) for your environment.
@@ -195,7 +197,7 @@ Tools like [Langfuse](https://langfuse.com/) and [Braintrust](https://braintrust
 
 | | Context Lens | Langfuse / Braintrust |
 |:---|:---|:---|
-| **Setup** | `npx context-lens claude` | Add SDK, configure API keys |
+| **Setup** | `context-lens claude` | Add SDK, configure API keys |
 | **Works with closed-source tools** | Yes (proxy) | No (needs instrumentation) |
 | **Context composition breakdown** | Yes (treemap, per-category) | Token totals only |
 | **Runs locally** | Yes, entirely | Cloud or self-hosted server |
