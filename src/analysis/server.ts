@@ -109,6 +109,17 @@ const webUIServer = http.createServer(
   createWebUIHandler(store, htmlUI, projectDistDir),
 );
 
+webUIServer.on("error", (err: NodeJS.ErrnoException) => {
+  if (err.code === "EADDRINUSE") {
+    console.log(
+      `🌐 Context Lens Analysis already running on port ${port}`,
+    );
+    watcher.stop();
+    process.exit(0);
+  }
+  throw err;
+});
+
 webUIServer.listen(port, bindHost, () => {
   console.log(`🌐 Context Lens Analysis running on http://${bindHost}:${port}`);
   console.log(`📁 Watching captures → ${captureDir}`);
