@@ -1,6 +1,6 @@
 # Context Lens
 
-![Early Development](https://img.shields.io/badge/status-early%20development-orange)
+![Beta](https://img.shields.io/badge/status-beta-blue)
 [![CI](https://github.com/larsderidder/context-lens/actions/workflows/ci.yml/badge.svg)](https://github.com/larsderidder/context-lens/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/context-lens)](https://www.npmjs.com/package/context-lens)
 
