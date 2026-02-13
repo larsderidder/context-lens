@@ -6,12 +6,14 @@ import { getExportUrl } from '@/api'
 
 const store = useSessionStore()
 const showExportMenu = ref(false)
+const showResetMenu = ref(false)
 const sessionIdCopied = ref(false)
 
 const isInspector = computed(() => store.view === 'inspector' && !!store.selectedSession)
 
 const session = computed(() => store.selectedSession)
 const hasRequests = computed(() => store.totalRequests > 0)
+const canRemoveSession = computed(() => isInspector.value && !!store.selectedSessionId)
 
 const summary = computed(() => {
   const id = store.selectedSessionId
@@ -74,10 +76,30 @@ async function handleExport(format: 'lhar' | 'lhar.json', scope: 'all' | 'sessio
   showExportMenu.value = false
 }
 
+function toggleExportMenu() {
+  showExportMenu.value = !showExportMenu.value
+  if (showExportMenu.value) showResetMenu.value = false
+}
+
+function toggleResetMenu() {
+  showResetMenu.value = !showResetMenu.value
+  if (showResetMenu.value) showExportMenu.value = false
+}
+
 function handleReset() {
   if (confirm('Clear all captured data?')) {
     store.reset()
   }
+  showResetMenu.value = false
+}
+
+function handleRemoveSession() {
+  const id = store.selectedSessionId
+  if (!id || !canRemoveSession.value) return
+  if (confirm('Remove this session?')) {
+    store.deleteSession(id)
+  }
+  showResetMenu.value = false
 }
 
 function goBack() {
@@ -182,7 +204,7 @@ function onSessionIdKeydown(e: KeyboardEvent) {
       </template>
 
       <div v-if="hasRequests" class="toolbar-dropdown">
-        <button class="toolbar-control" @click="showExportMenu = !showExportMenu">
+        <button class="toolbar-control" @click="toggleExportMenu">
           <i class="i-carbon-download" /> Export
         </button>
         <Transition name="dropdown">
@@ -198,13 +220,26 @@ function onSessionIdKeydown(e: KeyboardEvent) {
         </Transition>
       </div>
 
-      <button
-        v-if="hasRequests"
-        class="toolbar-control toolbar-control--danger"
-        @click="handleReset"
-      >
-        <i class="i-carbon-trash-can" /> Reset
-      </button>
+      <div v-if="hasRequests" class="toolbar-dropdown">
+        <button class="toolbar-control" @click="toggleResetMenu">
+          <i class="i-carbon-overflow-menu-horizontal" /> Menu
+        </button>
+        <Transition name="dropdown">
+          <div v-if="showResetMenu" class="dropdown-menu" @mouseleave="showResetMenu = false">
+            <button class="dropdown-item dropdown-item--danger" @click="handleReset">
+              <i class="i-carbon-trash-can" /> Reset all
+            </button>
+            <button
+              class="dropdown-item dropdown-item--danger"
+              :class="{ 'dropdown-item--disabled': !canRemoveSession }"
+              :disabled="!canRemoveSession"
+              @click="handleRemoveSession"
+            >
+              <i class="i-carbon-subtract-alt" /> Remove this session
+            </button>
+          </div>
+        </Transition>
+      </div>
     </div>
   </header>
 </template>
@@ -466,6 +501,29 @@ function onSessionIdKeydown(e: KeyboardEvent) {
   &:hover {
     background: var(--bg-hover);
     color: var(--text-primary);
+  }
+
+  &:disabled {
+    cursor: default;
+  }
+}
+
+.dropdown-item--danger {
+  &:hover {
+    color: var(--accent-red);
+  }
+}
+
+.dropdown-item--disabled {
+  color: var(--text-ghost);
+
+  i {
+    color: var(--text-ghost);
+  }
+
+  &:hover {
+    background: none;
+    color: var(--text-ghost);
   }
 }
 
