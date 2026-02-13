@@ -35,6 +35,33 @@ pnpm build:test        # build tests only
 
 For manual testing, `pnpm start` launches the proxy and web UI, then point your tool at `http://localhost:4040`.
 
+### Startup performance
+
+The analysis server loads the full state from `state.jsonl` on startup. With thousands of entries this file can grow to tens of megabytes, so keep `loadState()` fast. Measure with real data after any changes to the Store or its migrations:
+
+```bash
+pnpm build && node -e "
+const { Store } = require('./dist/server/store.js');
+const path = require('path');
+const dataDir = path.resolve('data');   // or wherever your state.jsonl lives
+const store = new Store({
+  dataDir,
+  stateFile: path.join(dataDir, 'state.jsonl'),
+  maxSessions: 100,
+  maxCompactMessages: 60,
+});
+const t0 = performance.now();
+store.loadState();
+console.log((performance.now() - t0).toFixed(0) + 'ms');
+"
+```
+
+Target: under 1 second for ~3000 entries. Watch out for:
+
+- **Disk I/O in migrations.** Reading detail files (details/*.json) is expensive. Gate file reads behind cheap in-memory checks and use marker files to skip completed migrations.
+- **O(n^2) loops.** Migrations that filter all entries per entry (e.g. finding prior conversation entries) add up fast.
+- **Full state rewrites.** `saveState()` rewrites the entire file. New entries use `appendToState()` instead. Only call `saveState()` after structural changes (eviction, deletion, migrations).
+
 ## Releasing
 
 Publishing to npm is automated via GitHub Actions using [npm trusted publishing (OIDC)](https://docs.npmjs.com/trusted-publishers). No tokens or secrets are needed.
