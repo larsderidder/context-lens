@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
 import http from "node:http";
-import { tmpdir } from "node:os";
-import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
-import { createProxyHandler } from "../src/server/proxy.js";
-import { Store } from "../src/server/store.js";
-import type { Upstreams } from "../src/types.js";
+import type { CaptureData } from "../src/proxy/capture.js";
+import {
+  createProxyHandler,
+  type ForwardOptions,
+} from "../src/proxy/forward.js";
+import type { Upstreams } from "../src/proxy/routing.js";
 
 // --- Test infrastructure ---
 
@@ -18,7 +18,6 @@ interface UpstreamRequest {
   body: string;
 }
 
-/** Spins up a real HTTP server to act as the upstream API. */
 function createUpstreamServer(): {
   server: http.Server;
   port: number;
@@ -57,7 +56,6 @@ function createUpstreamServer(): {
   });
 
   let port = 0;
-
   return {
     server,
     get port() {
@@ -85,7 +83,6 @@ function createUpstreamServer(): {
   };
 }
 
-/** Send a request through the proxy handler using a real HTTP client/server pair. */
 async function proxyRequest(
   handler: (req: http.IncomingMessage, res: http.ServerResponse) => void,
   opts: {
@@ -99,7 +96,6 @@ async function proxyRequest(
   headers: http.IncomingHttpHeaders;
   body: string;
 }> {
-  // Create a one-shot HTTP server running the proxy handler
   const server = http.createServer(handler);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const port = (server.address() as { port: number }).port;
@@ -137,26 +133,17 @@ async function proxyRequest(
 
 // --- Tests ---
 
-describe("proxy handler", () => {
+describe("proxy/forward", () => {
   let upstream: ReturnType<typeof createUpstreamServer>;
-  let store: Store;
-  let cleanup: () => void;
   let upstreams: Upstreams;
+  let captures: CaptureData[];
   let handler: (req: http.IncomingMessage, res: http.ServerResponse) => void;
 
   beforeEach(async () => {
     upstream = createUpstreamServer();
     await upstream.start();
+    captures = [];
 
-    const dir = mkdtempSync(path.join(tmpdir(), "proxy-test-"));
-    store = new Store({
-      dataDir: path.join(dir, "data"),
-      stateFile: path.join(dir, "data", "state.jsonl"),
-      maxSessions: 10,
-      maxCompactMessages: 60,
-    });
-
-    // Point all upstreams at our mock server
     const base = `http://127.0.0.1:${upstream.port}`;
     upstreams = {
       openai: base,
@@ -166,26 +153,20 @@ describe("proxy handler", () => {
       geminiCodeAssist: base,
     };
 
-    handler = createProxyHandler(store, {
+    handler = createProxyHandler({
       upstreams,
       allowTargetOverride: false,
+      onCapture: (capture) => captures.push(capture),
     });
-    cleanup = () => {
-      try {
-        rmSync(dir, { recursive: true, force: true });
-      } catch {}
-    };
   });
 
   afterEach(async () => {
     await upstream.stop();
-    cleanup();
   });
 
-  it("forwards a POST with JSON body and captures the request", async () => {
+  it("forwards POST and calls onCapture with request/response data", async () => {
     const responseBody = JSON.stringify({
       model: "claude-sonnet-4-20250514",
-      stop_reason: "end_turn",
       usage: { input_tokens: 10, output_tokens: 5 },
     });
     upstream.setResponse({ body: responseBody });
@@ -205,70 +186,78 @@ describe("proxy handler", () => {
       body: requestBody,
     });
 
-    // Client gets the upstream response back
+    // Client gets the upstream response
     assert.equal(res.status, 200);
-    const parsed = JSON.parse(res.body);
-    assert.equal(parsed.model, "claude-sonnet-4-20250514");
+    assert.equal(JSON.parse(res.body).model, "claude-sonnet-4-20250514");
 
-    // Upstream received the correct request
+    // Upstream received the right request
     assert.equal(upstream.requests.length, 1);
-    assert.equal(upstream.requests[0].method, "POST");
     assert.equal(upstream.requests[0].body, requestBody);
 
-    // Store captured the request
-    assert.equal(store.getCapturedRequests().length, 1);
-    const captured = store.getCapturedRequests()[0];
-    assert.equal(captured.source, "unknown");
-    assert.equal(captured.httpStatus, 200);
+    // onCapture was called with the right data
+    assert.equal(captures.length, 1);
+    const c = captures[0];
+    assert.equal(c.method, "POST");
+    assert.equal(c.path, "/v1/messages");
+    assert.equal(c.provider, "anthropic");
+    assert.equal(c.apiFormat, "anthropic-messages");
+    assert.equal(c.responseStatus, 200);
+    assert.ok(c.requestBytes > 0);
+    assert.ok(c.responseBytes > 0);
+    assert.ok(c.timings.total_ms >= 0);
+
+    // Request body is captured as parsed JSON
+    assert.deepEqual(c.requestBody, JSON.parse(requestBody));
+
+    // Response body is captured as raw string
+    assert.equal(c.responseBody, responseBody);
   });
 
-  it("preserves multi-byte UTF-8 in forwarded body", async () => {
+  it("captures source from URL path prefix", async () => {
     upstream.setResponse({ body: '{"ok":true}' });
 
-    // Mix of ASCII and multi-byte: emoji, CJK, accented chars
-    const content = "Hello 🌍 世界 café ñ";
-    const requestBody = JSON.stringify({
-      model: "test-model",
-      messages: [{ role: "user", content }],
-    });
-
-    const res = await proxyRequest(handler, {
+    await proxyRequest(handler, {
       method: "POST",
-      path: "/v1/messages",
+      path: "/claude/v1/messages",
       headers: { "content-type": "application/json" },
-      body: requestBody,
+      body: JSON.stringify({ model: "test", messages: [] }),
     });
 
-    assert.equal(res.status, 200);
-
-    // Upstream received byte-identical body
-    assert.equal(upstream.requests[0].body, requestBody);
-
-    // Content-length header matches actual byte length
-    const upstreamContentLength =
-      upstream.requests[0].headers["content-length"];
-    assert.equal(
-      Number(upstreamContentLength),
-      Buffer.byteLength(requestBody, "utf8"),
-    );
+    assert.equal(captures.length, 1);
+    assert.equal(captures[0].source, "claude");
+    assert.equal(captures[0].path, "/v1/messages");
   });
 
-  it("captures non-JSON body as raw", async () => {
+  it("captures non-JSON body with null requestBody", async () => {
     upstream.setResponse({ body: "OK" });
 
-    const res = await proxyRequest(handler, {
+    await proxyRequest(handler, {
       method: "POST",
       path: "/v1/messages",
       headers: { "content-type": "text/plain" },
       body: "this is not JSON",
     });
 
-    assert.equal(res.status, 200);
-    assert.equal(store.getCapturedRequests().length, 1);
-    assert.equal(store.getCapturedRequests()[0].contextInfo.apiFormat, "raw");
+    assert.equal(captures.length, 1);
+    assert.equal(captures[0].requestBody, null);
+    assert.equal(captures[0].requestBytes, 16);
   });
 
-  it("strips proxy-internal headers before forwarding", async () => {
+  it("does not capture GET requests", async () => {
+    upstream.setResponse({
+      body: JSON.stringify({ data: [{ id: "model-1" }] }),
+    });
+
+    const res = await proxyRequest(handler, {
+      method: "GET",
+      path: "/v1/models",
+    });
+
+    assert.equal(res.status, 200);
+    assert.equal(captures.length, 0);
+  });
+
+  it("strips x-target-url before forwarding", async () => {
     upstream.setResponse({ body: '{"ok":true}' });
 
     await proxyRequest(handler, {
@@ -281,30 +270,61 @@ describe("proxy handler", () => {
       body: JSON.stringify({ model: "test", messages: [] }),
     });
 
-    // x-target-url should not reach the upstream
     assert.equal(upstream.requests[0].headers["x-target-url"], undefined);
   });
 
-  it("skips capturing utility endpoints", async () => {
-    upstream.setResponse({ body: '{"count":42}' });
+  it("redacts sensitive headers in captures", async () => {
+    upstream.setResponse({ body: '{"ok":true}' });
 
     await proxyRequest(handler, {
       method: "POST",
-      path: "/v1/count_tokens",
-      headers: { "content-type": "application/json" },
+      path: "/v1/messages",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer sk-secret-key",
+        "x-api-key": "secret-api-key",
+        "x-custom-header": "safe-value",
+      },
       body: JSON.stringify({ model: "test", messages: [] }),
     });
 
-    // Should not be stored
-    assert.equal(store.getCapturedRequests().length, 0);
+    assert.equal(captures.length, 1);
+    const h = captures[0].requestHeaders;
+    assert.equal(h["authorization"], undefined);
+    assert.equal(h["x-api-key"], undefined);
+    assert.equal(h["x-custom-header"], "safe-value");
   });
 
-  it("captures streaming responses", async () => {
-    // Simulate SSE response
+  it("preserves multi-byte UTF-8 in forwarded body", async () => {
+    upstream.setResponse({ body: '{"ok":true}' });
+
+    const content = "Hello 🌍 世界 café ñ";
+    const requestBody = JSON.stringify({
+      model: "test",
+      messages: [{ role: "user", content }],
+    });
+
+    await proxyRequest(handler, {
+      method: "POST",
+      path: "/v1/messages",
+      headers: { "content-type": "application/json" },
+      body: requestBody,
+    });
+
+    // Upstream received byte-identical body
+    assert.equal(upstream.requests[0].body, requestBody);
+
+    // Content-length matches byte length
+    assert.equal(
+      Number(upstream.requests[0].headers["content-length"]),
+      Buffer.byteLength(requestBody, "utf8"),
+    );
+  });
+
+  it("captures streaming responses with responseIsStreaming flag", async () => {
     const sseBody = [
-      'data: {"type":"message_start","message":{"model":"claude-sonnet-4","usage":{"input_tokens":10}}}',
+      'data: {"type":"message_start"}',
       'data: {"type":"content_block_delta","delta":{"text":"hi"}}',
-      'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}',
       "",
     ].join("\n");
 
@@ -317,61 +337,66 @@ describe("proxy handler", () => {
       method: "POST",
       path: "/v1/messages",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        model: "claude-sonnet-4",
-        messages: [{ role: "user", content: "hi" }],
-        stream: true,
-      }),
+      body: JSON.stringify({ model: "test", messages: [], stream: true }),
     });
 
     assert.equal(res.status, 200);
     assert.ok(res.body.includes("message_start"));
 
-    // Store should capture as streaming
-    assert.equal(store.getCapturedRequests().length, 1);
-    const captured = store.getCapturedRequests()[0];
-    assert.ok(captured.requestBytes > 0);
-    assert.ok(captured.responseBytes > 0);
+    assert.equal(captures.length, 1);
+    assert.equal(captures[0].responseIsStreaming, true);
+    assert.ok(captures[0].responseBytes > 0);
   });
 
-  it("extracts source from URL path prefix", async () => {
-    upstream.setResponse({
-      body: JSON.stringify({
-        model: "claude-sonnet-4",
-        stop_reason: "end_turn",
-        usage: { input_tokens: 1, output_tokens: 1 },
-      }),
-    });
+  it("captures timings", async () => {
+    upstream.setResponse({ body: '{"ok":true}' });
 
     await proxyRequest(handler, {
       method: "POST",
-      path: "/claude/v1/messages",
+      path: "/v1/messages",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        model: "claude-sonnet-4",
-        messages: [{ role: "user", content: "hi" }],
-      }),
+      body: JSON.stringify({ model: "test", messages: [] }),
     });
 
-    assert.equal(store.getCapturedRequests().length, 1);
-    assert.equal(store.getCapturedRequests()[0].source, "claude");
+    assert.equal(captures.length, 1);
+    const t = captures[0].timings;
+    assert.ok(t.total_ms >= 0);
+    assert.ok(t.send_ms >= 0);
+    assert.ok(t.wait_ms >= 0);
+    assert.ok(t.receive_ms >= 0);
   });
 
-  it("forwards GET requests without body parsing", async () => {
-    upstream.setResponse({
-      body: JSON.stringify({ data: [{ id: "model-1" }] }),
+  it("detects provider and apiFormat correctly", async () => {
+    upstream.setResponse({ body: '{"ok":true}' });
+
+    // Anthropic
+    await proxyRequest(handler, {
+      method: "POST",
+      path: "/v1/messages",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: "test", messages: [] }),
     });
+    assert.equal(captures[0].provider, "anthropic");
+    assert.equal(captures[0].apiFormat, "anthropic-messages");
 
-    const res = await proxyRequest(handler, {
-      method: "GET",
-      path: "/v1/models",
+    // OpenAI chat completions
+    await proxyRequest(handler, {
+      method: "POST",
+      path: "/v1/chat/completions",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: "test", messages: [] }),
     });
+    assert.equal(captures[1].provider, "openai");
+    assert.equal(captures[1].apiFormat, "chat-completions");
 
-    assert.equal(res.status, 200);
-    const parsed = JSON.parse(res.body);
-    assert.ok(Array.isArray(parsed.data));
-
-    // GET should not be captured in store
-    assert.equal(store.getCapturedRequests().length, 0);
+    // OpenAI responses
+    await proxyRequest(handler, {
+      method: "POST",
+      path: "/v1/responses",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: "test", input: "hi" }),
+    });
+    assert.equal(captures[2].provider, "openai");
+    assert.equal(captures[2].apiFormat, "responses");
   });
 });

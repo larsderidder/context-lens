@@ -47,15 +47,26 @@ if (privacyLevel !== undefined) {
 }
 
 if (filteredArgs.length === 0) {
-  // Standalone mode: just start the proxy server
-  const serverPath = join(__dirname, "server.js");
-  const server = spawn("node", [serverPath], {
+  // Standalone mode: start both proxy and analysis server
+  const proxyPath = join(__dirname, "proxy", "server.js");
+  const analysisPath = join(__dirname, "analysis", "server.js");
+  const proxy = spawn("node", [proxyPath], {
     stdio: "inherit",
     env: { ...process.env },
   });
-  server.on("exit", (code) => process.exit(code || 0));
-  process.on("SIGINT", () => server.kill("SIGINT"));
-  process.on("SIGTERM", () => server.kill("SIGTERM"));
+  const analysis = spawn("node", [analysisPath], {
+    stdio: "inherit",
+    env: { ...process.env },
+  });
+  function shutdownStandalone(code: number): void {
+    if (!proxy.killed) proxy.kill();
+    if (!analysis.killed) analysis.kill();
+    process.exit(code);
+  }
+  proxy.on("exit", (code) => shutdownStandalone(code || 0));
+  analysis.on("exit", (code) => shutdownStandalone(code || 0));
+  process.on("SIGINT", () => shutdownStandalone(0));
+  process.on("SIGTERM", () => shutdownStandalone(0));
   // Prevent early exit
   process.stdin.resume();
 } else {
@@ -143,79 +154,160 @@ if (filteredArgs.length === 0) {
     }
   }
 
-  let serverProcess: ChildProcess | null = null;
+  let proxyProcess: ChildProcess | null = null;
+  let analysisProcess: ChildProcess | null = null;
   let mitmProcess: ChildProcess | null = null;
-  let serverReady = false;
+  let proxyReady = false;
+  let analysisReady = false;
   let mitmReady = false;
   let childProcess: ChildProcess | null = null;
   let piAgentDirToCleanup: string | null = null;
-  let shouldShutdownProxy = false;
+  let shouldShutdownServers = false;
   let cleanupDidRun = false;
 
-  // Start proxy or attach to existing one
-  async function initializeProxy(): Promise<void> {
-    const alreadyRunning = await isProxyRunning();
-
-    if (alreadyRunning) {
-      console.log("🔍 Context Lens proxy already running, attaching to it...");
-      incrementRefCount();
-      serverReady = true;
-      shouldShutdownProxy = false;
+  function checkBothReady(): void {
+    if (proxyReady && analysisReady) {
       maybeStartMitmThenChild();
-    } else {
-      console.log("🔍 Starting Context Lens proxy and web UI...");
-      // No proxy is listening on :4040. Any existing lockfile is stale and would prevent shutdown later.
-      clearStaleLockfile();
-      incrementRefCount();
-      shouldShutdownProxy = true;
+    }
+  }
 
-      const serverPath = join(__dirname, "server.js");
-      serverProcess = spawn("node", [serverPath], {
+  // Check if analysis server is already running
+  function isAnalysisRunning(): Promise<boolean> {
+    return new Promise((resolve) => {
+      const socket = net.connect({ port: 4041, host: "localhost" }, () => {
+        socket.end();
+        resolve(true);
+      });
+      socket.on("error", () => resolve(false));
+      socket.setTimeout(1000, () => {
+        socket.destroy();
+        resolve(false);
+      });
+    });
+  }
+
+  // Start proxy and analysis server (or attach to existing ones)
+  async function initializeServers(): Promise<void> {
+    const [proxyAlreadyRunning, analysisAlreadyRunning] = await Promise.all([
+      isProxyRunning(),
+      isAnalysisRunning(),
+    ]);
+
+    const bothRunning = proxyAlreadyRunning && analysisAlreadyRunning;
+
+    if (bothRunning) {
+      console.log("🔍 Context Lens already running, attaching...");
+      incrementRefCount();
+      proxyReady = true;
+      analysisReady = true;
+      shouldShutdownServers = false;
+      checkBothReady();
+      return;
+    }
+
+    console.log("🔍 Starting Context Lens proxy and analysis server...");
+    // Clear stale lockfile if servers aren't actually running
+    if (!proxyAlreadyRunning) clearStaleLockfile();
+    incrementRefCount();
+    shouldShutdownServers = true;
+
+    const serverEnv = {
+      ...toolConfig.serverEnv,
+      ...process.env,
+      CONTEXT_LENS_CLI: "1",
+    };
+
+    // Start proxy
+    if (proxyAlreadyRunning) {
+      proxyReady = true;
+    } else {
+      const proxyPath = join(__dirname, "proxy", "server.js");
+      proxyProcess = spawn("node", [proxyPath], {
         stdio: ["ignore", "pipe", "pipe"],
         detached: false,
-        env: { ...toolConfig.serverEnv, ...process.env, CONTEXT_LENS_CLI: "1" },
+        env: serverEnv,
       });
 
-      // Wait for server to be ready, then suppress output (visible in web UI at :4041)
-      serverProcess.stdout?.on("data", (data: Buffer) => {
+      proxyProcess.stdout?.on("data", (data: Buffer) => {
         const output = data.toString();
-        if (!serverReady) {
-          process.stderr.write(output);
-        }
-        if (output.includes("Context Lens Web UI running") && !serverReady) {
-          serverReady = true;
-          maybeStartMitmThenChild();
+        if (!proxyReady) process.stderr.write(output);
+        if (output.includes("Context Lens Proxy running") && !proxyReady) {
+          proxyReady = true;
+          checkBothReady();
         }
       });
 
-      serverProcess.stderr?.on("data", (data: Buffer) => {
-        if (!serverReady) {
-          process.stderr.write(data);
-        }
+      proxyProcess.stderr?.on("data", (data: Buffer) => {
+        if (!proxyReady) process.stderr.write(data);
       });
 
-      serverProcess.on("error", (err) => {
-        console.error("Failed to start server:", err);
+      proxyProcess.on("error", (err) => {
+        console.error("Failed to start proxy:", err);
         decrementRefCount();
         process.exit(1);
       });
 
-      serverProcess.on("exit", (code) => {
-        if (!serverReady) {
-          console.error("Server exited unexpectedly");
+      proxyProcess.on("exit", (code) => {
+        if (!proxyReady) {
+          console.error("Proxy exited unexpectedly");
           decrementRefCount();
           process.exit(code || 1);
         }
       });
-
-      // Open browser after a short delay (only when starting new server)
-      setTimeout(() => {
-        openBrowser("http://localhost:4041");
-      }, 1000);
     }
+
+    // Start analysis server
+    if (analysisAlreadyRunning) {
+      analysisReady = true;
+    } else {
+      const analysisPath = join(__dirname, "analysis", "server.js");
+      analysisProcess = spawn("node", [analysisPath], {
+        stdio: ["ignore", "pipe", "pipe"],
+        detached: false,
+        env: serverEnv,
+      });
+
+      analysisProcess.stdout?.on("data", (data: Buffer) => {
+        const output = data.toString();
+        if (!analysisReady) process.stderr.write(output);
+        if (
+          output.includes("Context Lens Analysis running") &&
+          !analysisReady
+        ) {
+          analysisReady = true;
+          checkBothReady();
+        }
+      });
+
+      analysisProcess.stderr?.on("data", (data: Buffer) => {
+        if (!analysisReady) process.stderr.write(data);
+      });
+
+      analysisProcess.on("error", (err) => {
+        console.error("Failed to start analysis server:", err);
+        decrementRefCount();
+        process.exit(1);
+      });
+
+      analysisProcess.on("exit", (code) => {
+        if (!analysisReady) {
+          console.error("Analysis server exited unexpectedly");
+          decrementRefCount();
+          process.exit(code || 1);
+        }
+      });
+    }
+
+    // Open browser after a short delay (only when starting new servers)
+    setTimeout(() => {
+      openBrowser("http://localhost:4041");
+    }, 1000);
+
+    // If both were already ready (mixed scenario), check now
+    checkBothReady();
   }
 
-  initializeProxy();
+  initializeServers();
 
   // Start mitmproxy if needed, then start the child
   function maybeStartMitmThenChild(): void {
@@ -430,13 +522,9 @@ if (filteredArgs.length === 0) {
       }
     }
 
-    if (
-      remainingRefs === 0 &&
-      shouldShutdownProxy &&
-      serverProcess &&
-      !serverProcess.killed
-    ) {
-      serverProcess.kill();
+    if (remainingRefs === 0 && shouldShutdownServers) {
+      if (proxyProcess && !proxyProcess.killed) proxyProcess.kill();
+      if (analysisProcess && !analysisProcess.killed) analysisProcess.kill();
     }
 
     process.exit(exitCode);

@@ -1,5 +1,3 @@
-import type http from "node:http";
-
 export { selectHeaders } from "./http/headers.js";
 
 // Keep filenames predictable and prevent traversal or weird platform behavior.
@@ -18,20 +16,17 @@ export function isLocalRemote(addr: string | undefined): boolean {
 }
 
 export function headersForResolution(
-  headers: http.IncomingHttpHeaders,
+  headers: Record<string, string | undefined>,
   remoteAddr: string | undefined,
   allowTargetOverride: boolean,
 ): Record<string, string | undefined> {
-  const h = headers as Record<string, string | undefined>;
+  const h = headers;
   if (
     h["x-target-url"] &&
     !(allowTargetOverride && isLocalRemote(remoteAddr))
   ) {
-    // Ignore override unless explicitly enabled and coming from localhost.
     const { "x-target-url": _drop, ...rest } = h;
     return rest;
   }
   return h;
 }
-
-// `selectHeaders` is re-exported from `src/http/headers.ts` to keep server-utils small.
