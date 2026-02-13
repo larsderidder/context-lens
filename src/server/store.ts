@@ -181,8 +181,9 @@ export class Store {
       // BEFORE the usage backfill rescales everything proportionally.
       const migrated = this.migrateImageTokenCounts();
       this.backfillTotalTokensFromUsage();
+      const tokenFixups = this.restoreTokenCountsFromDetails();
       this.backfillHealthScores();
-      if (migrated > 0) {
+      if (migrated > 0 || tokenFixups > 0) {
         this.saveState();
       }
       console.log(
@@ -524,6 +525,45 @@ export class Store {
   }
 
   /**
+   * Restore token counts for compacted entries whose totalTokens was incorrectly
+   * recalculated from truncated messages. Uses the detail files (which contain
+   * the full uncompacted contextInfo) as the source of truth.
+   */
+  private restoreTokenCountsFromDetails(): number {
+    let fixed = 0;
+    for (const entry of this.capturedRequests) {
+      const ci = entry.contextInfo;
+      // Only entries at the compaction limit could have been truncated.
+      if (ci.messages.length !== this.maxCompactMessages) continue;
+      const msgTokenSum = ci.messages.reduce((s, m) => s + m.tokens, 0);
+      // If messagesTokens matches the sum of compacted messages, the entry
+      // was likely corrupted by the old migration recalculating from truncated
+      // messages. If messagesTokens is already higher, it was never corrupted
+      // (or already fixed).
+      if (ci.messagesTokens !== msgTokenSum) continue;
+      const detail = this.getEntryDetail(entry.id);
+      if (!detail || detail.messages.length <= ci.messages.length) continue;
+      // The detail has more messages; the compacted entry's totalTokens is wrong.
+      if (
+        detail.totalTokens !== ci.totalTokens &&
+        detail.totalTokens > ci.totalTokens
+      ) {
+        ci.systemTokens = detail.systemTokens;
+        ci.toolsTokens = detail.toolsTokens;
+        ci.messagesTokens = detail.messagesTokens;
+        ci.totalTokens = detail.totalTokens;
+        fixed++;
+      }
+    }
+    if (fixed > 0) {
+      console.log(
+        `Restored totalTokens from detail files for ${fixed} compacted entries`,
+      );
+    }
+    return fixed;
+  }
+
+  /**
    * Migrate image token counts: re-estimate token counts for messages containing
    * contentBlocks (which have no base64 data) using the fixed estimateTokens().
    */
@@ -565,12 +605,6 @@ export class Store {
         messagesTokens += msg.tokens;
       }
       if (changed) {
-        updateTotals(ci, messagesTokens);
-        migrated++;
-      } else if (ci.messagesTokens !== messagesTokens) {
-        // Messages with images may have been truncated during compaction,
-        // leaving messagesTokens inflated even though no image blocks remain.
-        // Fix by recalculating from the actual per-message token counts.
         updateTotals(ci, messagesTokens);
         migrated++;
       }
