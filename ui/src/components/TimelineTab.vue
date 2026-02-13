@@ -295,7 +295,7 @@ watch(
       <span class="scope-label">Scope</span>
       <div class="scope-toggle">
         <button
-          v-for="m in (['all', 'main'] as TimelineMode[])"
+          v-for="m in (['main', 'all'] as TimelineMode[])"
           :key="'scope-' + m"
           :class="{ on: mode === m }"
           @click="mode = m"

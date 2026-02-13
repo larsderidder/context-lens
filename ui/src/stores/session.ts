@@ -54,7 +54,7 @@ export const useSessionStore = defineStore('session', () => {
   const messagesMode = ref<'all' | 'main'>('main')
 
   // Timeline tab persistent state
-  const timelineMode = ref<'all' | 'main'>('all')
+  const timelineMode = ref<'all' | 'main'>('main')
   const timelineStackMode = ref<'absolute' | 'normalized'>('absolute')
   const timelineHiddenLegendKeys = ref(new Set<string>())
   const timelineShowLimitOverlay = ref(true)
