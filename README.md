@@ -153,22 +153,25 @@ If Codex fails with certificate trust errors, install/trust the mitmproxy CA cer
 
 ## How It Works
 
-Context Lens sits between your coding tool and the LLM API, capturing requests in transit.
-
-**Reverse proxy (Claude Code, aider, OpenAI API tools)**
+Context Lens sits between your coding tool and the LLM API, capturing requests in transit. It has two parts: a **proxy** and an **analysis server**.
 
 ```
-Tool  ─HTTP─▶  Context Lens (:4040)  ─HTTPS─▶  api.anthropic.com / api.openai.com
-                      │
-                      ▼
-                 Web UI (:4041)
+Tool  ─HTTP─▶  Proxy (:4040)  ─HTTPS─▶  api.anthropic.com / api.openai.com
+                    │
+              capture files
+                    │
+            Analysis Server (:4041)  →  Web UI
 ```
 
-The CLI sets env vars like `ANTHROPIC_BASE_URL=http://localhost:4040` so the tool sends requests to the proxy instead of the real API. The proxy buffers each request body, parses the JSON to extract context structure (system prompts, tools, messages), forwards the raw bytes upstream with all original headers intact, then captures the response on the way back. The tool never knows it's being proxied.
+The **proxy** forwards requests to the LLM API and writes each request/response pair to disk. It has zero dependencies (~500 lines, only Node.js built-ins), so you can read the entire source and verify it does nothing unexpected with your API keys.
+
+The **analysis server** picks up those captures, parses request bodies, estimates tokens, groups requests into conversations, computes composition breakdowns, calculates costs, scores context health, and scans for prompt injection patterns. It serves the web UI and API.
+
+The CLI sets env vars like `ANTHROPIC_BASE_URL=http://localhost:4040` so the tool sends requests to the proxy instead of the real API. The tool never knows it's being proxied.
 
 **Forward HTTPS proxy (Codex subscription mode)**
 
-Some tools can't be reverse-proxied. Codex with a ChatGPT subscription authenticates against `chatgpt.com`, which is behind Cloudflare. A reverse proxy changes the TLS fingerprint, causing Cloudflare to reject the request with a 403. For these tools, Context Lens uses mitmproxy as a forward HTTPS proxy instead:
+Codex with a ChatGPT subscription authenticates against `chatgpt.com`, which is behind Cloudflare. A reverse proxy changes the TLS fingerprint, causing Cloudflare to reject the request. For this case, Context Lens uses mitmproxy as a forward HTTPS proxy:
 
 ```
 Tool  ─HTTPS via proxy─▶  mitmproxy (:8080)  ─HTTPS─▶  chatgpt.com
@@ -176,14 +179,10 @@ Tool  ─HTTPS via proxy─▶  mitmproxy (:8080)  ─HTTPS─▶  chatgpt.com
                             mitm_addon.py
                                   │
                                   ▼
-                          Web UI /api/ingest
+                          Analysis Server /api/ingest
 ```
 
-The tool makes its own TLS connection through the proxy, preserving its native TLS fingerprint. The mitmproxy addon intercepts completed request/response pairs and posts them to Context Lens's ingest API. The tool needs `https_proxy` and `SSL_CERT_FILE` env vars set to route through mitmproxy and trust its CA certificate.
-
-**What the proxy captures**
-
-Each request is parsed to extract: model name, system prompts, tool definitions, message history (with per-message token estimates), and content block types (text, tool calls, tool results, images, thinking). The response is captured to extract usage stats and cost. Requests are grouped into conversations using session IDs (Anthropic `metadata.user_id`), response chaining (OpenAI `previous_response_id`), or a fingerprint of the system prompt + first user message.
+The tool makes its own TLS connection through the proxy, preserving its native fingerprint. The mitmproxy addon intercepts completed request/response pairs and posts them to the analysis server's ingest API. The tool needs `https_proxy` and `SSL_CERT_FILE` env vars set to route through mitmproxy and trust its CA certificate.
 
 ## Why Context Lens?
 
@@ -208,7 +207,7 @@ Context Lens is for developers who want to understand and optimize their coding 
 
 ## Data
 
-Captured requests are kept in memory (last 100) and persisted to `data/state.jsonl` across restarts. Each session is also logged as a separate `.lhar` file in `data/`. Use the Reset button in the UI to clear everything.
+Captured requests are kept in memory (last 100 sessions) and persisted to `~/.context-lens/data/state.jsonl` across restarts. Each session is also logged as a separate `.lhar` file in `~/.context-lens/data/`. Use the Reset button in the UI to clear everything.
 
 ## License
 
