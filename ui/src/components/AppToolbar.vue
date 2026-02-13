@@ -41,6 +41,16 @@ function safeFilenamePart(input: string): string {
     .slice(0, 80) || 'unknown'
 }
 
+function buildExportFilename(
+  format: 'lhar' | 'lhar.json',
+  conversationId: string | undefined,
+): string {
+  const ext = format === 'lhar' ? 'lhar' : 'lhar.json'
+  const sessionPart = `session-${safeFilenamePart(conversationId || 'all')}`
+  const privacyPart = 'privacy-standard'
+  return `context-lens-export-${sessionPart}-${privacyPart}.${ext}`
+}
+
 async function downloadWithFilename(url: string, filename: string) {
   const res = await fetch(url)
   if (!res.ok) throw new Error(`Download failed: ${res.status}`)
@@ -62,15 +72,10 @@ async function downloadWithFilename(url: string, filename: string) {
 async function handleExport(format: 'lhar' | 'lhar.json', scope: 'all' | 'session') {
   const convoId = scope === 'session' ? store.selectedSessionId ?? undefined : undefined
   const url = getExportUrl(format, convoId)
-  if (scope === 'session' && convoId) {
-    const ext = format === 'lhar' ? 'lhar' : 'lhar.json'
-    const safeId = safeFilenamePart(convoId)
-    try {
-      await downloadWithFilename(url, `context-lens-session-${safeId}.${ext}`)
-    } catch {
-      window.open(url, '_blank')
-    }
-  } else {
+  const filename = buildExportFilename(format, convoId)
+  try {
+    await downloadWithFilename(url, filename)
+  } catch {
     window.open(url, '_blank')
   }
   showExportMenu.value = false
