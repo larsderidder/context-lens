@@ -37,10 +37,25 @@ const privacyEnv = (
 const privacy: PrivacyLevel =
   privacyEnv === "minimal" || privacyEnv === "full" ? privacyEnv : "standard";
 
-// Data directory: alongside captures in the same parent
-const dataDir =
-  process.env.CONTEXT_LENS_DATA_DIR ||
-  path.join(homedir(), ".context-lens", "data");
+// Data directory: check for explicit env, then legacy location, then new default.
+// Pre-split installs stored data in <project>/data/ next to dist/.
+import fs from "node:fs";
+
+function resolveDataDir(): string {
+  if (process.env.CONTEXT_LENS_DATA_DIR) return process.env.CONTEXT_LENS_DATA_DIR;
+
+  // Legacy location: <project>/data/ (sibling of dist/)
+  const legacyDir = path.resolve(__dirname, "..", "..", "data");
+  const legacyState = path.join(legacyDir, "state.jsonl");
+  if (fs.existsSync(legacyState)) {
+    console.log(`📦 Found existing data at legacy location: ${legacyDir}`);
+    return legacyDir;
+  }
+
+  return path.join(homedir(), ".context-lens", "data");
+}
+
+const dataDir = resolveDataDir();
 
 const maxSessions = 100;
 const maxCompactMessages = 60;
