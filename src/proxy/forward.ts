@@ -208,6 +208,7 @@ export function createProxyHandler(
       const protocol = targetParsed.protocol === "https:" ? https : http;
       const startTime = performance.now();
       let firstByteTime = 0;
+      let requestSentTime = 0;
       const reqBytes = bodyBuffer.length;
 
       const proxyReq = protocol.request(
@@ -259,8 +260,12 @@ export function createProxyHandler(
               responseIsStreaming: !!isStreaming,
               responseBytes: respBytes,
               timings: {
-                send_ms: Math.round(firstByteTime - startTime),
-                wait_ms: Math.round(firstByteTime - startTime),
+                send_ms: Math.round(
+                  Math.max(0, (requestSentTime || firstByteTime) - startTime),
+                ),
+                wait_ms: Math.round(
+                  Math.max(0, firstByteTime - (requestSentTime || startTime)),
+                ),
                 receive_ms: Math.round(endTime - firstByteTime),
                 total_ms: Math.round(endTime - startTime),
               },
@@ -279,6 +284,9 @@ export function createProxyHandler(
       );
 
       attachLifecycleHandlers(res, proxyReq);
+      proxyReq.on("finish", () => {
+        requestSentTime = performance.now();
+      });
       proxyReq.write(bodyBuffer);
       proxyReq.end();
     });

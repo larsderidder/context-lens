@@ -5,7 +5,7 @@
  * runs the full analysis pipeline, then stores the result.
  */
 
-import { detectApiFormat, estimateTokens, parseContextInfo } from "../core.js";
+import { estimateTokens, parseContextInfo } from "../core.js";
 import type { CaptureData } from "../proxy/capture.js";
 import type { Store } from "../server/store.js";
 import type { ContextInfo, RequestMeta, ResponseData } from "../types.js";

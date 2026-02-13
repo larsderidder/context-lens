@@ -31,6 +31,7 @@ export class CaptureWatcher {
   private readonly deleteAfterProcessing: boolean;
   private readonly pollInterval: number;
   private readonly processed = new Set<string>();
+  private readonly processing = new Set<string>();
   private watcher: fs.FSWatcher | null = null;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private running = false;
@@ -144,6 +145,13 @@ export class CaptureWatcher {
       .readdirSync(this.captureDir)
       .filter((f) => f.endsWith(".json") && !f.endsWith(".tmp"))
       .sort();
+    const present = new Set(files);
+
+    // Keep dedupe state bounded to files that still exist.
+    // This prevents unbounded growth in long-running processes.
+    for (const filename of this.processed) {
+      if (!present.has(filename)) this.processed.delete(filename);
+    }
 
     for (const filename of files) {
       if (!this.processed.has(filename)) {
@@ -156,9 +164,10 @@ export class CaptureWatcher {
    * Read and process a single capture file.
    */
   private processFile(filename: string): void {
-    if (this.processed.has(filename)) return;
+    if (this.processed.has(filename) || this.processing.has(filename)) return;
 
     const filePath = join(this.captureDir, filename);
+    this.processing.add(filename);
     try {
       const content = fs.readFileSync(filePath, "utf8");
       const capture: CaptureData = JSON.parse(content);
@@ -168,6 +177,7 @@ export class CaptureWatcher {
       if (this.deleteAfterProcessing) {
         try {
           fs.unlinkSync(filePath);
+          this.processed.delete(filename);
         } catch {
           /* file may already be gone */
         }
@@ -177,6 +187,8 @@ export class CaptureWatcher {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes("ENOENT")) return; // File disappeared, ignore
       console.error(`Capture read error (${filename}):`, msg);
+    } finally {
+      this.processing.delete(filename);
     }
   }
 }
