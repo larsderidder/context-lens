@@ -34,3 +34,27 @@ pnpm build:test        # build tests only
 ```
 
 For manual testing, `pnpm start` launches the proxy and web UI, then point your tool at `http://localhost:4040`.
+
+## Releasing
+
+Publishing to npm is automated via GitHub Actions using [npm trusted publishing (OIDC)](https://docs.npmjs.com/trusted-publishers). No tokens or secrets are needed.
+
+1. Bump the version in `package.json`
+2. Commit and push to `main`
+3. Create and publish a GitHub release:
+
+```bash
+gh release create v0.X.0 --title "v0.X.0" --target main --latest --notes "release notes here"
+gh release edit v0.X.0 --draft=false --latest
+```
+
+The `publish.yml` workflow will build, lint, test, and publish to npm automatically.
+
+### How trusted publishing works
+
+The workflow uses GitHub Actions OIDC to authenticate with npm directly. No `NPM_TOKEN` secret is involved. The trust relationship is configured in two places:
+
+- **npm**: package settings > Trusted Publisher, linked to `larsderidder/context-lens`, workflow `publish.yml`, environment `npm`
+- **GitHub**: an environment called `npm` exists under repo Settings > Environments
+
+If either side is misconfigured, the publish step will fail with `ENEEDAUTH` or an OIDC token exchange error.
