@@ -4,11 +4,15 @@ mitmproxy addon for Context Lens.
 Captures LLM API requests passing through mitmproxy and forwards them
 to Context Lens's ingest API for visualization.
 
-Usage:
-    mitmdump -s mitm_addon.py
+NOTE: This addon is for advanced/manual use only. The built-in reverse
+proxy handles all supported tools (including Codex) without mitmproxy.
+Use this only when you need to intercept HTTPS traffic from tools that
+cannot be configured with a custom base URL.
 
-Then run codex through the proxy:
-    https_proxy=http://localhost:8080 SSL_CERT_FILE=~/.mitmproxy/mitmproxy-ca-cert.pem codex "prompt"
+Usage:
+    context-lens background start
+    mitmdump -s mitm_addon.py
+    https_proxy=http://localhost:8080 SSL_CERT_FILE=~/.mitmproxy/mitmproxy-ca-cert.pem <tool> "prompt"
 
 View at http://localhost:4041
 """

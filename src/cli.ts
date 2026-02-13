@@ -957,9 +957,7 @@ async function runAnalyze(args: string[]): Promise<number> {
       resolvedPath = localData;
     } else {
       console.error(`Error: file not found: ${filepath}`);
-      console.error(
-        `  Searched: ${filepath}, ${homeData}, ${localData}`,
-      );
+      console.error(`  Searched: ${filepath}, ${homeData}, ${localData}`);
       return 1;
     }
   }
@@ -1018,17 +1016,18 @@ async function runDoctor(): Promise<number> {
   const mitmdumpPath = findBinaryOnPath("mitmdump");
   report(
     "mitmdump",
-    mitmdumpPath != null,
-    mitmdumpPath ?? "not found (required for codex subscription mode)",
+    true,
+    mitmdumpPath ??
+      "not found (optional; only needed for manual HTTPS interception)",
   );
 
   const certPath = join(homedir(), ".mitmproxy", "mitmproxy-ca-cert.pem");
   report(
     "mitm CA cert",
-    fs.existsSync(certPath),
+    true,
     fs.existsSync(certPath)
       ? certPath
-      : `${certPath} (missing; run mitmproxy once to generate)`,
+      : `${certPath} (not present; optional for manual HTTPS interception)`,
   );
 
   const contextDir = join(homedir(), ".context-lens");
