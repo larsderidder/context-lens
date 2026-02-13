@@ -31,9 +31,9 @@ npx context-lens ...
 ## Quick Start
 
 ```bash
-context-lens claude "your prompt"
-context-lens codex "your prompt"
-context-lens gemini "your prompt"
+context-lens claude
+context-lens codex
+context-lens gemini
 context-lens aider --model claude-sonnet-4
 context-lens pi
 context-lens -- python my_agent.py
@@ -92,9 +92,9 @@ This starts the proxy (port 4040), opens the web UI (http://localhost:4041), set
 pnpm start
 # Port 4040 = proxy, port 4041 = web UI
 
-ANTHROPIC_BASE_URL=http://localhost:4040 claude "your prompt"
-OPENAI_BASE_URL=http://localhost:4040 codex "your prompt"  # API-key/OpenAI-base-url mode
-GOOGLE_GEMINI_BASE_URL=http://localhost:4040 gemini "your prompt"  # experimental
+ANTHROPIC_BASE_URL=http://localhost:4040 claude
+OPENAI_BASE_URL=http://localhost:4040 codex  # API-key/OpenAI-base-url mode
+GOOGLE_GEMINI_BASE_URL=http://localhost:4040 gemini  # experimental
 ```
 
 ### Source Tagging
@@ -102,8 +102,8 @@ GOOGLE_GEMINI_BASE_URL=http://localhost:4040 gemini "your prompt"  # experimenta
 Add a path prefix to tag requests by tool:
 
 ```bash
-ANTHROPIC_BASE_URL=http://localhost:4040/claude claude "prompt"
-OPENAI_BASE_URL=http://localhost:4040/aider aider "prompt"
+ANTHROPIC_BASE_URL=http://localhost:4040/claude claude
+OPENAI_BASE_URL=http://localhost:4040/aider aider
 ```
 
 ### Pi Coding Agent
@@ -146,7 +146,7 @@ Codex with a ChatGPT subscription needs mitmproxy for HTTPS interception (Cloudf
 
 ```bash
 pipx install mitmproxy
-context-lens codex "your prompt"
+context-lens codex
 ```
 
 If Codex fails with certificate trust errors, install/trust the mitmproxy CA certificate (`~/.mitmproxy/mitmproxy-ca-cert.pem`) for your environment.
