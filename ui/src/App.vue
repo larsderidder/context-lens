@@ -229,7 +229,7 @@ onUnmounted(() => {
       
       <!-- Main content area with transitions -->
       <div class="main-content">
-        <Transition :name="viewTransitionName" mode="out-in">
+        <Transition :name="viewTransitionName">
           <DashboardView v-if="store.view === 'dashboard'" key="dashboard" />
           <div v-else-if="store.view === 'inspector'" key="inspector" class="inspector-content">
             <InspectorPanel v-if="store.selectedSession" />
@@ -311,8 +311,7 @@ onUnmounted(() => {
 }
 
 .view-slide-forward-leave-active {
-  transition: transform 0.22s cubic-bezier(0.25, 0.46, 0.45, 0.94),
-              opacity 0.18s ease;
+  display: none;
 }
 
 .view-slide-forward-enter-from {
@@ -320,25 +319,17 @@ onUnmounted(() => {
   opacity: 0;
 }
 
-.view-slide-forward-leave-to {
-  transform: translateX(-20%);
-  opacity: 0;
-}
-
-// Back: Inspector → Dashboard (dashboard zooms/fades in, inspector slides out right)
+// Back: Inspector → Dashboard (inspector slides out right, dashboard appears instantly underneath)
 .view-slide-back-enter-active {
-  transition: transform 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94),
-              opacity 0.2s ease;
+  transition: none;
 }
 
 .view-slide-back-leave-active {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
   transition: transform 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94),
               opacity 0.18s ease;
-}
-
-.view-slide-back-enter-from {
-  transform: scale(0.96);
-  opacity: 0;
 }
 
 .view-slide-back-leave-to {
