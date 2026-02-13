@@ -142,14 +142,14 @@ function onSessionIdKeydown(e: KeyboardEvent) {
 <template>
   <header class="toolbar">
     <!-- ═══ Left: brand or back + session context ═══ -->
-    <button class="toolbar-brand toolbar-brand-btn" @click="goBack">
+    <a class="toolbar-brand toolbar-brand-btn" href="#sessions" @click.prevent="goBack">
       <svg class="logo-mark" width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
         <circle cx="9" cy="9" r="7.5" fill="none" stroke="var(--accent-blue)" stroke-width="1" opacity="0.35" />
         <circle cx="9" cy="9" r="4" fill="none" stroke="var(--accent-blue)" stroke-width="1" opacity="0.6" />
         <circle cx="9" cy="9" r="1.5" fill="var(--accent-blue)" />
       </svg>
       <span class="brand-text">Context Lens</span>
-    </button>
+    </a>
 
     <template v-if="isInspector && session">
       <span class="toolbar-sep"></span>
@@ -276,6 +276,7 @@ function onSessionIdKeydown(e: KeyboardEvent) {
   background: none;
   padding: 0;
   cursor: pointer;
+  text-decoration: none;
 
   &:hover .brand-text { color: var(--accent-blue); }
   &:focus-visible { @include focus-ring; }

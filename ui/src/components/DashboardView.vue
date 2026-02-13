@@ -276,6 +276,10 @@ function collapseAll() {
 }
 
 // ── Navigation ──
+function sessionHref(id: string): string {
+  return `#session/${encodeURIComponent(id)}?tab=overview`
+}
+
 function inspectSession(id: string) {
   store.setInspectorTab('overview')
   store.selectSession(id)
@@ -431,11 +435,12 @@ function onKeydown(e: KeyboardEvent) {
                 <span class="time-text" :title="exactTime(s.latestTimestamp)">{{ relativeTime(s.latestTimestamp) }}</span>
               </td>
               <td class="col-arrow">
-                <button
+                <a
                   class="inspect-btn"
                   title="Open in inspector"
-                  @click.stop="inspectSession(s.id)"
-                ><i class="i-carbon-arrow-right" /></button>
+                  :href="sessionHref(s.id)"
+                  @click.prevent.stop="inspectSession(s.id)"
+                ><i class="i-carbon-arrow-right" /></a>
               </td>
             </tr>
 
@@ -900,6 +905,7 @@ function onKeydown(e: KeyboardEvent) {
   border-radius: var(--radius-sm);
   cursor: pointer;
   color: var(--text-secondary);
+  text-decoration: none;
   font-size: 13px;
   font-weight: 500;
   transition: all 0.15s ease;
