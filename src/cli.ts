@@ -410,6 +410,22 @@ if (parsedArgs.commandName === "analyze") {
       ...toolConfig.childEnv,
     };
 
+    // Fill in mitmproxy CA cert path for tools that need HTTPS interception
+    if (toolConfig.needsMitm && childEnv.SSL_CERT_FILE === "") {
+      const certPath = join(
+        homedir(),
+        ".mitmproxy",
+        "mitmproxy-ca-cert.pem",
+      );
+      if (fs.existsSync(certPath)) {
+        childEnv.SSL_CERT_FILE = certPath;
+      } else {
+        console.error(
+          `Warning: mitmproxy CA cert not found at ${certPath}. Run 'mitmdump' once to generate it.`,
+        );
+      }
+    }
+
     if (commandName === "pi") {
       childEnv.PI_CODING_AGENT_DIR = preparePiAgentDir(
         childEnv.PI_CODING_AGENT_DIR,
@@ -1016,18 +1032,18 @@ async function runDoctor(): Promise<number> {
   const mitmdumpPath = findBinaryOnPath("mitmdump");
   report(
     "mitmdump",
-    true,
+    !!mitmdumpPath,
     mitmdumpPath ??
-      "not found (optional; only needed for manual HTTPS interception)",
+      "not found (required for Codex; install: pipx install mitmproxy)",
   );
 
   const certPath = join(homedir(), ".mitmproxy", "mitmproxy-ca-cert.pem");
   report(
     "mitm CA cert",
-    true,
+    fs.existsSync(certPath),
     fs.existsSync(certPath)
       ? certPath
-      : `${certPath} (not present; optional for manual HTTPS interception)`,
+      : `${certPath} (not present; run 'mitmdump' once to generate it)`,
   );
 
   const contextDir = join(homedir(), ".context-lens");

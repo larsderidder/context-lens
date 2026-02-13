@@ -2,10 +2,20 @@ import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import * as v from "valibot";
 
+import { ingestCapture } from "../analysis/ingest.js";
 import { parseContextInfo } from "../core.js";
 import { toLharJson, toLharJsonl } from "../lhar.js";
-import { IngestPayloadSchema } from "../schemas.js";
-import type { AgentGroup, CapturedEntry, ConversationGroup, PrivacyLevel } from "../types.js";
+import {
+  IngestCapturePayloadSchema,
+  IngestLegacyPayloadSchema,
+  IngestPayloadSchema,
+} from "../schemas.js";
+import type {
+  AgentGroup,
+  CapturedEntry,
+  ConversationGroup,
+  PrivacyLevel,
+} from "../types.js";
 import { projectEntry } from "./projection.js";
 import type { Store } from "./store.js";
 
@@ -118,23 +128,40 @@ export function createApiApp(store: Store): Hono {
 
   app.post("/api/ingest", async (c) => {
     const raw = await c.req.json();
-    const result = v.safeParse(IngestPayloadSchema, raw);
-    if (!result.success) {
-      const message = v.summarize(result.issues);
-      console.error("Ingest validation error:", message);
-      return c.json({ error: message }, 400);
+
+    // Try capture format first (from mitmproxy addon), then legacy format
+    const captureResult = v.safeParse(IngestCapturePayloadSchema, raw);
+    if (captureResult.success) {
+      const data = captureResult.output;
+      ingestCapture(store, {
+        ...data,
+        source: data.source ?? "unknown",
+        requestBody: data.requestBody ?? null,
+      });
+      console.log(
+        `  📥 Ingested (capture): [${data.provider}] from ${data.source ?? "unknown"}`,
+      );
+      return c.json({ ok: true });
     }
-    const data = result.output;
-    const contextInfo = parseContextInfo(
-      data.provider,
-      data.body,
-      data.apiFormat,
-    );
-    store.storeRequest(contextInfo, data.response, data.source, data.body);
-    console.log(
-      `  📥 Ingested: [${data.provider}] ${contextInfo.model} from ${data.source}`,
-    );
-    return c.json({ ok: true });
+
+    const legacyResult = v.safeParse(IngestLegacyPayloadSchema, raw);
+    if (legacyResult.success) {
+      const data = legacyResult.output;
+      const contextInfo = parseContextInfo(
+        data.provider,
+        data.body,
+        data.apiFormat,
+      );
+      store.storeRequest(contextInfo, data.response, data.source, data.body);
+      console.log(
+        `  📥 Ingested: [${data.provider}] ${contextInfo.model} from ${data.source}`,
+      );
+      return c.json({ ok: true });
+    }
+
+    const message = v.summarize(legacyResult.issues);
+    console.error("Ingest validation error:", message);
+    return c.json({ error: message }, 400);
   });
 
   // --- Entry detail ---
@@ -297,10 +324,7 @@ export function createApiApp(store: Store): Hono {
     const entries = getExportEntries(store, conversation);
     const jsonl = toLharJsonl(entries, store.getConversations(), privacy);
     const filename = buildExportFilename("lhar", conversation, privacy);
-    c.header(
-      "Content-Disposition",
-      `attachment; filename="${filename}"`,
-    );
+    c.header("Content-Disposition", `attachment; filename="${filename}"`);
     return c.text(jsonl, 200, {
       "Content-Type": "application/x-ndjson",
     });
@@ -312,10 +336,7 @@ export function createApiApp(store: Store): Hono {
     const entries = getExportEntries(store, conversation);
     const wrapped = toLharJson(entries, store.getConversations(), privacy);
     const filename = buildExportFilename("lhar.json", conversation, privacy);
-    c.header(
-      "Content-Disposition",
-      `attachment; filename="${filename}"`,
-    );
+    c.header("Content-Disposition", `attachment; filename="${filename}"`);
     return c.json(wrapped);
   });
 

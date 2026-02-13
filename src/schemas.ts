@@ -234,13 +234,55 @@ export const StateLineSchema = v.variant("type", [
 // Ingest API (POST /api/ingest)
 // ---------------------------------------------------------------------------
 
-export const IngestPayloadSchema = v.object({
+/**
+ * Legacy ingest format (provider + body + response).
+ */
+export const IngestLegacyPayloadSchema = v.object({
   provider: v.optional(v.string(), "unknown"),
   apiFormat: v.optional(v.string(), "unknown"),
   source: v.optional(v.string(), "unknown"),
   body: v.optional(v.record(v.string(), v.unknown()), {}),
   response: v.optional(v.record(v.string(), v.unknown()), {}),
 });
+
+/**
+ * Capture-format ingest (same shape as proxy CaptureData).
+ * Sent by the mitmproxy addon. Includes headers, timings, streaming body.
+ */
+export const IngestCapturePayloadSchema = v.object({
+  timestamp: v.string(),
+  method: v.optional(v.string(), "POST"),
+  path: v.string(),
+  source: v.optional(v.nullable(v.string()), "unknown"),
+  provider: v.string(),
+  apiFormat: v.optional(v.string(), "unknown"),
+  targetUrl: v.optional(v.string(), ""),
+  requestHeaders: v.optional(v.record(v.string(), v.string()), {}),
+  requestBody: v.optional(v.nullable(v.record(v.string(), v.unknown())), null),
+  requestBytes: v.optional(v.number(), 0),
+  responseStatus: v.optional(v.number(), 200),
+  responseHeaders: v.optional(v.record(v.string(), v.string()), {}),
+  responseBody: v.optional(v.string(), ""),
+  responseIsStreaming: v.optional(v.boolean(), false),
+  responseBytes: v.optional(v.number(), 0),
+  timings: v.optional(
+    v.object({
+      send_ms: v.number(),
+      wait_ms: v.number(),
+      receive_ms: v.number(),
+      total_ms: v.number(),
+    }),
+    { send_ms: 0, wait_ms: 0, receive_ms: 0, total_ms: 0 },
+  ),
+});
+
+/**
+ * Union: accept either capture-format or legacy format.
+ */
+export const IngestPayloadSchema = v.union([
+  IngestCapturePayloadSchema,
+  IngestLegacyPayloadSchema,
+]);
 
 // ---------------------------------------------------------------------------
 // Inferred types for convenience

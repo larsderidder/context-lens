@@ -45,17 +45,20 @@ const TOOL_CONFIG: Record<string, ToolConfig> = {
     needsMitm: false,
   },
   codex: {
-    // Codex (v0.101+) is a Rust binary with a built-in network proxy and
-    // responses-api-proxy. It supports OPENAI_BASE_URL for API key mode
-    // and chatgpt_base_url for ChatGPT subscription mode.
+    // Codex (v0.101+) is a Rust binary that connects directly to
+    // chatgpt.com over HTTPS. It ignores chatgpt_base_url for subscription
+    // mode and does not support OPENAI_BASE_URL (OAuth token lacks scopes).
     //
-    // Only override chatgpt_base_url via -c flag. Setting OPENAI_BASE_URL
-    // would force subscription users onto api.openai.com where their OAuth
-    // token lacks the required scopes (api.responses.write).
-    childEnv: {},
-    extraArgs: ["-c", `chatgpt_base_url=${PROXY_URL}/codex/backend-api/codex`],
+    // We use mitmproxy as a forward HTTPS proxy to intercept traffic.
+    // The mitmproxy addon captures requests and POSTs them to the
+    // analysis server's ingest API.
+    childEnv: {
+      https_proxy: MITM_PROXY_URL,
+      SSL_CERT_FILE: "", // filled in by cli.ts with mitmproxy CA cert path
+    },
+    extraArgs: [],
     serverEnv: {},
-    needsMitm: false,
+    needsMitm: true,
   },
   aider: {
     childEnv: {
@@ -260,7 +263,7 @@ export function formatHelpText(): string {
     "",
     "Notes:",
     "  - No command starts standalone mode (proxy + analysis/web UI by default).",
-    "  - 'codex' routes traffic via the reverse proxy (both API key and subscription modes).",
+    "  - 'codex' uses mitmproxy for HTTPS interception (requires mitmproxy; install: pipx install mitmproxy).",
     "  - 'doctor' is a local diagnostics command.",
     "  - 'background' manages detached proxy/web-ui processes.",
     "  - 'analyze' reads an .lhar file and prints session statistics.",

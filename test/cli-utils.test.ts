@@ -31,12 +31,10 @@ describe("cli-utils", () => {
     );
 
     const codex = getToolConfig("codex");
-    assert.equal(codex.needsMitm, false);
-    assert.deepEqual(codex.childEnv, {});
-    assert.ok(codex.extraArgs.includes("-c"));
-    assert.ok(
-      codex.extraArgs.some((a: string) => a.startsWith("chatgpt_base_url=")),
-    );
+    assert.equal(codex.needsMitm, true);
+    assert.equal(codex.childEnv.https_proxy, CLI_CONSTANTS.MITM_PROXY_URL);
+    assert.equal(codex.childEnv.SSL_CERT_FILE, ""); // filled in by cli.ts
+    assert.deepEqual(codex.extraArgs, []);
 
     const pi = getToolConfig("pi");
     assert.equal(pi.needsMitm, false);
