@@ -324,7 +324,11 @@ if (filteredArgs.length === 0) {
     try {
       const raw = fs.readFileSync(sourcePath, "utf8");
       const settings = JSON.parse(raw);
-      if (settings && typeof settings === "object" && Array.isArray(settings.packages)) {
+      if (
+        settings &&
+        typeof settings === "object" &&
+        Array.isArray(settings.packages)
+      ) {
         settings.packages = settings.packages.map((pkg: unknown) => {
           if (typeof pkg === "string") {
             return resolvePackagePath(pkg, sourceDir);
@@ -332,7 +336,10 @@ if (filteredArgs.length === 0) {
           if (pkg && typeof pkg === "object" && "source" in pkg) {
             const obj = pkg as Record<string, unknown>;
             if (typeof obj.source === "string") {
-              return { ...obj, source: resolvePackagePath(obj.source, sourceDir) };
+              return {
+                ...obj,
+                source: resolvePackagePath(obj.source, sourceDir),
+              };
             }
           }
           return pkg;
@@ -357,7 +364,8 @@ if (filteredArgs.length === 0) {
     // Skip URLs and npm/git specifiers
     if (/^(https?:|git[@+:]|npm:|github:)/.test(pkg)) return pkg;
     // Skip what looks like a bare npm package name (no slashes or starts with @scope/)
-    if (/^@?[a-z0-9][\w.-]*$/i.test(pkg) || /^@[\w.-]+\/[\w.-]+/.test(pkg)) return pkg;
+    if (/^@?[a-z0-9][\w.-]*$/i.test(pkg) || /^@[\w.-]+\/[\w.-]+/.test(pkg))
+      return pkg;
     // If it's already absolute, leave it
     if (isAbsolute(pkg)) return pkg;
     // Relative path: resolve against the original agent dir
