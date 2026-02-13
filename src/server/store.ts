@@ -20,6 +20,7 @@ import {
   analyzeComposition,
   buildLharRecord,
   buildSessionLine,
+  extractResponseId,
   normalizeComposition,
   parseResponseUsage,
 } from "../lhar.js";
@@ -371,10 +372,9 @@ export class Store {
     const securityResult = scanSecurity(contextInfo);
     entry.securityAlerts = securityResult.alerts;
 
-    // Track response IDs for Responses API chaining
-    const respId =
-      (responseData as Record<string, any>).id ||
-      (responseData as Record<string, any>).response_id;
+    // Track response IDs for Responses API chaining (works for both
+    // non-streaming JSON and streaming SSE responses)
+    const respId = extractResponseId(responseData);
     if (respId && conversationId) {
       this.responseIdToConvo.set(respId, conversationId);
     }

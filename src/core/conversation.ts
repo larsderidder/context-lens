@@ -174,24 +174,46 @@ function findWorkingDirectoryInObject(node: unknown, depth = 0): string | null {
  * For OpenAI Responses-style input arrays, extract the first "real" user prompt.
  *
  * Skips boilerplate blocks (AGENTS.md / environment wrappers).
+ * Handles both JSON-encoded content (test fixtures) and plain text with
+ * contentBlocks (real Codex traffic via mitmproxy where parseResponsesItem
+ * already extracted text from the content array).
  */
 export function extractUserPrompt(messages: ParsedMessage[]): string | null {
   for (const m of messages) {
     if (m.role !== "user" || !m.content) continue;
-    try {
-      const parsed = JSON.parse(m.content);
-      if (
-        Array.isArray(parsed) &&
-        parsed[0] &&
-        parsed[0].type === "input_text"
-      ) {
-        const text = parsed[0].text || "";
-        if (text.startsWith("#") || text.startsWith("<environment")) continue;
-        return m.content;
+
+    // Determine the actual text to check for boilerplate.
+    // Real Codex traffic has plain text in content + contentBlocks with
+    // type "input_text"; test fixtures may have JSON-encoded content.
+    let text: string | null = null;
+
+    // Try contentBlocks first (real traffic from parseResponsesItem)
+    if (m.contentBlocks && m.contentBlocks.length > 0) {
+      const block = m.contentBlocks[0] as any;
+      if (block.type === "input_text" && block.text) {
+        text = block.text;
       }
-    } catch {
-      // Expected: content may not be valid JSON; skip this message
     }
+
+    // Fall back to JSON-encoded content (test fixtures, some formats)
+    if (!text) {
+      try {
+        const parsed = JSON.parse(m.content);
+        if (
+          Array.isArray(parsed) &&
+          parsed[0] &&
+          parsed[0].type === "input_text"
+        ) {
+          text = parsed[0].text || "";
+        }
+      } catch {
+        // Not JSON and no contentBlocks: skip (not a Responses API message)
+      }
+    }
+
+    if (!text) continue;
+    if (text.startsWith("#") || text.startsWith("<environment")) continue;
+    return m.content;
   }
   return null;
 }
@@ -244,7 +266,11 @@ export function computeAgentKey(contextInfo: ContextInfo): string | null {
  * Priority:
  * 1. explicit session IDs (most stable)
  * 2. Responses API chaining (`previous_response_id`)
- * 3. content hash of system + first prompt
+ * 3. content hash of system + first user prompt
+ *
+ * For the Responses API (Codex), the first "real" user prompt is used
+ * (skipping AGENTS.md and environment boilerplate). This is stable across
+ * turns (Codex resends full history) and unique per session.
  */
 export function computeFingerprint(
   contextInfo: ContextInfo,
@@ -267,6 +293,9 @@ export function computeFingerprint(
 
   let promptText: string;
   if (contextInfo.apiFormat === "responses" && userMsgs.length > 1) {
+    // For Responses API with multiple user messages (Codex sends AGENTS.md,
+    // environment context, and the real prompt as separate items), extract the
+    // first non-boilerplate user message for a stable, unique fingerprint.
     promptText = extractUserPrompt(userMsgs) || "";
   } else {
     const firstUser = userMsgs[0];

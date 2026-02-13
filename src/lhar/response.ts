@@ -8,6 +8,48 @@ export interface ParsedResponseUsage {
   stream: boolean;
 }
 
+/**
+ * Extract the response ID from a response object.
+ *
+ * Works for both non-streaming (direct JSON) and streaming (SSE chunks)
+ * responses. For streaming, scans for `response.completed` or
+ * `response.created` SSE events that carry the response object with its ID.
+ */
+export function extractResponseId(responseData: any): string | null {
+  if (!responseData) return null;
+
+  // Non-streaming: direct JSON response with id field
+  if (responseData.id) return responseData.id;
+  if (responseData.response_id) return responseData.response_id;
+
+  // Streaming: scan SSE chunks for response events
+  if (responseData.streaming && typeof responseData.chunks === "string") {
+    const lines = responseData.chunks.split("\n");
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue;
+      const data = line.slice(6).trim();
+      if (data === "[DONE]") continue;
+      try {
+        const parsed = JSON.parse(data);
+        // OpenAI Responses API: response.completed / response.created events
+        // carry the full response object including its id
+        if (parsed.response?.id) return parsed.response.id;
+        // Direct id on the event object (some streaming formats)
+        if (
+          parsed.type === "response.completed" ||
+          parsed.type === "response.created"
+        ) {
+          if (parsed.id) return parsed.id;
+        }
+      } catch {
+        // Skip unparseable lines
+      }
+    }
+  }
+
+  return null;
+}
+
 export function parseResponseUsage(responseData: any): ParsedResponseUsage {
   const result: ParsedResponseUsage = {
     inputTokens: 0,

@@ -283,6 +283,38 @@ describe("extractUserPrompt", () => {
     ];
     assert.equal(extractUserPrompt(messages), null);
   });
+
+  it("extracts prompt from contentBlocks (real Codex traffic)", () => {
+    const messages = [
+      {
+        role: "user",
+        content: "# AGENTS.md\nYou are a helpful coding agent.",
+        tokens: 10,
+        contentBlocks: [
+          { type: "input_text" as const, text: "# AGENTS.md\nYou are a helpful coding agent." },
+        ],
+      },
+      {
+        role: "user",
+        content: "<environment_context>\n  <cwd>/home/user/project</cwd>\n</environment_context>",
+        tokens: 10,
+        contentBlocks: [
+          { type: "input_text" as const, text: "<environment_context>\n  <cwd>/home/user/project</cwd>\n</environment_context>" },
+        ],
+      },
+      {
+        role: "user",
+        content: "Fix the login bug",
+        tokens: 5,
+        contentBlocks: [
+          { type: "input_text" as const, text: "Fix the login bug" },
+        ],
+      },
+    ];
+    const result = extractUserPrompt(messages);
+    assert.ok(result);
+    assert.ok(result.includes("Fix the login bug"));
+  });
 });
 
 describe("extractSessionId", () => {
@@ -352,11 +384,40 @@ describe("computeFingerprint", () => {
     assert.equal(fp, "existing-convo-fp");
   });
 
-  it("skips codex boilerplate for fingerprint", () => {
+  it("produces stable fingerprint for responses API using first real prompt", () => {
     const info = parseContextInfo("openai", codexResponses, "responses");
     const fp = computeFingerprint(info, codexResponses, new Map());
     assert.ok(fp);
     assert.equal(fp?.length, 16);
+
+    // Same request should produce same fingerprint (stable across turns)
+    const info2 = parseContextInfo("openai", codexResponses, "responses");
+    const fp2 = computeFingerprint(info2, codexResponses, new Map());
+    assert.equal(fp, fp2);
+  });
+
+  it("produces different fingerprints for responses API with different prompts", () => {
+    const body1 = {
+      ...codexResponses,
+      input: [
+        ...codexResponses.input.slice(0, 2),
+        { role: "user", content: '[{"type":"input_text","text":"Fix the login bug"}]' },
+      ],
+    };
+    const body2 = {
+      ...codexResponses,
+      input: [
+        ...codexResponses.input.slice(0, 2),
+        { role: "user", content: '[{"type":"input_text","text":"Add a new feature"}]' },
+      ],
+    };
+    const info1 = parseContextInfo("openai", body1, "responses");
+    const info2 = parseContextInfo("openai", body2, "responses");
+    const fp1 = computeFingerprint(info1, body1, new Map());
+    const fp2 = computeFingerprint(info2, body2, new Map());
+    assert.ok(fp1);
+    assert.ok(fp2);
+    assert.notEqual(fp1, fp2, "Different prompts must produce different fingerprints");
   });
 
   it("produces content-based fingerprint for simple messages", () => {
