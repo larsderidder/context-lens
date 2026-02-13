@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import SearchInput from '@/components/SearchInput.vue'
 import { useSessionStore } from '@/stores/session'
 import { fmtTokens, fmtCost, shortModel, sourceBadgeClass, healthColor } from '@/utils/format'
 import { computeSessionPriority } from '@/utils/priority'
@@ -15,6 +16,7 @@ const store = useSessionStore()
 const sortMode = ref<'recent' | 'priority' | 'cost'>('recent')
 const expandedIds = ref<Set<string>>(new Set())
 const sourceMenuOpen = ref(false)
+const searchQuery = ref('')
 
 // ── Source filter (local multi-select, independent of store.sourceFilter) ──
 const activeSources = ref<Set<string> | null>(null) // null = all
@@ -67,6 +69,19 @@ const filteredSummaries = computed(() => {
   let list = store.summaries
   if (activeSources.value) {
     list = list.filter(s => activeSources.value!.has(s.source))
+  }
+  const q = searchQuery.value.trim().toLowerCase()
+  if (q) {
+    list = list.filter(s => {
+      const haystack = [
+        s.id,
+        s.source,
+        s.label,
+        s.workingDirectory ?? '',
+        s.latestModel,
+      ].join('\0').toLowerCase()
+      return haystack.includes(q)
+    })
   }
   return list
 })
@@ -328,6 +343,11 @@ function onKeydown(e: KeyboardEvent) {
       <span class="section-title">Sessions</span>
       <span class="section-count">{{ filteredSummaries.length }}</span>
 
+      <SearchInput
+        v-model="searchQuery"
+        placeholder="Filter by ID, directory, model…"
+      />
+
       <div class="filter-group">
         <!-- Source filter dropdown -->
         <div v-if="allSources.length > 1" class="filter-dropdown">
@@ -512,7 +532,11 @@ function onKeydown(e: KeyboardEvent) {
     </div>
 
     <!-- Empty state -->
-    <div v-if="store.summaries.length === 0" class="dashboard-empty">
+    <div v-if="sortedSummaries.length === 0 && (searchQuery || activeSources)" class="dashboard-empty">
+      <div class="empty-title">No matching sessions</div>
+      <div class="empty-sub">Try adjusting your search or filters</div>
+    </div>
+    <div v-else-if="store.summaries.length === 0" class="dashboard-empty">
       <div class="empty-title">No requests captured</div>
       <div class="empty-sub">Point API calls to <code>localhost:4040</code></div>
     </div>
