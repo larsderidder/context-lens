@@ -2,12 +2,19 @@
 
 import { type ChildProcess, spawn } from "node:child_process";
 import fs from "node:fs";
+import https from "node:https";
 import net from "node:net";
-import { platform, tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { homedir, platform, tmpdir } from "node:os";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { CLI_CONSTANTS, getToolConfig } from "./cli-utils.js";
+import {
+  CLI_CONSTANTS,
+  formatHelpText,
+  getToolConfig,
+  parseCliArgs,
+} from "./cli-utils.js";
+import { VERSION } from "./version.generated.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -17,75 +24,113 @@ const __dirname = dirname(__filename);
 
 const LOCKFILE = "/tmp/context-lens.lock";
 
-// Parse command line arguments
-const args = process.argv.slice(2);
-
-// Extract --privacy flag from args (before or after command)
-let privacyLevel: string | undefined;
-const filteredArgs: string[] = [];
-for (let i = 0; i < args.length; i++) {
-  if (args[i] === "--privacy" && i + 1 < args.length) {
-    privacyLevel = args[i + 1];
-    i++; // skip the value
-  } else if (args[i].startsWith("--privacy=")) {
-    privacyLevel = args[i].split("=", 2)[1];
+const parsedArgs = parseCliArgs(process.argv.slice(2));
+if (parsedArgs.error) {
+  console.error(parsedArgs.error);
+  process.exit(1);
+}
+if (parsedArgs.showHelp) {
+  console.log(formatHelpText());
+  process.exit(0);
+}
+if (parsedArgs.showVersion) {
+  console.log(VERSION);
+  process.exit(0);
+}
+if (parsedArgs.privacyLevel !== undefined) {
+  process.env.CONTEXT_LENS_PRIVACY = parsedArgs.privacyLevel;
+}
+if (
+  !parsedArgs.noUpdateCheck &&
+  process.env.CONTEXT_LENS_NO_UPDATE_CHECK !== "1"
+) {
+  void checkForUpdate(VERSION);
+}
+if (parsedArgs.commandName === "doctor") {
+  void runDoctor().then((exitCode) => process.exit(exitCode));
+} else if (parsedArgs.commandName === "background") {
+  void runBackgroundCommand(parsedArgs.commandArguments, parsedArgs.noUi).then(
+    (exitCode) => process.exit(exitCode),
+  );
+} else if (!parsedArgs.commandName) {
+  if (parsedArgs.dryRun) {
+    if (parsedArgs.noUi) {
+      console.log("Dry run: would start proxy only (no analysis/web UI server).");
+    } else {
+      console.log(
+        "Dry run: would start proxy and analysis/web UI server in standalone mode.",
+      );
+    }
+    process.exit(0);
+  }
+  if (parsedArgs.noUi) {
+    // Standalone mode (no UI): start proxy only
+    const proxyPath = join(__dirname, "proxy", "server.js");
+    const proxy = spawn("node", [proxyPath], {
+      stdio: "inherit",
+      env: { ...process.env },
+    });
+    function shutdownStandaloneProxyOnly(code: number): void {
+      if (!proxy.killed) proxy.kill();
+      process.exit(code);
+    }
+    proxy.on("exit", (code) => shutdownStandaloneProxyOnly(code || 0));
+    process.on("SIGINT", () => shutdownStandaloneProxyOnly(0));
+    process.on("SIGTERM", () => shutdownStandaloneProxyOnly(0));
+    process.stdin.resume();
   } else {
-    filteredArgs.push(args[i]);
+    // Standalone mode: start both proxy and analysis server
+    const proxyPath = join(__dirname, "proxy", "server.js");
+    const analysisPath = join(__dirname, "analysis", "server.js");
+    const proxy = spawn("node", [proxyPath], {
+      stdio: "inherit",
+      env: { ...process.env },
+    });
+    const analysis = spawn("node", [analysisPath], {
+      stdio: "inherit",
+      env: { ...process.env },
+    });
+    function shutdownStandalone(code: number): void {
+      if (!proxy.killed) proxy.kill();
+      if (!analysis.killed) analysis.kill();
+      process.exit(code);
+    }
+    proxy.on("exit", (code) => shutdownStandalone(code || 0));
+    analysis.on("exit", (code) => shutdownStandalone(code || 0));
+    process.on("SIGINT", () => shutdownStandalone(0));
+    process.on("SIGTERM", () => shutdownStandalone(0));
+    // Prevent early exit
+    process.stdin.resume();
   }
-}
-
-// Validate privacy level
-if (privacyLevel !== undefined) {
-  if (!["minimal", "standard", "full"].includes(privacyLevel)) {
-    console.error(
-      `Error: Invalid privacy level '${privacyLevel}'. Must be one of: minimal, standard, full`,
-    );
-    process.exit(1);
-  }
-  // Pass to server via env var
-  process.env.CONTEXT_LENS_PRIVACY = privacyLevel;
-}
-
-if (filteredArgs.length === 0) {
-  // Standalone mode: start both proxy and analysis server
-  const proxyPath = join(__dirname, "proxy", "server.js");
-  const analysisPath = join(__dirname, "analysis", "server.js");
-  const proxy = spawn("node", [proxyPath], {
-    stdio: "inherit",
-    env: { ...process.env },
-  });
-  const analysis = spawn("node", [analysisPath], {
-    stdio: "inherit",
-    env: { ...process.env },
-  });
-  function shutdownStandalone(code: number): void {
-    if (!proxy.killed) proxy.kill();
-    if (!analysis.killed) analysis.kill();
-    process.exit(code);
-  }
-  proxy.on("exit", (code) => shutdownStandalone(code || 0));
-  analysis.on("exit", (code) => shutdownStandalone(code || 0));
-  process.on("SIGINT", () => shutdownStandalone(0));
-  process.on("SIGTERM", () => shutdownStandalone(0));
-  // Prevent early exit
-  process.stdin.resume();
 } else {
-  // Skip '--' separator if present
-  let commandArgs = filteredArgs;
-  if (filteredArgs[0] === "--") {
-    commandArgs = filteredArgs.slice(1);
-  }
-
-  if (commandArgs.length === 0) {
-    console.error("Error: No command specified after --");
-    process.exit(1);
-  }
-
-  const commandName = commandArgs[0];
-  const commandArguments = commandArgs.slice(1);
+  const commandName = parsedArgs.commandName;
+  const commandArguments = parsedArgs.commandArguments;
+  const noOpen = parsedArgs.noOpen;
+  const noUi = parsedArgs.noUi;
+  const dryRun = parsedArgs.dryRun;
 
   // Get tool-specific config
   const toolConfig = getToolConfig(commandName);
+  if (noUi && toolConfig.needsMitm) {
+    console.error(
+      "Error: --no-ui is not supported for this command because mitm capture requires the analysis ingest API on :4041.",
+    );
+    process.exit(1);
+  }
+  if (dryRun) {
+    const allArgs = [...toolConfig.extraArgs, ...commandArguments];
+    console.log("Dry run summary:");
+    console.log(`  command: ${commandName}`);
+    console.log(`  args: ${allArgs.length > 0 ? allArgs.join(" ") : "(none)"}`);
+    console.log(`  needs mitmproxy: ${toolConfig.needsMitm ? "yes" : "no"}`);
+    console.log(`  start analysis/web UI server: ${noUi ? "no" : "yes"}`);
+    console.log(`  auto-open UI: ${noOpen || noUi ? "no" : "yes"}`);
+    const envKeys = Object.keys(toolConfig.childEnv);
+    console.log(
+      `  child env overrides: ${envKeys.length > 0 ? envKeys.join(", ") : "(none)"}`,
+    );
+    process.exit(0);
+  }
 
   // Check if proxy is already running
   function isProxyRunning(): Promise<boolean> {
@@ -164,6 +209,7 @@ if (filteredArgs.length === 0) {
   let piAgentDirToCleanup: string | null = null;
   let shouldShutdownServers = false;
   let cleanupDidRun = false;
+  const requiresAnalysis = !noUi;
 
   function checkBothReady(): void {
     if (proxyReady && analysisReady) {
@@ -188,18 +234,19 @@ if (filteredArgs.length === 0) {
 
   // Start proxy and analysis server (or attach to existing ones)
   async function initializeServers(): Promise<void> {
-    const [proxyAlreadyRunning, analysisAlreadyRunning] = await Promise.all([
-      isProxyRunning(),
-      isAnalysisRunning(),
-    ]);
+    const proxyAlreadyRunning = await isProxyRunning();
+    const analysisAlreadyRunning = requiresAnalysis
+      ? await isAnalysisRunning()
+      : false;
 
-    const bothRunning = proxyAlreadyRunning && analysisAlreadyRunning;
+    const allRequiredRunning =
+      proxyAlreadyRunning && (!requiresAnalysis || analysisAlreadyRunning);
 
-    if (bothRunning) {
+    if (allRequiredRunning) {
       console.log("🔍 Context Lens already running, attaching...");
       incrementRefCount();
       proxyReady = true;
-      analysisReady = true;
+      analysisReady = !requiresAnalysis || analysisAlreadyRunning;
       shouldShutdownServers = false;
       checkBothReady();
       return;
@@ -257,7 +304,9 @@ if (filteredArgs.length === 0) {
     }
 
     // Start analysis server
-    if (analysisAlreadyRunning) {
+    if (!requiresAnalysis) {
+      analysisReady = true;
+    } else if (analysisAlreadyRunning) {
       analysisReady = true;
     } else {
       const analysisPath = join(__dirname, "analysis", "server.js");
@@ -299,9 +348,11 @@ if (filteredArgs.length === 0) {
     }
 
     // Open browser after a short delay (only when starting new servers)
-    setTimeout(() => {
-      openBrowser("http://localhost:4041");
-    }, 1000);
+    if (!noOpen && requiresAnalysis) {
+      setTimeout(() => {
+        openBrowser("http://localhost:4041");
+      }, 1000);
+    }
 
     // If both were already ready (mixed scenario), check now
     checkBothReady();
@@ -394,6 +445,13 @@ if (filteredArgs.length === 0) {
     });
 
     childProcess.on("error", (err) => {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        console.error(`\nFailed to start '${commandName}': command not found.`);
+        console.error("Try a known tool (claude, codex, gemini, aider, pi) or use:");
+        console.error("  context-lens -- <your-command> [args...]");
+        cleanup(127);
+        return;
+      }
       console.error(`\nFailed to start ${commandName}:`, err.message);
       cleanup(1);
     });
@@ -402,6 +460,58 @@ if (filteredArgs.length === 0) {
     childProcess.on("exit", (code, signal) => {
       cleanup(signal ? 128 + (signal === "SIGINT" ? 2 : 15) : code || 0);
     });
+  }
+
+  /**
+   * Copy settings.json to the temp agent dir, resolving any relative package
+   * paths to absolute paths so they remain valid from the temp location.
+   */
+  function rewriteSettingsWithAbsolutePaths(
+    sourcePath: string,
+    targetPath: string,
+    sourceDir: string,
+  ): void {
+    try {
+      const raw = fs.readFileSync(sourcePath, "utf8");
+      const settings = JSON.parse(raw);
+      if (settings && typeof settings === "object" && Array.isArray(settings.packages)) {
+        settings.packages = settings.packages.map((pkg: unknown) => {
+          if (typeof pkg === "string") {
+            return resolvePackagePath(pkg, sourceDir);
+          }
+          if (pkg && typeof pkg === "object" && "source" in pkg) {
+            const obj = pkg as Record<string, unknown>;
+            if (typeof obj.source === "string") {
+              return { ...obj, source: resolvePackagePath(obj.source, sourceDir) };
+            }
+          }
+          return pkg;
+        });
+      }
+      fs.writeFileSync(targetPath, `${JSON.stringify(settings, null, 2)}\n`);
+    } catch {
+      // Fall back to symlinking if we can't parse/rewrite
+      try {
+        fs.symlinkSync(sourcePath, targetPath);
+      } catch {}
+    }
+  }
+
+  /**
+   * Resolve a package path to absolute if it is a relative filesystem path.
+   * Leaves URLs, npm specifiers (name@version), and already-absolute paths unchanged.
+   */
+  function resolvePackagePath(pkg: string, baseDir: string): string {
+    // Skip tilde paths (pi resolves these against homedir, not baseDir)
+    if (pkg.startsWith("~")) return pkg;
+    // Skip URLs and npm/git specifiers
+    if (/^(https?:|git[@+:]|npm:|github:)/.test(pkg)) return pkg;
+    // Skip what looks like a bare npm package name (no slashes or starts with @scope/)
+    if (/^@?[a-z0-9][\w.-]*$/i.test(pkg) || /^@[\w.-]+\/[\w.-]+/.test(pkg)) return pkg;
+    // If it's already absolute, leave it
+    if (isAbsolute(pkg)) return pkg;
+    // Relative path: resolve against the original agent dir
+    return resolve(baseDir, pkg);
   }
 
   function preparePiAgentDir(targetDirEnv: string | undefined): string {
@@ -425,6 +535,16 @@ if (filteredArgs.length === 0) {
           withFileTypes: true,
         })) {
           if (entry.name === "models.json") continue;
+          // settings.json needs special handling: relative package paths
+          // must be resolved against the real agent dir, not the temp dir.
+          if (entry.name === "settings.json") {
+            rewriteSettingsWithAbsolutePaths(
+              join(sourceDir, entry.name),
+              join(targetDir, entry.name),
+              sourceDir,
+            );
+            continue;
+          }
           const src = join(sourceDir, entry.name);
           const dst = join(targetDir, entry.name);
           fs.symlinkSync(src, dst);
@@ -538,4 +658,412 @@ if (filteredArgs.length === 0) {
   process.on("SIGTERM", () => {
     if (childProcess && !childProcess.killed) childProcess.kill("SIGTERM");
   });
+}
+
+interface UpdateCheckCache {
+  checkedAt: number;
+  latestVersion: string;
+}
+
+interface BackgroundState {
+  proxyPid: number;
+  analysisPid: number | null;
+  noUi: boolean;
+  startedAt: string;
+}
+
+function getBackgroundStatePath(): string {
+  return join(homedir(), ".context-lens", "background.json");
+}
+
+function ensureContextLensDir(): void {
+  fs.mkdirSync(join(homedir(), ".context-lens"), { recursive: true });
+}
+
+function readBackgroundState(): BackgroundState | null {
+  try {
+    const raw = fs.readFileSync(getBackgroundStatePath(), "utf8");
+    const parsed = JSON.parse(raw);
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      typeof parsed.proxyPid === "number" &&
+      (typeof parsed.analysisPid === "number" || parsed.analysisPid === null) &&
+      typeof parsed.noUi === "boolean" &&
+      typeof parsed.startedAt === "string"
+    ) {
+      return parsed as BackgroundState;
+    }
+  } catch {}
+  return null;
+}
+
+function writeBackgroundState(state: BackgroundState): void {
+  ensureContextLensDir();
+  fs.writeFileSync(
+    getBackgroundStatePath(),
+    `${JSON.stringify(state, null, 2)}\n`,
+  );
+}
+
+function clearBackgroundState(): void {
+  try {
+    fs.unlinkSync(getBackgroundStatePath());
+  } catch {}
+}
+
+function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isBackgroundRunning(state: BackgroundState): boolean {
+  const proxyAlive = isPidAlive(state.proxyPid);
+  const analysisAlive = state.analysisPid == null || isPidAlive(state.analysisPid);
+  return proxyAlive && analysisAlive;
+}
+
+function parseBackgroundArgs(
+  args: string[],
+  globalNoUi: boolean,
+): { action: "start" | "stop" | "status"; noUi: boolean } | { error: string } {
+  const actionArg = args[0] || "status";
+  if (!["start", "stop", "status"].includes(actionArg)) {
+    return {
+      error:
+        "Error: background command requires one of: start, stop, status",
+    };
+  }
+  const localNoUi = args.includes("--no-ui");
+  return {
+    action: actionArg as "start" | "stop" | "status",
+    noUi: globalNoUi || localNoUi,
+  };
+}
+
+async function runBackgroundCommand(
+  args: string[],
+  globalNoUi: boolean,
+): Promise<number> {
+  const parsed = parseBackgroundArgs(args, globalNoUi);
+  if ("error" in parsed) {
+    console.error(parsed.error);
+    return 1;
+  }
+  if (parsed.action === "status") {
+    return backgroundStatus();
+  }
+  if (parsed.action === "stop") {
+    return backgroundStop();
+  }
+  return backgroundStart(parsed.noUi);
+}
+
+function backgroundStatus(): number {
+  const state = readBackgroundState();
+  if (!state) {
+    console.log("Background status: not running");
+    return 0;
+  }
+  const running = isBackgroundRunning(state);
+  if (!running) {
+    console.log("Background status: stale state found (not running)");
+    clearBackgroundState();
+    return 0;
+  }
+  console.log("Background status: running");
+  console.log(`  proxy pid: ${state.proxyPid}`);
+  if (state.analysisPid != null) {
+    console.log(`  analysis pid: ${state.analysisPid}`);
+  } else {
+    console.log("  analysis: disabled (--no-ui)");
+  }
+  console.log(`  started: ${state.startedAt}`);
+  return 0;
+}
+
+function backgroundStop(): number {
+  const state = readBackgroundState();
+  if (!state) {
+    console.log("Background status: not running");
+    return 0;
+  }
+
+  const pids = [state.proxyPid, state.analysisPid].filter(
+    (pid): pid is number => pid != null,
+  );
+  for (const pid of pids) {
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch {}
+  }
+  clearBackgroundState();
+  console.log("Background services stopped.");
+  return 0;
+}
+
+async function backgroundStart(noUi: boolean): Promise<number> {
+  const existing = readBackgroundState();
+  if (existing && isBackgroundRunning(existing)) {
+    console.log("Background status: already running");
+    console.log(`  proxy pid: ${existing.proxyPid}`);
+    return 0;
+  }
+  if (existing) clearBackgroundState();
+
+  const proxyPath = join(__dirname, "proxy", "server.js");
+  const proxy = spawn("node", [proxyPath], {
+    stdio: "ignore",
+    detached: true,
+    env: { ...process.env, CONTEXT_LENS_CLI: "1" },
+  });
+  proxy.unref();
+
+  let analysis: ChildProcess | null = null;
+  if (!noUi) {
+    const analysisPath = join(__dirname, "analysis", "server.js");
+    analysis = spawn("node", [analysisPath], {
+      stdio: "ignore",
+      detached: true,
+      env: { ...process.env, CONTEXT_LENS_CLI: "1" },
+    });
+    analysis.unref();
+  }
+
+  // Give children a brief chance to fail immediately (e.g. command not found).
+  await new Promise((resolve) => setTimeout(resolve, 150));
+
+  const proxyPid = proxy.pid ?? 0;
+  const analysisPid = analysis?.pid ?? null;
+  if (!proxyPid || !isPidAlive(proxyPid)) {
+    console.error("Failed to start proxy in background.");
+    return 1;
+  }
+  if (analysisPid != null && !isPidAlive(analysisPid)) {
+    console.error("Failed to start analysis server in background.");
+    try {
+      process.kill(proxyPid, "SIGTERM");
+    } catch {}
+    return 1;
+  }
+
+  writeBackgroundState({
+    proxyPid,
+    analysisPid,
+    noUi,
+    startedAt: new Date().toISOString(),
+  });
+
+  console.log("Background services started.");
+  console.log(`  proxy: http://localhost:4040 (pid ${proxyPid})`);
+  if (analysisPid != null) {
+    console.log(`  analysis/web UI: http://localhost:4041 (pid ${analysisPid})`);
+  } else {
+    console.log("  analysis/web UI: disabled (--no-ui)");
+  }
+  return 0;
+}
+
+async function isPortListening(port: number): Promise<boolean> {
+  return await new Promise((resolve) => {
+    const socket = net.connect({ port, host: "localhost" }, () => {
+      socket.end();
+      resolve(true);
+    });
+    socket.on("error", () => resolve(false));
+    socket.setTimeout(700, () => {
+      socket.destroy();
+      resolve(false);
+    });
+  });
+}
+
+function findBinaryOnPath(binary: string): string | null {
+  const pathValue = process.env.PATH || "";
+  const dirs = pathValue.split(":").filter(Boolean);
+  for (const dir of dirs) {
+    const full = join(dir, binary);
+    if (fs.existsSync(full)) return full;
+  }
+  return null;
+}
+
+function checkWritableDir(targetDir: string): boolean {
+  try {
+    fs.mkdirSync(targetDir, { recursive: true });
+    fs.accessSync(targetDir, fs.constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function runDoctor(): Promise<number> {
+  let hasFailures = false;
+  function report(name: string, ok: boolean, detail: string): void {
+    const mark = ok ? "OK" : "FAIL";
+    console.log(`[${mark}] ${name}: ${detail}`);
+    if (!ok) hasFailures = true;
+  }
+
+  console.log(`Context Lens doctor v${VERSION}`);
+
+  report("node", true, process.version);
+
+  const proxyListening = await isPortListening(4040);
+  report(
+    "proxy port :4040",
+    true,
+    proxyListening ? "already running" : "available/not running",
+  );
+
+  const analysisListening = await isPortListening(4041);
+  report(
+    "analysis port :4041",
+    true,
+    analysisListening ? "already running" : "available/not running",
+  );
+
+  const mitmdumpPath = findBinaryOnPath("mitmdump");
+  report(
+    "mitmdump",
+    mitmdumpPath != null,
+    mitmdumpPath ?? "not found (required for codex subscription mode)",
+  );
+
+  const certPath = join(homedir(), ".mitmproxy", "mitmproxy-ca-cert.pem");
+  report(
+    "mitm CA cert",
+    fs.existsSync(certPath),
+    fs.existsSync(certPath)
+      ? certPath
+      : `${certPath} (missing; run mitmproxy once to generate)`,
+  );
+
+  const contextDir = join(homedir(), ".context-lens");
+  const dataDir = join(contextDir, "data");
+  report(
+    "context dir writable",
+    checkWritableDir(contextDir),
+    contextDir,
+  );
+  report("data dir writable", checkWritableDir(dataDir), dataDir);
+
+  const bg = readBackgroundState();
+  if (!bg) {
+    report("background state", true, "not running");
+  } else {
+    report(
+      "background state",
+      isBackgroundRunning(bg),
+      isBackgroundRunning(bg) ? "running" : "stale state file",
+    );
+  }
+
+  const lockfileExists = fs.existsSync(LOCKFILE);
+  report(
+    "lockfile",
+    true,
+    lockfileExists ? `${LOCKFILE} present` : `${LOCKFILE} absent`,
+  );
+
+  if (hasFailures) {
+    console.log("Doctor result: issues found.");
+    return 1;
+  }
+  console.log("Doctor result: all checks passed.");
+  return 0;
+}
+
+function checkForUpdate(currentVersion: string): void {
+  const cachePath = join(homedir(), ".context-lens", "update-check.json");
+  const dayMs = 24 * 60 * 60 * 1000;
+  let cached: UpdateCheckCache | null = null;
+  try {
+    const raw = fs.readFileSync(cachePath, "utf8");
+    const parsed = JSON.parse(raw);
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      typeof parsed.checkedAt === "number" &&
+      typeof parsed.latestVersion === "string"
+    ) {
+      cached = parsed as UpdateCheckCache;
+    }
+  } catch {}
+
+  if (cached && Date.now() - cached.checkedAt < dayMs) {
+    if (isNewerVersion(cached.latestVersion, currentVersion)) {
+      printUpdateNotice(currentVersion, cached.latestVersion);
+    }
+    return;
+  }
+
+  const req = https.get(
+    "https://registry.npmjs.org/context-lens/latest",
+    { timeout: 1500 },
+    (res) => {
+      if (res.statusCode !== 200) return;
+      let body = "";
+      res.setEncoding("utf8");
+      res.on("data", (chunk) => {
+        body += chunk;
+      });
+      res.on("end", () => {
+        try {
+          const parsed = JSON.parse(body) as { version?: string };
+          if (!parsed.version) return;
+          const latestVersion = parsed.version;
+          try {
+            fs.mkdirSync(join(homedir(), ".context-lens"), {
+              recursive: true,
+            });
+            fs.writeFileSync(
+              cachePath,
+              `${JSON.stringify(
+                { checkedAt: Date.now(), latestVersion },
+                null,
+                2,
+              )}\n`,
+            );
+          } catch {}
+          if (isNewerVersion(latestVersion, currentVersion)) {
+            printUpdateNotice(currentVersion, latestVersion);
+          }
+        } catch {}
+      });
+    },
+  );
+  req.on("error", () => {});
+  req.on("timeout", () => req.destroy());
+}
+
+function isNewerVersion(candidate: string, current: string): boolean {
+  const a = splitSemver(candidate);
+  const b = splitSemver(current);
+  for (let i = 0; i < 3; i++) {
+    if (a[i] > b[i]) return true;
+    if (a[i] < b[i]) return false;
+  }
+  return false;
+}
+
+function splitSemver(version: string): [number, number, number] {
+  const [major, minor, patch] = version.split(".", 3).map((part) => {
+    const parsed = Number.parseInt(part.replace(/[^0-9].*$/, ""), 10);
+    return Number.isFinite(parsed) ? parsed : 0;
+  });
+  return [major ?? 0, minor ?? 0, patch ?? 0];
+}
+
+function printUpdateNotice(currentVersion: string, latestVersion: string): void {
+  console.error(
+    `\nUpdate available: context-lens ${currentVersion} -> ${latestVersion}`,
+  );
+  console.error("Run: npm install -g context-lens");
+  console.error("Skip this check: --no-update-check or CONTEXT_LENS_NO_UPDATE_CHECK=1\n");
 }
