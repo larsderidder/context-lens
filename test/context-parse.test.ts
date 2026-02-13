@@ -144,7 +144,7 @@ describe("parseContextInfo", () => {
       const customCall = info.messages[1].contentBlocks?.[0] as any;
       assert.equal(customCall.type, "tool_use");
       assert.equal(customCall.id, "call_2");
-      assert.deepEqual(customCall.input, {});
+      assert.deepEqual(customCall.input, { sql: "select 1" });
 
       const output = info.messages[2].contentBlocks?.[0] as any;
       assert.equal(output.type, "tool_result");

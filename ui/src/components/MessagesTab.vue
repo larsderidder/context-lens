@@ -5,7 +5,8 @@ import { useSessionStore } from '@/stores/session'
 import { useExpandable } from '@/composables/useExpandable'
 import { fmtTokens } from '@/utils/format'
 import { groupMessagesByCategory, buildToolNameMap, extractPreview, CATEGORY_META, classifyMessageRole, classifyEntries } from '@/utils/messages'
-import type { ParsedMessage } from '@/api-types'
+import { makeRelative, shortFileName } from '@/utils/files'
+import type { ParsedMessage, ToolUseBlock } from '@/api-types'
 import DetailPane from '@/components/DetailPane.vue'
 
 const store = useSessionStore()
@@ -203,6 +204,7 @@ const heaviestMessages = computed(() => {
 
 const focusedToolName = computed(() => store.messageFocusTool)
 const focusedCategory = computed(() => store.messageFocusCategory)
+const focusedFile = computed(() => store.messageFocusFile)
 
 const focusCategory = computed(() => {
   const requested = store.messageFocusCategory
@@ -380,6 +382,7 @@ async function applyMessageFocus() {
   const snapshotIndex = store.messageFocusIndex
   const snapshotOpenDetail = store.messageFocusOpenDetail
   const snapshotTool = store.messageFocusTool
+  const snapshotFile = store.messageFocusFile
   store.clearMessageFocus()
 
   // Focus by message index (e.g. from security alert findings)
@@ -417,6 +420,65 @@ async function applyMessageFocus() {
             const target = rows.find(row => row.classList.contains('selected'))
             if (target) target.scrollIntoView({ block: 'center', behavior: 'smooth' })
           }
+          return
+        }
+      }
+    }
+    return
+  }
+
+  // Focus by file path: switch to chrono mode and apply file filter highlighting.
+  // The reactive `focusedFile` drives the row dimming; we re-set it here
+  // because clearMessageFocus() already wiped it above.
+  if (snapshotFile) {
+    store.messageFocusFile = snapshotFile
+    viewMode.value = 'chrono'
+    await nextTick()
+
+    // Build the set of related message indices for this file
+    const msgs = messages.value
+    const fileToolIds = new Set<string>()
+    for (const msg of msgs) {
+      if (!msg.contentBlocks) continue
+      for (const block of msg.contentBlocks) {
+        if (block.type === 'tool_use') {
+          const tb = block as ToolUseBlock
+          const fp = extractToolFilePath(tb)
+          if (fp === snapshotFile) fileToolIds.add(tb.id)
+        }
+      }
+    }
+
+    // Find the first tool_result for this file and scroll to it
+    let firstRelatedIdx = -1
+    for (let i = 0; i < msgs.length; i++) {
+      const msg = msgs[i]
+      if (!msg.contentBlocks) continue
+      for (const block of msg.contentBlocks) {
+        if (block.type === 'tool_result' && fileToolIds.has(block.tool_use_id)) {
+          firstRelatedIdx = i
+          break
+        }
+        if (block.type === 'tool_use') {
+          const tb = block as ToolUseBlock
+          const fp = extractToolFilePath(tb)
+          if (fp === snapshotFile && firstRelatedIdx < 0) {
+            firstRelatedIdx = i
+            break
+          }
+        }
+      }
+      if (firstRelatedIdx >= 0) break
+    }
+
+    if (firstRelatedIdx >= 0) {
+      for (let attempt = 0; attempt < 4; attempt++) {
+        await nextTick()
+        const root = msgListEl.value
+        if (!root) continue
+        const rows = Array.from(root.querySelectorAll('.chrono-row')) as HTMLElement[]
+        if (rows[firstRelatedIdx]) {
+          rows[firstRelatedIdx].scrollIntoView({ block: 'center', behavior: 'smooth' })
           return
         }
       }
@@ -493,6 +555,94 @@ async function applyMessageFocus() {
 function clearToolFilter() {
   store.focusMessageCategory(focusCategory.value || store.messageFocusCategory || 'tool_results')
 }
+
+function clearFileFilter() {
+  store.clearMessageFocus()
+}
+
+/**
+ * Build a set of message indices that relate to the focused file path.
+ * A message is related if it contains a tool_use targeting that file,
+ * or a tool_result whose corresponding tool_use targeted that file.
+ */
+const fileRelatedMessageIndices = computed((): Set<number> => {
+  const file = focusedFile.value
+  if (!file) return new Set()
+
+  const msgs = messages.value
+  const indices = new Set<number>()
+
+  // Build a map of tool_use IDs that target the focused file
+  const fileToolIds = new Set<string>()
+  for (let i = 0; i < msgs.length; i++) {
+    const msg = msgs[i]
+    if (!msg.contentBlocks) continue
+    for (const block of msg.contentBlocks) {
+      if (block.type === 'tool_use') {
+        const tb = block as ToolUseBlock
+        const filePath = extractToolFilePath(tb)
+        if (filePath === file) {
+          fileToolIds.add(tb.id)
+          indices.add(i)
+        }
+      }
+    }
+  }
+
+  // Find tool_result messages whose tool_use_id matches
+  for (let i = 0; i < msgs.length; i++) {
+    const msg = msgs[i]
+    if (!msg.contentBlocks) continue
+    for (const block of msg.contentBlocks) {
+      if (block.type === 'tool_result' && fileToolIds.has(block.tool_use_id)) {
+        indices.add(i)
+      }
+    }
+  }
+
+  return indices
+})
+
+/**
+ * Extract a normalized file path from a tool_use block, or null.
+ * Applies makeRelative using the session's working directory so paths
+ * match the relative format used by the file attribution panel.
+ *
+ * When input is empty (compacted entries), falls back to parsing
+ * the parent message's content string.
+ */
+function extractToolFilePath(block: ToolUseBlock): string | null {
+  const input = block.input
+  const wd = store.selectedSession?.workingDirectory
+  if (input && typeof input === 'object') {
+    for (const key of ['file_path', 'path', 'filePath']) {
+      const val = input[key]
+      if (typeof val === 'string' && val.length > 0) {
+        let result = val.replace(/\/+/g, '/')
+        if (result.startsWith('./')) result = result.slice(2)
+        if (result.length > 1 && result.endsWith('/')) result = result.slice(0, -1)
+        return makeRelative(result, wd)
+      }
+    }
+  }
+  return null
+}
+
+function rowClassForFileFocus(origIdx: number): Record<string, boolean> {
+  const file = focusedFile.value
+  if (!file) return {}
+  const related = fileRelatedMessageIndices.value
+  return {
+    'file-focused': related.has(origIdx),
+    'file-muted': !related.has(origIdx),
+  }
+}
+
+const focusedFileShortName = computed(() => {
+  const file = focusedFile.value
+  if (!file) return ''
+  return shortFileName(file)
+})
 
 watch(
   () => store.messageFocusToken,
@@ -648,6 +798,13 @@ watch(
           </template>
 
           <template v-else-if="viewMode === 'chrono'">
+            <div v-if="focusedFile" class="focus-strip">
+              <span>
+                Filtered file: <b class="focus-file-name" v-tooltip="focusedFile">{{ focusedFileShortName }}</b>
+                <span class="focus-file-count">({{ fileRelatedMessageIndices.size }} messages)</span>
+              </span>
+              <button class="focus-clear" @click.stop="clearFileFilter">Show all</button>
+            </div>
             <div class="chrono-list">
               <template v-for="(item, i) in chronoAllMessages" :key="i">
                 <!-- Turn boundary marker -->
@@ -665,10 +822,13 @@ watch(
 
                 <div
                   class="chrono-row"
-                  :class="{
-                    selected: !item.future && detailOpen && flatMessages[detailIndex]?.origIdx === item.origIdx,
-                    future: item.future,
-                  }"
+                  :class="[
+                    rowClassForFileFocus(item.origIdx),
+                    {
+                      selected: !item.future && detailOpen && flatMessages[detailIndex]?.origIdx === item.origIdx,
+                      future: item.future,
+                    },
+                  ]"
                   :style="{ '--cat-border': chronoCategoryColor(item.msg) }"
                   @click="item.future ? jumpToFutureMessage(item.origIdx) : openDetail(item.origIdx)"
                 >
@@ -999,6 +1159,15 @@ watch(
 
     &:hover { opacity: 0.5; }
   }
+
+  &.file-focused {
+    background: rgba(59, 130, 246, 0.14);
+    border-left-color: var(--accent-blue);
+  }
+
+  &.file-muted {
+    opacity: 0.22;
+  }
 }
 
 .chrono-gutter {
@@ -1106,6 +1275,18 @@ watch(
   opacity: 0.6;
   white-space: nowrap;
   flex-shrink: 0;
+}
+
+.focus-file-name {
+  @include mono-text;
+  color: var(--accent-blue);
+  font-weight: 600;
+  cursor: help;
+}
+
+.focus-file-count {
+  color: var(--text-ghost);
+  font-size: var(--text-xs);
 }
 
 </style>

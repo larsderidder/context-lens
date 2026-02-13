@@ -757,7 +757,13 @@ export class Store {
     const limit = 200;
     switch (b.type) {
       case "tool_use":
-        return { type: "tool_use", id: b.id, name: b.name, input: {} };
+        return {
+          type: "tool_use",
+          id: b.id,
+          name: b.name,
+          // Preserve small path-like keys for file attribution; drop large values
+          input: this.compactToolInput(b.input),
+        };
       case "tool_result": {
         const rc =
           typeof b.content === "string"
@@ -786,6 +792,32 @@ export class Store {
         return b;
       }
     }
+  }
+
+  /**
+   * Compact tool_use input: preserve keys that contain file paths (small strings),
+   * drop large values like file content, diffs, and command output.
+   */
+  private compactToolInput(
+    input: Record<string, any> | undefined,
+  ): Record<string, any> {
+    if (!input || typeof input !== "object") return {};
+    const PATH_KEYS = [
+      "file_path",
+      "path",
+      "filePath",
+      "file",
+      "dir_path",
+      "pattern",
+      "glob",
+    ];
+    const result: Record<string, any> = {};
+    for (const key of PATH_KEYS) {
+      if (typeof input[key] === "string") {
+        result[key] = input[key];
+      }
+    }
+    return result;
   }
 
   private compactMessages(

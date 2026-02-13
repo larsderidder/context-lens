@@ -6,6 +6,7 @@ import { classifyEntries, SIMPLE_GROUPS, SIMPLE_META, groupMessagesByCategory, g
 import { computeRecommendations } from '@/utils/recommendations'
 import { calculateContextDiff, projectTurnsRemaining } from '@/utils/timeline'
 import { buildHealthNarrative } from '@/utils/overview'
+import { extractSessionFileAttributions, fileColor, shortFileName, fileDirectory } from '@/utils/files'
 import type { ProjectedEntry } from '@/api-types'
 import CompositionTreemap from './CompositionTreemap.vue'
 import ContextDiffPanel from './ContextDiffPanel.vue'
@@ -208,6 +209,33 @@ function categoryPct(tokens: number): number {
 function categoryWidth(tokens: number): string {
   return contextTotalTokens.value > 0 ? `${(tokens / contextTotalTokens.value) * 100}%` : '0%'
 }
+
+// ── File attribution ──
+const fileAttributions = computed(() => {
+  const s = session.value
+  if (!s || s.entries.length === 0) return []
+  const wd = s.workingDirectory
+  return extractSessionFileAttributions(s.entries, wd)
+})
+
+const totalFileTokens = computed(() => fileAttributions.value.reduce((s, f) => s + f.tokens, 0))
+
+function filePct(tokens: number): number {
+  return totalFileTokens.value > 0 ? Math.round(tokens / totalFileTokens.value * 100) : 0
+}
+
+function fileBarWidth(tokens: number): string {
+  return totalFileTokens.value > 0 ? `${(tokens / totalFileTokens.value) * 100}%` : '0%'
+}
+
+function jumpToFile(filePath: string) {
+  openMessagesTab()
+  store.focusMessageFile(filePath)
+}
+
+function handleTreemapFileClick(filePath: string) {
+  jumpToFile(filePath)
+}
 </script>
 
 <template>
@@ -315,6 +343,7 @@ function categoryWidth(tokens: number): string {
       :turn-num="turnNum"
       @category-click="(cat) => jumpToMessagesCategory(cat, false)"
       @tool-click="jumpToMessagesTool"
+      @file-click="handleTreemapFileClick"
     />
 
     <!-- ═══ Findings ═══ -->
@@ -362,6 +391,40 @@ function categoryWidth(tokens: number): string {
           </div>
         </div>
         <button class="msg-view-all" @click="openAllMessages">View all messages ›</button>
+      </div>
+    </section>
+
+    <!-- ═══ Files preview ═══ -->
+    <section v-if="fileAttributions.length > 0" class="panel panel--secondary">
+      <div class="panel-head">
+        <span class="panel-title">Files</span>
+        <span class="panel-sub">{{ fileAttributions.length }} files · {{ fmtTokens(totalFileTokens) }}</span>
+      </div>
+      <div class="panel-body file-preview">
+        <div class="file-list">
+          <div
+            v-for="(file, idx) in fileAttributions" :key="file.path"
+            class="file-row"
+            @click="jumpToFile(file.path)"
+          >
+            <span class="file-dot" :style="{ background: fileColor(idx) }" />
+            <span class="file-path" v-tooltip="file.path">
+              <span class="file-dir">{{ fileDirectory(file.path) ? fileDirectory(file.path) + '/' : '' }}</span>{{ shortFileName(file.path) }}
+            </span>
+            <span class="file-ops">
+              <span v-if="file.reads > 0" class="file-op file-op--read" v-tooltip="`${file.reads} read${file.reads > 1 ? 's' : ''}`">{{ file.reads }}r</span>
+              <span v-if="file.writes > 0" class="file-op file-op--write" v-tooltip="`${file.writes} write/edit${file.writes > 1 ? 's' : ''}`">{{ file.writes }}w</span>
+            </span>
+            <span class="file-tokens">{{ fmtTokens(file.tokens) }}</span>
+            <span class="file-pct">{{ filePct(file.tokens) }}%</span>
+            <div class="file-bar">
+              <div class="file-bar-fill" :style="{
+                width: fileBarWidth(file.tokens),
+                background: fileColor(idx),
+              }" />
+            </div>
+          </div>
+        </div>
       </div>
     </section>
   </div>
@@ -694,5 +757,109 @@ function categoryWidth(tokens: number): string {
   transition: color 0.12s;
 
   &:hover { color: var(--accent-blue); }
+}
+
+// ═══ Files preview ═══
+.file-preview {
+  padding: var(--space-2) var(--space-4);
+}
+
+.file-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 240px;
+  overflow-y: auto;
+  @include scrollbar-thin;
+}
+
+.file-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 4px 4px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.1s;
+
+  &:hover { background: var(--bg-hover); }
+}
+
+.file-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 1px;
+  flex-shrink: 0;
+}
+
+.file-path {
+  @include mono-text;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  min-width: 0;
+  flex: 1;
+  @include truncate;
+  cursor: help;
+}
+
+.file-dir {
+  color: var(--text-ghost);
+}
+
+.file-ops {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.file-op {
+  @include mono-text;
+  font-size: 9px;
+  padding: 1px 4px;
+  border-radius: 2px;
+  white-space: nowrap;
+}
+
+.file-op--read {
+  color: var(--accent-blue);
+  background: rgba(59, 130, 246, 0.12);
+}
+
+.file-op--write {
+  color: var(--accent-amber);
+  background: rgba(245, 158, 11, 0.12);
+}
+
+.file-tokens {
+  @include mono-text;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  width: 55px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.file-pct {
+  @include mono-text;
+  font-size: var(--text-xs);
+  color: var(--text-dim);
+  width: 32px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.file-bar {
+  width: 48px;
+  height: 4px;
+  background: var(--bg-raised);
+  border-radius: 2px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.file-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.3s ease;
 }
 </style>

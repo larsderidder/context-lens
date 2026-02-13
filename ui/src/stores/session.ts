@@ -50,6 +50,7 @@ export const useSessionStore = defineStore('session', () => {
   const messageFocusTool = ref<string | null>(null)
   const messageFocusIndex = ref<number | null>(null)
   const messageFocusOpenDetail = ref(false)
+  const messageFocusFile = ref<string | null>(null)
 
   // Messages tab persistent state
   const messagesMode = ref<'all' | 'main'>('main')
@@ -300,6 +301,7 @@ export const useSessionStore = defineStore('session', () => {
     messageFocusCategory.value = category
     messageFocusTool.value = null
     messageFocusIndex.value = null
+    messageFocusFile.value = null
     messageFocusOpenDetail.value = openDetail
     messageFocusToken.value += 1
   }
@@ -308,6 +310,7 @@ export const useSessionStore = defineStore('session', () => {
     messageFocusCategory.value = category
     messageFocusTool.value = toolName
     messageFocusIndex.value = null
+    messageFocusFile.value = null
     messageFocusToken.value += 1
   }
 
@@ -315,6 +318,15 @@ export const useSessionStore = defineStore('session', () => {
     messageFocusCategory.value = null
     messageFocusTool.value = null
     messageFocusIndex.value = index
+    messageFocusFile.value = null
+    messageFocusToken.value += 1
+  }
+
+  function focusMessageFile(filePath: string) {
+    messageFocusCategory.value = 'tool_results'
+    messageFocusTool.value = null
+    messageFocusIndex.value = null
+    messageFocusFile.value = filePath
     messageFocusToken.value += 1
   }
 
@@ -323,6 +335,7 @@ export const useSessionStore = defineStore('session', () => {
     messageFocusTool.value = null
     messageFocusIndex.value = null
     messageFocusOpenDetail.value = false
+    messageFocusFile.value = null
   }
 
   /**
@@ -441,6 +454,7 @@ export const useSessionStore = defineStore('session', () => {
     messageFocusTool,
     messageFocusIndex,
     messageFocusOpenDetail,
+    messageFocusFile,
     messagesMode,
     timelineMode,
     timelineStackMode,
@@ -473,6 +487,7 @@ export const useSessionStore = defineStore('session', () => {
     focusMessageCategory,
     focusMessageTool,
     focusMessageByIndex,
+    focusMessageFile,
     clearMessageFocus,
     loadEntryDetail,
     getEntryDetail,

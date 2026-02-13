@@ -57,7 +57,7 @@ function resolveDataDir(): string {
 
 const dataDir = resolveDataDir();
 
-const maxSessions = 100;
+const maxSessions = 200;
 const maxCompactMessages = 60;
 
 // --- Setup ---

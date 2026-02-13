@@ -84,15 +84,21 @@ function buildFullConversation(
   entries: CapturedEntry[],
   conversations: Map<string, any>,
 ): ConversationGroup {
+  // Sort newest-first (by timestamp descending) for consistent API output.
+  // The UI and scrubber expect entries[0] to be the latest turn.
+  const sorted = [...entries].sort(
+    (a, b) =>
+      new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+  );
   const meta = conversations.get(id) || {
     id,
     label: "Unknown",
     source: "unknown",
     workingDirectory: null,
-    firstSeen: entries[entries.length - 1].timestamp,
+    firstSeen: sorted[sorted.length - 1].timestamp,
   };
   const agentMap = new Map<string, CapturedEntry[]>();
-  for (const e of entries) {
+  for (const e of sorted) {
     const ak = e.agentKey || "_default";
     if (!agentMap.has(ak)) agentMap.set(ak, []);
     agentMap.get(ak)?.push(e);
@@ -114,7 +120,7 @@ function buildFullConversation(
   return {
     ...meta,
     agents,
-    entries: entries.map(projectEntryForApi),
+    entries: sorted.map(projectEntryForApi),
   };
 }
 
@@ -212,7 +218,12 @@ export function createApiApp(store: Store): Hono {
 
     if (isSummary) {
       const summaries = [];
-      for (const [id, entries] of grouped) {
+      for (const [id, rawEntries] of grouped) {
+        // Sort newest-first for consistent access patterns
+        const entries = [...rawEntries].sort(
+          (a, b) =>
+            new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+        );
         const meta = conversations.get(id) || {
           id,
           label: "Unknown",
