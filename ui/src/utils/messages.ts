@@ -178,18 +178,27 @@ export function groupMessagesByCategory(msgs: ParsedMessage[]): {
     }))
 }
 
-/** Mark entries as main/sub by picking the most frequent `agentKey` as main. */
+/** Mark entries as main/sub by majority vote on agent key (most common = main). */
 export function classifyEntries(entries: ProjectedEntry[]): ClassifiedEntry[] {
+  if (entries.length === 0) return []
+
+  // The agent key that appears most often is the main agent.
+  // This matches the backend heuristic in buildLharRecord.
   const keyCounts = new Map<string, number>()
   for (const e of entries) {
     const k = e.agentKey || '_default'
     keyCounts.set(k, (keyCounts.get(k) || 0) + 1)
   }
+
   let mainKey = '_default'
   let maxCount = 0
   for (const [k, count] of keyCounts) {
-    if (count > maxCount) { mainKey = k; maxCount = count }
+    if (count > maxCount) {
+      mainKey = k
+      maxCount = count
+    }
   }
+
   return entries.map(e => ({
     entry: e,
     isMain: (e.agentKey || '_default') === mainKey,

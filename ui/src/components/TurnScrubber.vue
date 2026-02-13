@@ -18,17 +18,25 @@ const classifiedOldestFirst = computed(() => {
   return classifyEntries([...session.value.entries].reverse())
 })
 
-const mainEntries = computed(() => {
-  return classifiedOldestFirst.value
-    .filter((item) => item.isMain)
-    .map((item) => item.entry)
+const showAll = computed(() => store.messagesMode === 'all')
+
+const visibleClassified = computed(() => {
+  if (showAll.value) return classifiedOldestFirst.value
+  return classifiedOldestFirst.value.filter((item) => item.isMain)
 })
 
-const turnCount = computed(() => mainEntries.value.length)
+const visibleEntries = computed(() => visibleClassified.value.map((item) => item.entry))
+
+const isSubAgent = computed(() => visibleClassified.value.map((item) => !item.isMain))
+
+const turnCount = computed(() => visibleEntries.value.length)
 
 const selectedTurnIndex = computed(() => {
   const selected = selectedEntry.value
   if (!selected) return -1
+  if (showAll.value) {
+    return visibleEntries.value.findIndex((e) => e.id === selected.id)
+  }
   // Find which main turn the selected entry belongs to
   let currentMain = -1
   for (const item of classifiedOldestFirst.value) {
@@ -40,7 +48,7 @@ const selectedTurnIndex = computed(() => {
 
 const maxTokens = computed(() => {
   let max = 0
-  for (const e of mainEntries.value) {
+  for (const e of visibleEntries.value) {
     if (e.contextInfo.totalTokens > max) max = e.contextInfo.totalTokens
   }
   return max
@@ -57,8 +65,8 @@ interface SparkDatum {
 
 const sparkData = computed((): SparkDatum[] => {
   const max = maxTokens.value
-  if (max === 0) return mainEntries.value.map(() => ({ height: 0.15, tokens: 0, cost: 0, model: '', utilization: 0 }))
-  return mainEntries.value.map((e) => ({
+  if (max === 0) return visibleEntries.value.map(() => ({ height: 0.15, tokens: 0, cost: 0, model: '', utilization: 0 }))
+  return visibleEntries.value.map((e) => ({
     height: Math.max(0.08, e.contextInfo.totalTokens / max),
     tokens: e.contextInfo.totalTokens,
     cost: e.costUsd ?? 0,
@@ -94,8 +102,10 @@ const newBadgeLeft = computed(() => {
   return ((futureStart + futureEnd) / 2) * 100
 })
 
-// Sub-agent calls in each turn (for the density dots below the spark)
+// Sub-agent calls in each turn (for the density dots below the spark).
+// In "all" mode every entry is its own slot, so sub-call counting is skipped.
 const subCallsPerTurn = computed(() => {
+  if (showAll.value) return visibleEntries.value.map(() => 0)
   const result: number[] = []
   let currentSubs = 0
   let mainIdx = -1
@@ -114,8 +124,8 @@ const subCallsPerTurn = computed(() => {
 
 // Tooltip data
 const tooltipEntry = computed(() => {
-  if (hoverIndex.value === null || hoverIndex.value < 0 || hoverIndex.value >= mainEntries.value.length) return null
-  const e = mainEntries.value[hoverIndex.value]
+  if (hoverIndex.value === null || hoverIndex.value < 0 || hoverIndex.value >= visibleEntries.value.length) return null
+  const e = visibleEntries.value[hoverIndex.value]
   const data = sparkData.value[hoverIndex.value]
   const subs = subCallsPerTurn.value[hoverIndex.value] || 0
   return {
@@ -124,12 +134,13 @@ const tooltipEntry = computed(() => {
     cost: fmtCost(e.costUsd),
     model: data.model,
     subs,
+    isSub: isSubAgent.value[hoverIndex.value] || false,
   }
 })
 
 function selectTurn(index: number) {
   if (!isTurnIndexSelectable(index)) return
-  store.pinEntry(mainEntries.value[index].id)
+  store.pinEntry(visibleEntries.value[index].id)
 }
 
 function followLive() {
@@ -286,6 +297,7 @@ function barColor(utilization: number): string {
             active: i === selectedTurnIndex,
             hover: i === hoverIndex && i !== selectedTurnIndex,
             past: store.selectionMode === 'pinned' && i > selectedTurnIndex,
+            'is-sub': isSubAgent[i],
           }"
         >
           <div
@@ -334,7 +346,7 @@ function barColor(utilization: number): string {
             left: Math.min(Math.max(((hoverIndex! + 0.5) / turnCount * 100), 8), 92) + '%',
           }"
         >
-          <div class="tt-row tt-turn">T{{ tooltipEntry.turn }}</div>
+          <div class="tt-row tt-turn">T{{ tooltipEntry.turn }}{{ tooltipEntry.isSub ? ' (sub)' : '' }}</div>
           <div class="tt-row">{{ tooltipEntry.tokens }} · {{ tooltipEntry.cost }}</div>
           <div class="tt-row tt-dim">{{ tooltipEntry.model }}{{ tooltipEntry.subs > 0 ? ` · ${tooltipEntry.subs} sub` : '' }}</div>
         </div>
@@ -521,6 +533,19 @@ function barColor(utilization: number): string {
 
   .spark-col.past & {
     opacity: 0.15;
+  }
+
+  .spark-col.is-sub & {
+    opacity: 0.25;
+    background: var(--accent-purple);
+  }
+
+  .spark-col.is-sub.active & {
+    opacity: 0.7;
+  }
+
+  .spark-col.is-sub.hover & {
+    opacity: 0.5;
   }
 }
 

@@ -24,6 +24,14 @@ const toolNameMap = computed(() => {
   return buildToolNameMap(messages.value)
 })
 
+// Whether the session has any subagent entries (to conditionally show the Main/All toggle)
+const hasSubAgentEntries = computed(() => {
+  const s = session.value
+  if (!s || s.entries.length <= 1) return false
+  const classified = classifyEntries([...s.entries].reverse())
+  return classified.some((item) => !item.isMain)
+})
+
 // Use full (uncompacted) messages when available, fall back to compacted
 const messages = computed(() => {
   if (!entry.value) return []
@@ -97,16 +105,18 @@ const chronoTurnBoundaries = computed(() => {
 
 // Global turn number of the selected entry (1-based), derived from the session's
 // full entry list so that post-compaction turns don't reset to "Turn 1".
+// In "all" mode, every entry (including subagent) counts as a turn.
 const globalTurnNumber = computed(() => {
   const s = session.value
   const e = entry.value
   if (!s || !e) return 1
   // entries are newest-first; reverse for chronological order
   const classified = classifyEntries([...s.entries].reverse())
-  let mainIdx = 0
+  const showAll = store.messagesMode === 'all'
+  let idx = 0
   for (const item of classified) {
-    if (item.isMain) mainIdx++
-    if (item.entry.id === e.id) return mainIdx
+    if (showAll || item.isMain) idx++
+    if (item.entry.id === e.id) return idx
   }
   return 1
 })
@@ -551,9 +561,15 @@ watch(
     <Splitpanes class="default-theme" :push-other-panes="false">
       <Pane :min-size="25" :size="detailOpen ? 42 : 100">
         <div ref="msgListEl" class="msg-list">
-          <div class="message-view-toggle">
-            <button :class="{ on: viewMode === 'chrono' }" @click="viewMode = 'chrono'">Chronological</button>
-            <button :class="{ on: viewMode === 'category' }" @click="viewMode = 'category'">By Category</button>
+          <div class="msg-toolbar">
+            <div class="message-view-toggle">
+              <button :class="{ on: viewMode === 'chrono' }" @click="viewMode = 'chrono'">Chronological</button>
+              <button :class="{ on: viewMode === 'category' }" @click="viewMode = 'category'">By Category</button>
+            </div>
+            <div v-if="hasSubAgentEntries && viewMode === 'chrono'" class="message-view-toggle agent-toggle">
+              <button :class="{ on: store.messagesMode === 'main' }" @click="store.messagesMode = 'main'">Main</button>
+              <button :class="{ on: store.messagesMode === 'all' }" @click="store.messagesMode = 'all'">All</button>
+            </div>
           </div>
 
           <template v-if="viewMode === 'category'">
@@ -701,9 +717,16 @@ watch(
   @include scrollbar-thin;
 }
 
+.msg-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0 var(--space-4) var(--space-3);
+}
+
 .message-view-toggle {
   display: inline-flex;
-  margin: 0 var(--space-4) var(--space-3);
+  margin: 0;
   border: 1px solid var(--border-dim);
   border-radius: var(--radius-sm);
   overflow: hidden;

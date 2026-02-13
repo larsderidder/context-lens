@@ -50,6 +50,9 @@ export const useSessionStore = defineStore('session', () => {
   const messageFocusIndex = ref<number | null>(null)
   const messageFocusOpenDetail = ref(false)
 
+  // Messages tab persistent state
+  const messagesMode = ref<'all' | 'main'>('main')
+
   // Timeline tab persistent state
   const timelineMode = ref<'all' | 'main'>('all')
   const timelineStackMode = ref<'absolute' | 'normalized'>('absolute')
@@ -433,6 +436,7 @@ export const useSessionStore = defineStore('session', () => {
     messageFocusTool,
     messageFocusIndex,
     messageFocusOpenDetail,
+    messagesMode,
     timelineMode,
     timelineStackMode,
     timelineHiddenLegendKeys,
