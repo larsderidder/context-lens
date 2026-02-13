@@ -60,5 +60,8 @@
     "@types/node": "^25.2.2",
     "json-schema-to-typescript": "^15.0.4",
     "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "valibot": "^1.2.0"
   }
 }

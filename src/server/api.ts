@@ -1,8 +1,10 @@
 import type http from "node:http";
 import url from "node:url";
+import * as v from "valibot";
 
 import { parseContextInfo } from "../core.js";
 import { toLharJson, toLharJsonl } from "../lhar.js";
+import { IngestPayloadSchema } from "../schemas.js";
 import type { AgentGroup, CapturedEntry, ConversationGroup } from "../types.js";
 import { projectEntry } from "./projection.js";
 import type { Store } from "./store.js";
@@ -38,23 +40,29 @@ function handleIngest(
   });
   req.on("end", () => {
     try {
-      const data = JSON.parse(Buffer.concat(bodyChunks).toString("utf8"));
-      const provider = data.provider || "unknown";
-      const apiFormat = data.apiFormat || "unknown";
-      const source = data.source || "unknown";
+      const raw = JSON.parse(Buffer.concat(bodyChunks).toString("utf8"));
+      const result = v.safeParse(IngestPayloadSchema, raw);
+      if (!result.success) {
+        const message = v.summarize(result.issues);
+        console.error("Ingest validation error:", message);
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: message }));
+        return;
+      }
+      const data = result.output;
       const contextInfo = parseContextInfo(
-        provider,
-        data.body || {},
-        apiFormat,
+        data.provider,
+        data.body,
+        data.apiFormat,
       );
       store.storeRequest(
         contextInfo,
-        data.response || {},
-        source,
-        data.body || {},
+        data.response,
+        data.source,
+        data.body,
       );
       console.log(
-        `  📥 Ingested: [${provider}] ${contextInfo.model} from ${source}`,
+        `  📥 Ingested: [${data.provider}] ${contextInfo.model} from ${data.source}`,
       );
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: true }));

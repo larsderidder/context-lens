@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import * as v from "valibot";
 import {
   computeAgentKey,
   computeFingerprint,
@@ -22,6 +23,10 @@ import {
   normalizeComposition,
   parseResponseUsage,
 } from "../lhar.js";
+import {
+  ConversationLineSchema,
+  EntryLineSchema,
+} from "../schemas.js";
 import { safeFilenamePart } from "../server-utils.js";
 import type {
   CapturedEntry,
@@ -140,16 +145,35 @@ export class Store {
     let maxId = 0;
     for (const line of lines) {
       try {
-        const record = JSON.parse(line);
-        if (record.type === "conversation") {
-          const c = record.data as Conversation;
+        const raw = JSON.parse(line);
+
+        if (raw.type === "conversation") {
+          const result = v.safeParse(ConversationLineSchema, raw);
+          if (!result.success) {
+            console.warn(
+              `State: skipping invalid conversation line: ${v.summarize(result.issues)}`,
+            );
+            continue;
+          }
+          const c = result.output.data as Conversation;
           this.conversations.set(c.id, c);
           this.diskSessionsWritten.add(c.id);
-        } else if (record.type === "entry") {
-          const projected = record.data;
+        } else if (raw.type === "entry") {
+          const result = v.safeParse(EntryLineSchema, raw);
+          if (!result.success) {
+            console.warn(
+              `State: skipping invalid entry line (id=${raw.data?.id}): ${v.summarize(result.issues)}`,
+            );
+            continue;
+          }
+          const projected = result.output.data;
+          // The schema validates structure; cast to domain types for fields
+          // where the schema is intentionally looser (tools as unknown[],
+          // nested content blocks as loose objects).
           const entry: CapturedEntry = {
             ...projected,
-            response: projected.response || { raw: true },
+            contextInfo: projected.contextInfo as ContextInfo,
+            response: (projected.response || { raw: true }) as ResponseData,
             requestHeaders: {},
             responseHeaders: {},
             rawBody: undefined,
@@ -496,12 +520,6 @@ export class Store {
     }
   }
 
-  /**
-   * Recalculate token counts for messages that contain image blocks.
-   *
-   * Before the image token fix, estimateTokens() would stringify base64 image
-   * data, producing millions of phantom tokens. Persisted entries still have
-   * those inflated counts. This migration recalculates from the compacted
   /**
    * Backfill totalTokens from API usage data for entries that only have estimates.
    * The estimate (chars/4) can be wildly inaccurate; the API's real token count
