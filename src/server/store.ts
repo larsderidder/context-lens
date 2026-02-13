@@ -23,10 +23,7 @@ import {
   normalizeComposition,
   parseResponseUsage,
 } from "../lhar.js";
-import {
-  ConversationLineSchema,
-  EntryLineSchema,
-} from "../schemas.js";
+import { ConversationLineSchema, EntryLineSchema } from "../schemas.js";
 import { safeFilenamePart } from "../server-utils.js";
 import type {
   CapturedEntry,
@@ -143,6 +140,7 @@ export class Store {
     const lines = content.split("\n").filter((l) => l.length > 0);
     let loadedEntries = 0;
     let maxId = 0;
+    const loadedEntriesBuffer: CapturedEntry[] = [];
     for (const line of lines) {
       try {
         const raw = JSON.parse(line);
@@ -180,7 +178,7 @@ export class Store {
             healthScore: projected.healthScore ?? null,
             securityAlerts: projected.securityAlerts || [],
           };
-          this.capturedRequests.push(entry);
+          loadedEntriesBuffer.push(entry);
           if (entry.id > maxId) maxId = entry.id;
           loadedEntries++;
         }
@@ -191,6 +189,8 @@ export class Store {
         );
       }
     }
+    // Reverse entries to match runtime order (newest first)
+    this.capturedRequests = loadedEntriesBuffer.reverse();
     if (loadedEntries > 0) {
       this.nextEntryId = maxId + 1;
       this.dataRevision = 1;
@@ -429,7 +429,7 @@ export class Store {
     this.logToDisk(entry);
     this.saveEntryDetail(entry);
     this.compactEntry(entry);
-    this.saveState();
+    this.appendToState(entry, conversationId);
     return entry;
   }
 
@@ -548,28 +548,43 @@ export class Store {
    * the full uncompacted contextInfo) as the source of truth.
    */
   private restoreTokenCountsFromDetails(): number {
-    let fixed = 0;
+    // Skip if this migration has already completed successfully.
+    const markerPath = path.join(this.dataDir, ".token-restore-done");
+    if (fs.existsSync(markerPath)) return 0;
+
+    // First pass: identify candidates that might need fixing.
+    // An entry is a candidate only when it was compacted (fewer messages
+    // than maxCompactMessages) AND messagesTokens matches the truncated
+    // sum. This avoids reading thousands of detail files on every startup.
+    const candidates: CapturedEntry[] = [];
     for (const entry of this.capturedRequests) {
       const ci = entry.contextInfo;
+      if (ci.messages.length >= this.maxCompactMessages) continue;
       const msgTokenSum = ci.messages.reduce((s, m) => s + m.tokens, 0);
-      // If messagesTokens matches the sum of compacted messages, the entry
-      // may have been corrupted by the old migration. Check the detail file.
-      // Only needed when the entry has fewer messages than the detail.
       if (ci.messagesTokens === msgTokenSum) {
-        const detail = this.getEntryDetail(entry.id);
-        if (!detail || detail.messages.length <= ci.messages.length) continue;
-        // The detail has more messages; the compacted entry's totalTokens is wrong.
-        // Restore from the detail's token counts.
-        if (
-          detail.totalTokens !== ci.totalTokens &&
-          detail.totalTokens > ci.totalTokens
-        ) {
-          ci.systemTokens = detail.systemTokens;
-          ci.toolsTokens = detail.toolsTokens;
-          ci.messagesTokens = detail.messagesTokens;
-          ci.totalTokens = detail.totalTokens;
-          fixed++;
-        }
+        candidates.push(entry);
+      }
+    }
+    if (candidates.length === 0) {
+      this.writeMarker(markerPath);
+      return 0;
+    }
+
+    // Second pass: only read detail files for candidates.
+    let fixed = 0;
+    for (const entry of candidates) {
+      const ci = entry.contextInfo;
+      const detail = this.getEntryDetail(entry.id);
+      if (!detail || detail.messages.length <= ci.messages.length) continue;
+      if (
+        detail.totalTokens !== ci.totalTokens &&
+        detail.totalTokens > ci.totalTokens
+      ) {
+        ci.systemTokens = detail.systemTokens;
+        ci.toolsTokens = detail.toolsTokens;
+        ci.messagesTokens = detail.messagesTokens;
+        ci.totalTokens = detail.totalTokens;
+        fixed++;
       }
     }
     if (fixed > 0) {
@@ -577,7 +592,16 @@ export class Store {
         `Restored totalTokens from detail files for ${fixed} compacted entries`,
       );
     }
+    this.writeMarker(markerPath);
     return fixed;
+  }
+
+  private writeMarker(markerPath: string): void {
+    try {
+      fs.writeFileSync(markerPath, "");
+    } catch {
+      /* non-critical */
+    }
   }
 
   /**
@@ -823,12 +847,58 @@ export class Store {
     );
   }
 
+  /**
+   * Append a single new entry (and its conversation) to the state file.
+   * This is O(entry size) instead of O(total state size).
+   *
+   * The conversation line is always written so that backfilled fields
+   * (source, workingDirectory) are captured. On loadState, later
+   * conversation lines overwrite earlier ones, so duplicates are harmless.
+   */
+  private appendToState(
+    entry: CapturedEntry,
+    conversationId: string | null,
+  ): void {
+    let lines = "";
+
+    if (conversationId) {
+      const convo = this.conversations.get(conversationId);
+      if (convo) {
+        lines += `${JSON.stringify({ type: "conversation", data: convo })}\n`;
+      }
+    }
+
+    lines += `${JSON.stringify({
+      type: "entry",
+      data: projectEntry(entry, this.compactContextInfo(entry.contextInfo)),
+    })}\n`;
+
+    try {
+      fs.appendFileSync(this.stateFile, lines);
+    } catch (err: unknown) {
+      console.error(
+        "State append error:",
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  }
+
+  /**
+   * Full rewrite of the state file. Used after structural changes
+   * (eviction, deletion, reset, migrations) where append is not sufficient.
+   *
+   * Entries are written oldest-first (chronological) to match the append-only
+   * convention used by appendToState(). loadState() reverses on read to
+   * restore the in-memory newest-first order.
+   */
   private saveState(): void {
     let lines = "";
     for (const [, convo] of this.conversations) {
       lines += `${JSON.stringify({ type: "conversation", data: convo })}\n`;
     }
-    for (const entry of this.capturedRequests) {
+    // Write oldest-first so loadState's reverse() produces newest-first
+    for (let i = this.capturedRequests.length - 1; i >= 0; i--) {
+      const entry = this.capturedRequests[i];
       lines += `${JSON.stringify({
         type: "entry",
         data: projectEntry(entry, this.compactContextInfo(entry.contextInfo)),

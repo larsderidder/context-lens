@@ -415,6 +415,97 @@ describe("Store", () => {
     cleanup();
   });
 
+  it("maintains entry order after load (newest first)", async () => {
+    const { store, dir, cleanup } = makeStore();
+
+    const sessionId = "session_order-test-1111-1111-111111111111";
+    
+    // Add three entries in sequence
+    for (let i = 1; i <= 3; i++) {
+      const body = {
+        model: "claude-sonnet-4",
+        metadata: { user_id: sessionId },
+        messages: [{ role: "user", content: `turn ${i}` }],
+      };
+      const ci = parseContextInfo("anthropic", body, "anthropic-messages");
+      store.storeRequest(
+        ci,
+        {
+          model: "claude-sonnet-4",
+          stop_reason: "end_turn",
+          usage: { input_tokens: i * 10, output_tokens: i },
+        } as any,
+        "claude",
+        body,
+      );
+      // Ensure timestamps differ
+      await new Promise((r) => setTimeout(r, 5));
+    }
+
+    const runtimeEntries = store.getCapturedRequests();
+    assert.equal(runtimeEntries.length, 3);
+    // Runtime order should be newest first (id 3, 2, 1)
+    assert.equal(runtimeEntries[0].id, 3);
+    assert.equal(runtimeEntries[1].id, 2);
+    assert.equal(runtimeEntries[2].id, 1);
+
+    // Load state into a fresh store
+    const store2 = new Store({
+      dataDir: path.join(dir, "data"),
+      stateFile: path.join(dir, "data", "state.jsonl"),
+      maxSessions: 10,
+      maxCompactMessages: 60,
+    });
+    store2.loadState();
+
+    const loadedEntries = store2.getCapturedRequests();
+    assert.equal(loadedEntries.length, 3);
+    // Loaded order should match runtime order (newest first)
+    assert.equal(loadedEntries[0].id, 3, "first entry should be newest (id 3)");
+    assert.equal(loadedEntries[1].id, 2, "second entry should be middle (id 2)");
+    assert.equal(loadedEntries[2].id, 1, "third entry should be oldest (id 1)");
+
+    // Verify order survives a full saveState rewrite (triggered by delete).
+    // deleteConversation calls saveState which rewrites the file.
+    // Add a second conversation so deletion doesn't empty the store.
+    const body2 = {
+      model: "claude-sonnet-4",
+      metadata: { user_id: "session_order-test-2222-2222-222222222222" },
+      messages: [{ role: "user", content: "other session" }],
+    };
+    const ci2 = parseContextInfo("anthropic", body2, "anthropic-messages");
+    store2.storeRequest(
+      ci2,
+      {
+        model: "claude-sonnet-4",
+        stop_reason: "end_turn",
+        usage: { input_tokens: 50, output_tokens: 5 },
+      } as any,
+      "claude",
+      body2,
+    );
+    // Delete the second conversation to trigger saveState
+    const secondConvoId = store2.getCapturedRequests()[0].conversationId!;
+    store2.deleteConversation(secondConvoId);
+
+    // Load again from the rewritten file
+    const store3 = new Store({
+      dataDir: path.join(dir, "data"),
+      stateFile: path.join(dir, "data", "state.jsonl"),
+      maxSessions: 10,
+      maxCompactMessages: 60,
+    });
+    store3.loadState();
+
+    const reloadedEntries = store3.getCapturedRequests();
+    assert.equal(reloadedEntries.length, 3);
+    assert.equal(reloadedEntries[0].id, 3, "after saveState rewrite: first should be newest (id 3)");
+    assert.equal(reloadedEntries[1].id, 2, "after saveState rewrite: second should be middle (id 2)");
+    assert.equal(reloadedEntries[2].id, 1, "after saveState rewrite: third should be oldest (id 1)");
+
+    cleanup();
+  });
+
   it("backfills totalTokens from OpenAI prompt/completion usage on loadState()", () => {
     const dir = mkdtempSync(path.join(tmpdir(), "context-lens-test-"));
     const dataDir = path.join(dir, "data");
