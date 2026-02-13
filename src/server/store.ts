@@ -42,6 +42,10 @@ export interface StoreChangeEvent {
 
 type StoreChangeListener = (event: StoreChangeEvent) => void;
 
+// Bump this when adding new one-time migrations. Each migration should check
+// the persisted version before doing expensive work (e.g. reading detail files).
+const CURRENT_STATE_VERSION = 1;
+
 export class Store {
   private readonly dataDir: string;
   private readonly stateFile: string;
@@ -57,6 +61,7 @@ export class Store {
 
   private dataRevision = 0;
   private nextEntryId = 1;
+  private stateVersion = 0;
 
   // SSE change listeners
   private changeListeners = new Set<StoreChangeListener>();
@@ -141,7 +146,9 @@ export class Store {
     for (const line of lines) {
       try {
         const record = JSON.parse(line);
-        if (record.type === "conversation") {
+        if (record.type === "meta") {
+          this.stateVersion = record.version ?? 0;
+        } else if (record.type === "conversation") {
           const c = record.data as Conversation;
           this.conversations.set(c.id, c);
           this.diskSessionsWritten.add(c.id);
@@ -170,20 +177,21 @@ export class Store {
     if (loadedEntries > 0) {
       this.nextEntryId = maxId + 1;
       this.dataRevision = 1;
-      // Loaded entries are already compact (projectEntry strips heavy data before saving).
-      // Do NOT call compactEntry here. It would destroy the preserved response usage data.
-      // TODO: Consider introducing a formal versioned migration system (schema version
-      // tracking, ordered migration list, "already applied" checks) if the number of
-      // ad hoc migrations here keeps growing. For now each migration is idempotent and
-      // detects whether it needs to run by inspecting the data.
-      //
-      // Order matters: image migration fixes inflated per-message tokens from base64 data
-      // BEFORE the usage backfill rescales everything proportionally.
+
+      // Run migrations. Each checks stateVersion to skip already-applied work.
+      // Order matters: image migration fixes inflated per-message tokens from
+      // base64 data BEFORE the usage backfill rescales everything proportionally.
       const migrated = this.migrateImageTokenCounts();
       this.backfillTotalTokensFromUsage();
       const tokenFixups = this.restoreTokenCountsFromDetails();
       this.backfillHealthScores();
-      if (migrated > 0 || tokenFixups > 0) {
+
+      const needsSave =
+        migrated > 0 ||
+        tokenFixups > 0 ||
+        this.stateVersion < CURRENT_STATE_VERSION;
+      if (needsSave) {
+        this.stateVersion = CURRENT_STATE_VERSION;
         this.saveState();
       }
       console.log(
@@ -530,6 +538,11 @@ export class Store {
    * the full uncompacted contextInfo) as the source of truth.
    */
   private restoreTokenCountsFromDetails(): number {
+    // Added in state version 1. Once applied and saved, the corrected token
+    // counts are persisted in state.jsonl and this expensive migration (which
+    // reads thousands of detail files from disk) can be skipped.
+    if (this.stateVersion >= 1) return 0;
+
     let fixed = 0;
     for (const entry of this.capturedRequests) {
       const ci = entry.contextInfo;
@@ -807,7 +820,7 @@ export class Store {
   }
 
   private saveState(): void {
-    let lines = "";
+    let lines = `${JSON.stringify({ type: "meta", version: this.stateVersion })}\n`;
     for (const [, convo] of this.conversations) {
       lines += `${JSON.stringify({ type: "conversation", data: convo })}\n`;
     }
