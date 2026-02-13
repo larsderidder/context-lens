@@ -29,6 +29,35 @@ export interface LHARLLMHTTPArchiveFormat {
   [k: string]: unknown;
 }
 /**
+ * A tool/function available to the model in this request.
+ *
+ * This interface was referenced by `LHARLLMHTTPArchiveFormat`'s JSON-Schema
+ * via the `definition` "ToolDefinitionEntry".
+ */
+export interface ToolDefinitionEntry {
+  name: string;
+  description: string | null;
+}
+/**
+ * A tool invocation found in the conversation history of this request.
+ *
+ * This interface was referenced by `LHARLLMHTTPArchiveFormat`'s JSON-Schema
+ * via the `definition` "ToolCallEntry".
+ */
+export interface ToolCallEntry {
+  name: string;
+  call_id: string | null;
+  /**
+   * The arguments passed to the tool. Object when parsed, string when raw/unparsed.
+   */
+  arguments:
+    | {
+        [k: string]: unknown;
+      }
+    | string
+    | null;
+}
+/**
  * This interface was referenced by `LHARLLMHTTPArchiveFormat`'s JSON-Schema
  * via the `definition` "CompositionEntry".
  */
@@ -134,6 +163,14 @@ export interface LharRecord {
       cumulative_tokens: number;
       compaction_detected: boolean;
     };
+    /**
+     * Tool/function schemas available to the model in this request.
+     */
+    tool_definitions?: ToolDefinitionEntry[];
+    /**
+     * Tool invocations found in the conversation history of this request.
+     */
+    tool_calls?: ToolCallEntry[];
     security: {
       alerts: {
         message_index: number;

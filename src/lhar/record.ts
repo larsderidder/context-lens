@@ -5,6 +5,7 @@ import type { CapturedEntry, Conversation, PrivacyLevel } from "../types.js";
 import { VERSION } from "../version.generated.js";
 import { analyzeComposition } from "./composition.js";
 import { parseResponseUsage } from "./response.js";
+import { extractToolCalls, extractToolDefinitions } from "./tools.js";
 
 const COLLECTOR_NAME = "context-lens";
 const COLLECTOR_VERSION = VERSION;
@@ -209,6 +210,8 @@ export function buildLharRecord(
       tools_tokens: ci.toolsTokens,
       messages_tokens: ci.messagesTokens,
       composition,
+      tool_definitions: extractToolDefinitions(ci),
+      tool_calls: extractToolCalls(ci),
       growth: {
         tokens_added_this_turn: tokensAdded,
         cumulative_tokens: ci.totalTokens,

@@ -17,6 +17,11 @@ export { toLharJson, toLharJsonl } from "./lhar/export.js";
 
 // Record & session builders
 export { buildLharRecord, buildSessionLine } from "./lhar/record.js";
-export type { ParsedResponseUsage } from "./lhar/response.js";
+// Tool extraction
+export { extractToolCalls, extractToolDefinitions } from "./lhar/tools.js";
+// LHAR file reader
+export { readLharFile, parseLharContent } from "./lhar/reader.js";
+export type { ParsedLhar } from "./lhar/reader.js";
 // Response usage parsing
 export { parseResponseUsage } from "./lhar/response.js";
+export type { ParsedResponseUsage } from "./lhar/response.js";

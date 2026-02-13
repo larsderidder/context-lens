@@ -21,6 +21,46 @@
       ]
     },
 
+    "ToolDefinitionEntry": {
+      "type": "object",
+      "description": "A tool/function available to the model in this request.",
+      "properties": {
+        "name": { "type": "string" },
+        "description": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "null" }
+          ]
+        }
+      },
+      "required": ["name", "description"],
+      "additionalProperties": false
+    },
+
+    "ToolCallEntry": {
+      "type": "object",
+      "description": "A tool invocation found in the conversation history of this request.",
+      "properties": {
+        "name": { "type": "string" },
+        "call_id": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "null" }
+          ]
+        },
+        "arguments": {
+          "description": "The arguments passed to the tool. Object when parsed, string when raw/unparsed.",
+          "oneOf": [
+            { "type": "object" },
+            { "type": "string" },
+            { "type": "null" }
+          ]
+        }
+      },
+      "required": ["name", "call_id", "arguments"],
+      "additionalProperties": false
+    },
+
     "CompositionEntry": {
       "type": "object",
       "properties": {
@@ -255,6 +295,16 @@
               },
               "required": ["tokens_added_this_turn", "cumulative_tokens", "compaction_detected"],
               "additionalProperties": false
+            },
+            "tool_definitions": {
+              "type": "array",
+              "description": "Tool/function schemas available to the model in this request.",
+              "items": { "$ref": "#/definitions/ToolDefinitionEntry" }
+            },
+            "tool_calls": {
+              "type": "array",
+              "description": "Tool invocations found in the conversation history of this request.",
+              "items": { "$ref": "#/definitions/ToolCallEntry" }
             },
             "security": {
               "type": "object",

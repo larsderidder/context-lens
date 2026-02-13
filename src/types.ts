@@ -231,6 +231,8 @@ export type {
   LharRecord,
   LharSessionLine,
   Timings,
+  ToolCallEntry,
+  ToolDefinitionEntry,
 } from "./lhar-types.generated.js";
 
 import type { CompositionEntry, Timings } from "./lhar-types.generated.js";
