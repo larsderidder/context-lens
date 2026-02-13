@@ -4,7 +4,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import fs from "node:fs";
 import net from "node:net";
 import { platform, tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { CLI_CONSTANTS, getToolConfig } from "./cli-utils.js";
@@ -312,6 +312,58 @@ if (filteredArgs.length === 0) {
     });
   }
 
+  /**
+   * Copy settings.json to the temp agent dir, resolving any relative package
+   * paths to absolute paths so they remain valid from the temp location.
+   */
+  function rewriteSettingsWithAbsolutePaths(
+    sourcePath: string,
+    targetPath: string,
+    sourceDir: string,
+  ): void {
+    try {
+      const raw = fs.readFileSync(sourcePath, "utf8");
+      const settings = JSON.parse(raw);
+      if (settings && typeof settings === "object" && Array.isArray(settings.packages)) {
+        settings.packages = settings.packages.map((pkg: unknown) => {
+          if (typeof pkg === "string") {
+            return resolvePackagePath(pkg, sourceDir);
+          }
+          if (pkg && typeof pkg === "object" && "source" in pkg) {
+            const obj = pkg as Record<string, unknown>;
+            if (typeof obj.source === "string") {
+              return { ...obj, source: resolvePackagePath(obj.source, sourceDir) };
+            }
+          }
+          return pkg;
+        });
+      }
+      fs.writeFileSync(targetPath, `${JSON.stringify(settings, null, 2)}\n`);
+    } catch {
+      // Fall back to symlinking if we can't parse/rewrite
+      try {
+        fs.symlinkSync(sourcePath, targetPath);
+      } catch {}
+    }
+  }
+
+  /**
+   * Resolve a package path to absolute if it is a relative filesystem path.
+   * Leaves URLs, npm specifiers (name@version), and already-absolute paths unchanged.
+   */
+  function resolvePackagePath(pkg: string, baseDir: string): string {
+    // Skip tilde paths (pi resolves these against homedir, not baseDir)
+    if (pkg.startsWith("~")) return pkg;
+    // Skip URLs and npm/git specifiers
+    if (/^(https?:|git[@+:]|npm:|github:)/.test(pkg)) return pkg;
+    // Skip what looks like a bare npm package name (no slashes or starts with @scope/)
+    if (/^@?[a-z0-9][\w.-]*$/i.test(pkg) || /^@[\w.-]+\/[\w.-]+/.test(pkg)) return pkg;
+    // If it's already absolute, leave it
+    if (isAbsolute(pkg)) return pkg;
+    // Relative path: resolve against the original agent dir
+    return resolve(baseDir, pkg);
+  }
+
   function preparePiAgentDir(targetDirEnv: string | undefined): string {
     const dirPrefix =
       targetDirEnv && targetDirEnv.length > 0
@@ -333,6 +385,16 @@ if (filteredArgs.length === 0) {
           withFileTypes: true,
         })) {
           if (entry.name === "models.json") continue;
+          // settings.json needs special handling: relative package paths
+          // must be resolved against the real agent dir, not the temp dir.
+          if (entry.name === "settings.json") {
+            rewriteSettingsWithAbsolutePaths(
+              join(sourceDir, entry.name),
+              join(targetDir, entry.name),
+              sourceDir,
+            );
+            continue;
+          }
           const src = join(sourceDir, entry.name);
           const dst = join(targetDir, entry.name);
           fs.symlinkSync(src, dst);
