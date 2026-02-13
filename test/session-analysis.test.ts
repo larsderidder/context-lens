@@ -1,16 +1,22 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-
 import {
   analyzeSession,
+  buildAgentPaths,
   findCompactions,
   findGrowthBlocks,
+  fmtCost,
+  fmtDuration,
+  fmtTokens,
+  formatSessionAnalysis,
   identifyUserTurns,
-  buildAgentPaths,
+  shortModel,
 } from "../src/core.js";
-import { formatSessionAnalysis, fmtTokens, fmtCost, fmtDuration, shortModel } from "../src/core.js";
 import { parseLharContent } from "../src/lhar.js";
-import type { LharRecord, LharSessionLine } from "../src/lhar-types.generated.js";
+import type {
+  LharRecord,
+  LharSessionLine,
+} from "../src/lhar-types.generated.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -24,7 +30,12 @@ function mkEntry(overrides: {
   cumulativeTokens?: number;
   compactionDetected?: boolean;
   costUsd?: number | null;
-  composition?: Array<{ category: string; tokens: number; pct: number; count: number }>;
+  composition?: Array<{
+    category: string;
+    tokens: number;
+    pct: number;
+    count: number;
+  }>;
 }): LharRecord {
   return {
     type: "entry",
@@ -107,7 +118,11 @@ describe("findCompactions", () => {
     const entries = [
       mkEntry({ sequence: 1, cumulativeTokens: 10000 }),
       mkEntry({ sequence: 2, cumulativeTokens: 20000 }),
-      mkEntry({ sequence: 3, cumulativeTokens: 18000, compactionDetected: true }),
+      mkEntry({
+        sequence: 3,
+        cumulativeTokens: 18000,
+        compactionDetected: true,
+      }),
     ];
     const compactions = findCompactions(entries);
     assert.equal(compactions.length, 1);
@@ -157,7 +172,11 @@ describe("findGrowthBlocks", () => {
       mkEntry({ sequence: 1, cumulativeTokens: 10000 }),
       mkEntry({ sequence: 2, cumulativeTokens: 20000 }),
       mkEntry({ sequence: 3, cumulativeTokens: 30000 }),
-      mkEntry({ sequence: 4, cumulativeTokens: 25000, compactionDetected: true }),
+      mkEntry({
+        sequence: 4,
+        cumulativeTokens: 25000,
+        compactionDetected: true,
+      }),
       mkEntry({ sequence: 5, cumulativeTokens: 35000 }),
     ];
     const blocks = findGrowthBlocks(entries);
@@ -234,7 +253,11 @@ describe("buildAgentPaths", () => {
 
   it("marks compaction events", () => {
     const entries = [
-      mkEntry({ sequence: 1, cumulativeTokens: 50000, finishReasons: ["end_turn"] }),
+      mkEntry({
+        sequence: 1,
+        cumulativeTokens: 50000,
+        finishReasons: ["end_turn"],
+      }),
       mkEntry({
         sequence: 3,
         cumulativeTokens: 48000,
@@ -264,9 +287,21 @@ describe("analyzeSession", () => {
       model: "claude-sonnet-4-5-20250929",
     };
     const entries = [
-      mkEntry({ sequence: 1, cumulativeTokens: 20000, finishReasons: ["tool_use"] }),
-      mkEntry({ sequence: 2, cumulativeTokens: 40000, finishReasons: ["end_turn"] }),
-      mkEntry({ sequence: 4, cumulativeTokens: 50000, finishReasons: ["end_turn"] }),
+      mkEntry({
+        sequence: 1,
+        cumulativeTokens: 20000,
+        finishReasons: ["tool_use"],
+      }),
+      mkEntry({
+        sequence: 2,
+        cumulativeTokens: 40000,
+        finishReasons: ["end_turn"],
+      }),
+      mkEntry({
+        sequence: 4,
+        cumulativeTokens: 50000,
+        finishReasons: ["end_turn"],
+      }),
     ];
     const result = analyzeSession(session, entries, "test.lhar");
 
@@ -286,7 +321,9 @@ describe("analyzeSession", () => {
       mkEntry({ sequence: 2, agentRole: "subagent", cumulativeTokens: 300 }),
       mkEntry({ sequence: 3, agentRole: "main", cumulativeTokens: 40000 }),
     ];
-    const result = analyzeSession(null, entries, "test.lhar", { mainOnly: true });
+    const result = analyzeSession(null, entries, "test.lhar", {
+      mainOnly: true,
+    });
     // Context timeline should only have main entries
     assert.equal(result.contextTimeline.length, 2);
   });
@@ -306,7 +343,11 @@ describe("analyzeSession", () => {
 describe("formatSessionAnalysis", () => {
   it("produces non-empty output", () => {
     const entries = [
-      mkEntry({ sequence: 1, cumulativeTokens: 20000, finishReasons: ["end_turn"] }),
+      mkEntry({
+        sequence: 1,
+        cumulativeTokens: 20000,
+        finishReasons: ["end_turn"],
+      }),
     ];
     const analysis = analyzeSession(null, entries, "test.lhar");
     const output = formatSessionAnalysis(analysis);
@@ -317,7 +358,11 @@ describe("formatSessionAnalysis", () => {
 
   it("omits path trace when showPath is false", () => {
     const entries = [
-      mkEntry({ sequence: 1, cumulativeTokens: 20000, finishReasons: ["end_turn"] }),
+      mkEntry({
+        sequence: 1,
+        cumulativeTokens: 20000,
+        finishReasons: ["end_turn"],
+      }),
     ];
     const analysis = analyzeSession(null, entries, "test.lhar");
     const output = formatSessionAnalysis(analysis, { showPath: false });
@@ -327,7 +372,11 @@ describe("formatSessionAnalysis", () => {
   it("shows pre-compaction composition", () => {
     const entries = [
       mkEntry({ sequence: 1, cumulativeTokens: 50000 }),
-      mkEntry({ sequence: 2, cumulativeTokens: 48000, compactionDetected: true }),
+      mkEntry({
+        sequence: 2,
+        cumulativeTokens: 48000,
+        compactionDetected: true,
+      }),
     ];
     const analysis = analyzeSession(null, entries, "test.lhar");
     const output = formatSessionAnalysis(analysis, {
@@ -380,10 +429,22 @@ describe("timing and cache stats", () => {
   it("computes wall time from first to last timestamp + last duration", () => {
     const e1 = mkEntry({ sequence: 1 });
     e1.timestamp = "2026-01-01T00:00:00.000Z";
-    e1.timings = { send_ms: 10, wait_ms: 100, receive_ms: 200, total_ms: 5000, tokens_per_second: 50 };
+    e1.timings = {
+      send_ms: 10,
+      wait_ms: 100,
+      receive_ms: 200,
+      total_ms: 5000,
+      tokens_per_second: 50,
+    };
     const e2 = mkEntry({ sequence: 2 });
     e2.timestamp = "2026-01-01T00:00:10.000Z";
-    e2.timings = { send_ms: 10, wait_ms: 100, receive_ms: 200, total_ms: 3000, tokens_per_second: 80 };
+    e2.timings = {
+      send_ms: 10,
+      wait_ms: 100,
+      receive_ms: 200,
+      total_ms: 3000,
+      tokens_per_second: 80,
+    };
 
     const result = analyzeSession(null, [e1, e2], "test.lhar");
     // Wall time = (10000 - 0) + 3000 = 13000ms
@@ -394,8 +455,16 @@ describe("timing and cache stats", () => {
 
   it("computes cache stats", () => {
     const e1 = mkEntry({ sequence: 1 });
-    e1.usage_ext = { cache_read_tokens: 900, cache_write_tokens: 100, cost_usd: 0.01 };
-    e1.gen_ai.usage = { input_tokens: 100, output_tokens: 50, total_tokens: 150 };
+    e1.usage_ext = {
+      cache_read_tokens: 900,
+      cache_write_tokens: 100,
+      cost_usd: 0.01,
+    };
+    e1.gen_ai.usage = {
+      input_tokens: 100,
+      output_tokens: 50,
+      total_tokens: 150,
+    };
 
     const result = analyzeSession(null, [e1], "test.lhar");
     assert.equal(result.cache.totalCacheReadTokens, 900);
@@ -407,8 +476,18 @@ describe("timing and cache stats", () => {
   it("shows timing and cache sections in formatted output", () => {
     const e1 = mkEntry({ sequence: 1 });
     e1.timestamp = "2026-01-01T00:00:00.000Z";
-    e1.timings = { send_ms: 10, wait_ms: 100, receive_ms: 200, total_ms: 5000, tokens_per_second: 50 };
-    e1.usage_ext = { cache_read_tokens: 900, cache_write_tokens: 100, cost_usd: 0.01 };
+    e1.timings = {
+      send_ms: 10,
+      wait_ms: 100,
+      receive_ms: 200,
+      total_ms: 5000,
+      tokens_per_second: 50,
+    };
+    e1.usage_ext = {
+      cache_read_tokens: 900,
+      cache_write_tokens: 100,
+      cost_usd: 0.01,
+    };
 
     const result = analyzeSession(null, [e1], "test.lhar");
     const output = formatSessionAnalysis(result, { showPath: false });
@@ -433,8 +512,20 @@ describe("parseLharContent + analyzeSession round-trip", () => {
         tool: "claude",
         model: "claude-sonnet-4-5-20250929",
       }),
-      JSON.stringify(mkEntry({ sequence: 1, cumulativeTokens: 20000, finishReasons: ["tool_use"] })),
-      JSON.stringify(mkEntry({ sequence: 2, cumulativeTokens: 40000, finishReasons: ["end_turn"] })),
+      JSON.stringify(
+        mkEntry({
+          sequence: 1,
+          cumulativeTokens: 20000,
+          finishReasons: ["tool_use"],
+        }),
+      ),
+      JSON.stringify(
+        mkEntry({
+          sequence: 2,
+          cumulativeTokens: 40000,
+          finishReasons: ["end_turn"],
+        }),
+      ),
     ].join("\n");
 
     const { session, entries } = parseLharContent(jsonl);

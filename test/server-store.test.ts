@@ -419,7 +419,7 @@ describe("Store", () => {
     const { store, dir, cleanup } = makeStore();
 
     const sessionId = "session_order-test-1111-1111-111111111111";
-    
+
     // Add three entries in sequence
     for (let i = 1; i <= 3; i++) {
       const body = {
@@ -462,7 +462,11 @@ describe("Store", () => {
     assert.equal(loadedEntries.length, 3);
     // Loaded order should match runtime order (newest first)
     assert.equal(loadedEntries[0].id, 3, "first entry should be newest (id 3)");
-    assert.equal(loadedEntries[1].id, 2, "second entry should be middle (id 2)");
+    assert.equal(
+      loadedEntries[1].id,
+      2,
+      "second entry should be middle (id 2)",
+    );
     assert.equal(loadedEntries[2].id, 1, "third entry should be oldest (id 1)");
 
     // Verify order survives a full saveState rewrite (triggered by delete).
@@ -499,9 +503,21 @@ describe("Store", () => {
 
     const reloadedEntries = store3.getCapturedRequests();
     assert.equal(reloadedEntries.length, 3);
-    assert.equal(reloadedEntries[0].id, 3, "after saveState rewrite: first should be newest (id 3)");
-    assert.equal(reloadedEntries[1].id, 2, "after saveState rewrite: second should be middle (id 2)");
-    assert.equal(reloadedEntries[2].id, 1, "after saveState rewrite: third should be oldest (id 1)");
+    assert.equal(
+      reloadedEntries[0].id,
+      3,
+      "after saveState rewrite: first should be newest (id 3)",
+    );
+    assert.equal(
+      reloadedEntries[1].id,
+      2,
+      "after saveState rewrite: second should be middle (id 2)",
+    );
+    assert.equal(
+      reloadedEntries[2].id,
+      1,
+      "after saveState rewrite: third should be oldest (id 1)",
+    );
 
     cleanup();
   });

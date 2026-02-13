@@ -2,7 +2,7 @@ import type {
   ToolCallEntry,
   ToolDefinitionEntry,
 } from "../lhar-types.generated.js";
-import type { ContextInfo, AnthropicTool, OpenAITool } from "../types.js";
+import type { AnthropicTool, ContextInfo, OpenAITool } from "../types.js";
 
 /**
  * Extract structured tool definition summaries from a ContextInfo.
@@ -37,9 +37,7 @@ export function extractToolDefinitions(
  * Scans contentBlocks for tool_use blocks and returns each invocation with
  * its name, call ID, and arguments.
  */
-export function extractToolCalls(
-  contextInfo: ContextInfo,
-): ToolCallEntry[] {
+export function extractToolCalls(contextInfo: ContextInfo): ToolCallEntry[] {
   const calls: ToolCallEntry[] = [];
   for (const msg of contextInfo.messages) {
     if (!msg.contentBlocks) continue;

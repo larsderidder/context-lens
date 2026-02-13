@@ -203,7 +203,10 @@ export function findGrowthBlocks(entries: LharRecord[]): GrowthBlock[] {
     .filter((i) => i >= 0);
   if (mainIndices.length === 0) {
     // fallback: all entries
-    return findGrowthBlocksFromSlice(entries, entries.map((_, i) => i));
+    return findGrowthBlocksFromSlice(
+      entries,
+      entries.map((_, i) => i),
+    );
   }
   return findGrowthBlocksFromSlice(main, mainIndices);
 }
@@ -279,7 +282,12 @@ export function identifyUserTurns(entries: LharRecord[]): UserTurn[] {
 
     if (isNewTurn) {
       turns.push(
-        buildUserTurn(turnNumber, currentStart, i - 1, entries.slice(currentStart, i)),
+        buildUserTurn(
+          turnNumber,
+          currentStart,
+          i - 1,
+          entries.slice(currentStart, i),
+        ),
       );
       turnNumber++;
       currentStart = i;
@@ -414,22 +422,21 @@ function computeTimingStats(entries: LharRecord[]): TimingStats {
   // Median duration
   durations.sort((a, b) => a - b);
   const medianApiTimeMs =
-    durations.length > 0
-      ? durations[Math.floor(durations.length / 2)]
-      : 0;
+    durations.length > 0 ? durations[Math.floor(durations.length / 2)] : 0;
 
   // Tokens per second
   const tpsList: number[] = [];
   for (const e of entries) {
-    if (e.timings?.tokens_per_second != null && e.timings.tokens_per_second > 0) {
+    if (
+      e.timings?.tokens_per_second != null &&
+      e.timings.tokens_per_second > 0
+    ) {
       tpsList.push(e.timings.tokens_per_second);
     }
   }
   tpsList.sort((a, b) => a - b);
   const medianTokensPerSecond =
-    tpsList.length > 0
-      ? tpsList[Math.floor(tpsList.length / 2)]
-      : null;
+    tpsList.length > 0 ? tpsList[Math.floor(tpsList.length / 2)] : null;
 
   // Total I/O tokens
   let totalOutputTokens = 0;
@@ -528,12 +535,10 @@ export function analyzeSession(
   // Context timeline: main agent only
   let timelineEntries = entries.filter((e) => agentRole(e) === "main");
   if (timelineEntries.length === 0) timelineEntries = entries;
-  const contextTimeline: Array<[number, number]> = timelineEntries.map(
-    (e) => {
-      const idx = entries.indexOf(e);
-      return [idx, cumTokens(e)];
-    },
-  );
+  const contextTimeline: Array<[number, number]> = timelineEntries.map((e) => {
+    const idx = entries.indexOf(e);
+    return [idx, cumTokens(e)];
+  });
 
   // Compaction events
   const compactions = findCompactions(entries);
@@ -564,7 +569,10 @@ export function analyzeSession(
     const role = agentRole(compactedEntry);
     for (let j = comp.entryIndex - 1; j >= 0; j--) {
       const prev = entries[j];
-      if (agentRole(prev) === role && cumTokens(prev) >= cumTokens(compactedEntry)) {
+      if (
+        agentRole(prev) === role &&
+        cumTokens(prev) >= cumTokens(compactedEntry)
+      ) {
         compositionsPreCompaction.push([j, prev.context_lens.composition]);
         break;
       }

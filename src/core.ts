@@ -29,30 +29,30 @@ export {
   resolveTargetUrl,
 } from "./core/routing.js";
 export { scanSecurity } from "./core/security.js";
-export { detectSource } from "./core/source.js";
-export { estimateTokens, rescaleContextTokens } from "./core/tokens.js";
+export type {
+  AgentPathStep,
+  AnalyzeOptions,
+  CacheStats,
+  CompactionEvent,
+  GrowthBlock,
+  SessionAnalysis,
+  TimingStats,
+  UserTurn,
+} from "./core/session-analysis.js";
 export {
   analyzeSession,
+  buildAgentPaths,
   findCompactions,
   findGrowthBlocks,
   identifyUserTurns,
-  buildAgentPaths,
 } from "./core/session-analysis.js";
-export type {
-  SessionAnalysis,
-  CompactionEvent,
-  GrowthBlock,
-  UserTurn,
-  AgentPathStep,
-  AnalyzeOptions,
-  TimingStats,
-  CacheStats,
-} from "./core/session-analysis.js";
+export type { FormatOptions } from "./core/session-format.js";
 export {
-  formatSessionAnalysis,
-  fmtTokens,
   fmtCost,
   fmtDuration,
+  fmtTokens,
+  formatSessionAnalysis,
   shortModel,
 } from "./core/session-format.js";
-export type { FormatOptions } from "./core/session-format.js";
+export { detectSource } from "./core/source.js";
+export { estimateTokens, rescaleContextTokens } from "./core/tokens.js";

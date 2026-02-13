@@ -5,7 +5,7 @@
  */
 
 import type { CompositionEntry, LharRecord } from "../lhar-types.generated.js";
-import type { SessionAnalysis, AgentPathStep } from "./session-analysis.js";
+import type { AgentPathStep, SessionAnalysis } from "./session-analysis.js";
 
 // ---------------------------------------------------------------------------
 // Formatting helpers
@@ -76,7 +76,8 @@ function formatComposition(
   const sorted = [...composition].sort((a, b) => b.tokens - a.tokens);
   for (const c of sorted) {
     if (c.tokens === 0) continue;
-    const pct = c.pct || (total > 0 ? Math.round((c.tokens / total) * 1000) / 10 : 0);
+    const pct =
+      c.pct || (total > 0 ? Math.round((c.tokens / total) * 1000) / 10 : 0);
     lines.push(
       `${indent}${pad(c.category, 22)} ${pad(fmtTokens(c.tokens), 10, true)} ${pad(`${pct.toFixed(1)}%`, 7, true)} ${pad(String(c.count), 6, true)}`,
     );
@@ -121,7 +122,9 @@ export function formatSessionAnalysis(
     lines.push(`  Wall time:       ${fmtDuration(a.timing.wallTimeMs)}`);
   }
   if (a.cache.totalCacheReadTokens > 0 || a.cache.totalCacheWriteTokens > 0) {
-    lines.push(`  Cache hit rate:  ${(a.cache.cacheHitRate * 100).toFixed(1)}%`);
+    lines.push(
+      `  Cache hit rate:  ${(a.cache.cacheHitRate * 100).toFixed(1)}%`,
+    );
   }
   lines.push("");
 
@@ -281,19 +284,12 @@ export function formatSessionAnalysis(
   if (specificTurn !== null && opts.entries) {
     if (specificTurn > 0 && specificTurn <= a.userTurns.length) {
       const turn = a.userTurns[specificTurn - 1];
-      const entryIdx = Math.min(
-        turn.endEntryIndex,
-        opts.entries.length - 1,
-      );
+      const entryIdx = Math.min(turn.endEntryIndex, opts.entries.length - 1);
       const entry = opts.entries[entryIdx];
       if (entry) {
-        lines.push(
-          `COMPOSITION (turn ${specificTurn}, entry #${entryIdx})`,
-        );
+        lines.push(`COMPOSITION (turn ${specificTurn}, entry #${entryIdx})`);
         lines.push("-".repeat(70));
-        lines.push(
-          ...formatComposition(entry.context_lens.composition, "  "),
-        );
+        lines.push(...formatComposition(entry.context_lens.composition, "  "));
         lines.push("");
       }
     } else {
@@ -308,7 +304,9 @@ export function formatSessionAnalysis(
   lines.push("-".repeat(70));
   if (a.contextTimeline.length > 0) {
     const tokensList = a.contextTimeline.map((t) => t[1]);
-    lines.push(`  Peak context:          ${fmtTokens(Math.max(...tokensList))}`);
+    lines.push(
+      `  Peak context:          ${fmtTokens(Math.max(...tokensList))}`,
+    );
     lines.push(
       `  Final context:         ${fmtTokens(tokensList[tokensList.length - 1])}`,
     );
@@ -334,8 +332,7 @@ export function formatSessionAnalysis(
   }
   if (a.userTurns.length > 0) {
     const callsPerTurn = a.userTurns.map((t) => t.numApiCalls);
-    const avg =
-      callsPerTurn.reduce((s, c) => s + c, 0) / callsPerTurn.length;
+    const avg = callsPerTurn.reduce((s, c) => s + c, 0) / callsPerTurn.length;
     lines.push(`  Avg API calls/turn:    ${avg.toFixed(1)}`);
   }
   lines.push("");
@@ -353,7 +350,9 @@ export function formatSessionAnalysis(
       lines.push(`  Median API call:       ${fmtDuration(t.medianApiTimeMs)}`);
     }
     if (t.medianTokensPerSecond != null) {
-      lines.push(`  Median tok/s (output): ${t.medianTokensPerSecond.toFixed(1)}`);
+      lines.push(
+        `  Median tok/s (output): ${t.medianTokensPerSecond.toFixed(1)}`,
+      );
     }
     if (t.totalInputTokens > 0 || t.totalOutputTokens > 0) {
       lines.push(`  Total input tokens:    ${fmtTokens(t.totalInputTokens)}`);
@@ -368,8 +367,12 @@ export function formatSessionAnalysis(
     lines.push("CACHE");
     lines.push("-".repeat(70));
     lines.push(`  Cache read tokens:     ${fmtTokens(c.totalCacheReadTokens)}`);
-    lines.push(`  Cache write tokens:    ${fmtTokens(c.totalCacheWriteTokens)}`);
-    lines.push(`  Cache hit rate:        ${(c.cacheHitRate * 100).toFixed(1)}%`);
+    lines.push(
+      `  Cache write tokens:    ${fmtTokens(c.totalCacheWriteTokens)}`,
+    );
+    lines.push(
+      `  Cache hit rate:        ${(c.cacheHitRate * 100).toFixed(1)}%`,
+    );
     lines.push("");
   }
 
