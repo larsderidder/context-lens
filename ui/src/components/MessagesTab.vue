@@ -4,7 +4,7 @@ import { Splitpanes, Pane } from 'splitpanes'
 import { useSessionStore } from '@/stores/session'
 import { useExpandable } from '@/composables/useExpandable'
 import { fmtTokens } from '@/utils/format'
-import { groupMessagesByCategory, buildToolNameMap, extractPreview, CATEGORY_META, classifyMessageRole } from '@/utils/messages'
+import { groupMessagesByCategory, buildToolNameMap, extractPreview, CATEGORY_META, classifyMessageRole, classifyEntries } from '@/utils/messages'
 import type { ParsedMessage } from '@/api-types'
 import DetailPane from '@/components/DetailPane.vue'
 
@@ -95,10 +95,40 @@ const chronoTurnBoundaries = computed(() => {
   return boundaries
 })
 
+// Global turn number of the selected entry (1-based), derived from the session's
+// full entry list so that post-compaction turns don't reset to "Turn 1".
+const globalTurnNumber = computed(() => {
+  const s = session.value
+  const e = entry.value
+  if (!s || !e) return 1
+  // entries are newest-first; reverse for chronological order
+  const classified = classifyEntries([...s.entries].reverse())
+  let mainIdx = 0
+  for (const item of classified) {
+    if (item.isMain) mainIdx++
+    if (item.entry.id === e.id) return mainIdx
+  }
+  return 1
+})
+
+// How many user/assistant turns belong to the *selected* entry (exclude future messages).
+const localTurnCount = computed(() => {
+  const msgCount = selectedMessageCount.value
+  let count = 0
+  for (const idx of chronoTurnBoundaries.value) {
+    if (idx < msgCount) count++
+  }
+  return count
+})
+
+// Offset: global turn number minus local turn count gives how many turns
+// were compacted away before the first visible message.
+const turnOffset = computed(() => Math.max(0, globalTurnNumber.value - localTurnCount.value))
+
 // Map from message index to turn number
 const chronoTurnNumbers = computed(() => {
   const map = new Map<number, number>()
-  let turnNum = 0
+  let turnNum = turnOffset.value
   for (const idx of chronoTurnBoundaries.value) {
     turnNum++
     map.set(idx, turnNum)
@@ -334,8 +364,16 @@ function rowClassForToolFocus(msg: ParsedMessage): Record<string, boolean> {
 }
 
 async function applyMessageFocus() {
+  // Snapshot focus state and clear immediately so it acts as a one-shot request.
+  // This prevents stale focus from replaying on turn changes.
+  const snapshotCategory = focusCategory.value
+  const snapshotIndex = store.messageFocusIndex
+  const snapshotOpenDetail = store.messageFocusOpenDetail
+  const snapshotTool = store.messageFocusTool
+  store.clearMessageFocus()
+
   // Focus by message index (e.g. from security alert findings)
-  const focusIdx = store.messageFocusIndex
+  const focusIdx = snapshotIndex
   if (focusIdx != null) {
     // In chrono mode, origIdx maps directly to position
     if (viewMode.value === 'chrono') {
@@ -376,10 +414,10 @@ async function applyMessageFocus() {
     return
   }
 
-  const category = focusCategory.value
+  const category = snapshotCategory
   if (!category) return
 
-  const shouldOpenDetail = store.messageFocusOpenDetail
+  const shouldOpenDetail = snapshotOpenDetail
 
   // If openDetail is requested, switch to chrono mode and open the detail pane
   // Otherwise, switch to category mode to show all messages of that type
@@ -433,7 +471,7 @@ async function applyMessageFocus() {
   }
   if (!root) return
 
-  const focusTool = store.messageFocusTool
+  const focusTool = snapshotTool
   if (focusTool) {
     const rows = Array.from(root.querySelectorAll('.msg-row')) as HTMLElement[]
     const target = focusTool.trim().toLowerCase()
@@ -461,14 +499,7 @@ watch(
   },
 )
 
-watch(
-  () => categorized.value.length,
-  async () => {
-    if (store.inspectorTab === 'messages' && store.messageFocusCategory) {
-      await applyMessageFocus()
-    }
-  },
-)
+
 
 // Fetch full (uncompacted) entry detail when the selected entry changes
 watch(
