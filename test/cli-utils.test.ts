@@ -61,7 +61,6 @@ describe("cli-utils", () => {
       "--privacy=minimal",
       "--no-open",
       "--no-ui",
-      "--dry-run",
       "gm",
       "--model",
       "gemini-2.5-flash",
@@ -70,7 +69,6 @@ describe("cli-utils", () => {
     assert.equal(parsed.privacyLevel, "minimal");
     assert.equal(parsed.noOpen, true);
     assert.equal(parsed.noUi, true);
-    assert.equal(parsed.dryRun, true);
     assert.equal(parsed.commandName, "gemini");
     assert.deepEqual(parsed.commandArguments, ["--model", "gemini-2.5-flash"]);
   });
@@ -107,7 +105,6 @@ describe("cli-utils", () => {
   it("renders help text with key options", () => {
     const help = formatHelpText();
     assert.match(help, new RegExp(`context-lens v${VERSION}`));
-    assert.match(help, /--dry-run/);
     assert.match(help, /--no-ui/);
     assert.match(help, /--no-update-check/);
     assert.match(help, /context-lens doctor/);

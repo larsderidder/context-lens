@@ -46,23 +46,17 @@ if (
 ) {
   void checkForUpdate(VERSION);
 }
-if (parsedArgs.commandName === "doctor") {
+if (parsedArgs.commandName === "analyze") {
+  void runAnalyze(parsedArgs.commandArguments).then((exitCode) =>
+    process.exit(exitCode),
+  );
+} else if (parsedArgs.commandName === "doctor") {
   void runDoctor().then((exitCode) => process.exit(exitCode));
 } else if (parsedArgs.commandName === "background") {
   void runBackgroundCommand(parsedArgs.commandArguments, parsedArgs.noUi).then(
     (exitCode) => process.exit(exitCode),
   );
 } else if (!parsedArgs.commandName) {
-  if (parsedArgs.dryRun) {
-    if (parsedArgs.noUi) {
-      console.log("Dry run: would start proxy only (no analysis/web UI server).");
-    } else {
-      console.log(
-        "Dry run: would start proxy and analysis/web UI server in standalone mode.",
-      );
-    }
-    process.exit(0);
-  }
   if (parsedArgs.noUi) {
     // Standalone mode (no UI): start proxy only
     const proxyPath = join(__dirname, "proxy", "server.js");
@@ -107,7 +101,6 @@ if (parsedArgs.commandName === "doctor") {
   const commandArguments = parsedArgs.commandArguments;
   const noOpen = parsedArgs.noOpen;
   const noUi = parsedArgs.noUi;
-  const dryRun = parsedArgs.dryRun;
 
   // Get tool-specific config
   const toolConfig = getToolConfig(commandName);
@@ -116,20 +109,6 @@ if (parsedArgs.commandName === "doctor") {
       "Error: --no-ui is not supported for this command because mitm capture requires the analysis ingest API on :4041.",
     );
     process.exit(1);
-  }
-  if (dryRun) {
-    const allArgs = [...toolConfig.extraArgs, ...commandArguments];
-    console.log("Dry run summary:");
-    console.log(`  command: ${commandName}`);
-    console.log(`  args: ${allArgs.length > 0 ? allArgs.join(" ") : "(none)"}`);
-    console.log(`  needs mitmproxy: ${toolConfig.needsMitm ? "yes" : "no"}`);
-    console.log(`  start analysis/web UI server: ${noUi ? "no" : "yes"}`);
-    console.log(`  auto-open UI: ${noOpen || noUi ? "no" : "yes"}`);
-    const envKeys = Object.keys(toolConfig.childEnv);
-    console.log(
-      `  child env overrides: ${envKeys.length > 0 ? envKeys.join(", ") : "(none)"}`,
-    );
-    process.exit(0);
   }
 
   // Check if proxy is already running
@@ -447,7 +426,9 @@ if (parsedArgs.commandName === "doctor") {
     childProcess.on("error", (err) => {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") {
         console.error(`\nFailed to start '${commandName}': command not found.`);
-        console.error("Try a known tool (claude, codex, gemini, aider, pi) or use:");
+        console.error(
+          "Try a known tool (claude, codex, gemini, aider, pi) or use:",
+        );
         console.error("  context-lens -- <your-command> [args...]");
         cleanup(127);
         return;
@@ -474,7 +455,11 @@ if (parsedArgs.commandName === "doctor") {
     try {
       const raw = fs.readFileSync(sourcePath, "utf8");
       const settings = JSON.parse(raw);
-      if (settings && typeof settings === "object" && Array.isArray(settings.packages)) {
+      if (
+        settings &&
+        typeof settings === "object" &&
+        Array.isArray(settings.packages)
+      ) {
         settings.packages = settings.packages.map((pkg: unknown) => {
           if (typeof pkg === "string") {
             return resolvePackagePath(pkg, sourceDir);
@@ -482,7 +467,10 @@ if (parsedArgs.commandName === "doctor") {
           if (pkg && typeof pkg === "object" && "source" in pkg) {
             const obj = pkg as Record<string, unknown>;
             if (typeof obj.source === "string") {
-              return { ...obj, source: resolvePackagePath(obj.source, sourceDir) };
+              return {
+                ...obj,
+                source: resolvePackagePath(obj.source, sourceDir),
+              };
             }
           }
           return pkg;
@@ -507,7 +495,8 @@ if (parsedArgs.commandName === "doctor") {
     // Skip URLs and npm/git specifiers
     if (/^(https?:|git[@+:]|npm:|github:)/.test(pkg)) return pkg;
     // Skip what looks like a bare npm package name (no slashes or starts with @scope/)
-    if (/^@?[a-z0-9][\w.-]*$/i.test(pkg) || /^@[\w.-]+\/[\w.-]+/.test(pkg)) return pkg;
+    if (/^@?[a-z0-9][\w.-]*$/i.test(pkg) || /^@[\w.-]+\/[\w.-]+/.test(pkg))
+      return pkg;
     // If it's already absolute, leave it
     if (isAbsolute(pkg)) return pkg;
     // Relative path: resolve against the original agent dir
@@ -723,7 +712,8 @@ function isPidAlive(pid: number): boolean {
 
 function isBackgroundRunning(state: BackgroundState): boolean {
   const proxyAlive = isPidAlive(state.proxyPid);
-  const analysisAlive = state.analysisPid == null || isPidAlive(state.analysisPid);
+  const analysisAlive =
+    state.analysisPid == null || isPidAlive(state.analysisPid);
   return proxyAlive && analysisAlive;
 }
 
@@ -734,8 +724,7 @@ function parseBackgroundArgs(
   const actionArg = args[0] || "status";
   if (!["start", "stop", "status"].includes(actionArg)) {
     return {
-      error:
-        "Error: background command requires one of: start, stop, status",
+      error: "Error: background command requires one of: start, stop, status",
     };
   }
   const localNoUi = args.includes("--no-ui");
@@ -861,7 +850,9 @@ async function backgroundStart(noUi: boolean): Promise<number> {
   console.log("Background services started.");
   console.log(`  proxy: http://localhost:4040 (pid ${proxyPid})`);
   if (analysisPid != null) {
-    console.log(`  analysis/web UI: http://localhost:4041 (pid ${analysisPid})`);
+    console.log(
+      `  analysis/web UI: http://localhost:4041 (pid ${analysisPid})`,
+    );
   } else {
     console.log("  analysis/web UI: disabled (--no-ui)");
   }
@@ -899,6 +890,102 @@ function checkWritableDir(targetDir: string): boolean {
     return true;
   } catch {
     return false;
+  }
+}
+
+async function runAnalyze(args: string[]): Promise<number> {
+  // Lazy import to avoid loading analysis code unless needed
+  const { readLharFile } = await import("./lhar.js");
+  const { analyzeSession, formatSessionAnalysis } = await import("./core.js");
+
+  // Parse analyze-specific arguments
+  let filepath: string | undefined;
+  let outputJson = false;
+  let mainOnly = false;
+  let showPath = true;
+  let compositionArg: string | undefined;
+
+  for (const arg of args) {
+    if (arg === "--json") {
+      outputJson = true;
+    } else if (arg === "--main-only") {
+      mainOnly = true;
+    } else if (arg === "--no-path") {
+      showPath = false;
+    } else if (arg.startsWith("--composition=")) {
+      compositionArg = arg.split("=", 1 + 1)[1];
+    } else if (arg === "--help" || arg === "-h") {
+      console.log(
+        [
+          "Usage: context-lens analyze <session.lhar> [options]",
+          "",
+          "Analyze an LHAR session file and print detailed statistics.",
+          "",
+          "Options:",
+          "  --json                    Output as JSON",
+          "  --no-path                 Omit agent path trace",
+          "  --main-only               Only analyze main agent entries",
+          "  --composition=last        Composition of last entry (default)",
+          "  --composition=pre-compaction  Composition before each compaction",
+          "  --composition=N           Composition at end of user turn N",
+        ].join("\n"),
+      );
+      return 0;
+    } else if (!arg.startsWith("-")) {
+      filepath = arg;
+    } else {
+      console.error(`Unknown option: ${arg}`);
+      return 1;
+    }
+  }
+
+  if (!filepath) {
+    console.error(
+      "Error: no session file specified. Usage: context-lens analyze <session.lhar>",
+    );
+    return 1;
+  }
+
+  // Resolve filepath: try as-is, then in ~/.context-lens/data/, then in ./data/
+  let resolvedPath = filepath;
+  if (!fs.existsSync(resolvedPath)) {
+    const homeData = join(homedir(), ".context-lens", "data", filepath);
+    const localData = join("data", filepath);
+    if (fs.existsSync(homeData)) {
+      resolvedPath = homeData;
+    } else if (fs.existsSync(localData)) {
+      resolvedPath = localData;
+    } else {
+      console.error(`Error: file not found: ${filepath}`);
+      console.error(
+        `  Searched: ${filepath}, ${homeData}, ${localData}`,
+      );
+      return 1;
+    }
+  }
+
+  try {
+    const { session, entries } = readLharFile(resolvedPath);
+    const basename = resolvedPath.split("/").pop() || resolvedPath;
+    const analysis = analyzeSession(session, entries, basename, { mainOnly });
+
+    if (outputJson) {
+      console.log(JSON.stringify(analysis, null, 2));
+    } else {
+      const output = formatSessionAnalysis(analysis, {
+        showPath,
+        composition: compositionArg,
+        entries,
+      });
+      console.log(output);
+    }
+    return 0;
+  } catch (err: unknown) {
+    console.error(
+      `Error analyzing ${resolvedPath}:`,
+      err instanceof Error ? err.message : String(err),
+    );
+    return 1;
   }
 }
 
@@ -946,11 +1033,7 @@ async function runDoctor(): Promise<number> {
 
   const contextDir = join(homedir(), ".context-lens");
   const dataDir = join(contextDir, "data");
-  report(
-    "context dir writable",
-    checkWritableDir(contextDir),
-    contextDir,
-  );
+  report("context dir writable", checkWritableDir(contextDir), contextDir);
   report("data dir writable", checkWritableDir(dataDir), dataDir);
 
   const bg = readBackgroundState();
@@ -1060,10 +1143,15 @@ function splitSemver(version: string): [number, number, number] {
   return [major ?? 0, minor ?? 0, patch ?? 0];
 }
 
-function printUpdateNotice(currentVersion: string, latestVersion: string): void {
+function printUpdateNotice(
+  currentVersion: string,
+  latestVersion: string,
+): void {
   console.error(
     `\nUpdate available: context-lens ${currentVersion} -> ${latestVersion}`,
   );
   console.error("Run: npm install -g context-lens");
-  console.error("Skip this check: --no-update-check or CONTEXT_LENS_NO_UPDATE_CHECK=1\n");
+  console.error(
+    "Skip this check: --no-update-check or CONTEXT_LENS_NO_UPDATE_CHECK=1\n",
+  );
 }

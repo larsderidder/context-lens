@@ -26,7 +26,6 @@ export interface ParsedCliArgs {
   showVersion: boolean;
   noOpen: boolean;
   noUi: boolean;
-  dryRun: boolean;
   noUpdateCheck: boolean;
   privacyLevel?: string;
   commandName?: string;
@@ -113,7 +112,6 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
   let showVersion = false;
   let noOpen = false;
   let noUi = false;
-  let dryRun = false;
   let noUpdateCheck = false;
   let privacyLevel: string | undefined;
   let explicitSeparator = false;
@@ -145,10 +143,6 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
       noUi = true;
       continue;
     }
-    if (arg === "--dry-run") {
-      dryRun = true;
-      continue;
-    }
     if (arg === "--no-update-check") {
       noUpdateCheck = true;
       continue;
@@ -160,7 +154,6 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
           showVersion,
           noOpen,
           noUi,
-          dryRun,
           noUpdateCheck,
           commandArguments: [],
           error:
@@ -180,7 +173,6 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
       showVersion,
       noOpen,
       noUi,
-      dryRun,
       noUpdateCheck,
       commandArguments: [],
       error: `Error: Unknown option '${arg}'. Run 'context-lens --help' for usage.`,
@@ -193,7 +185,6 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
       showVersion,
       noOpen,
       noUi,
-      dryRun,
       noUpdateCheck,
       commandArguments: [],
       error: `Error: Invalid privacy level '${privacyLevel}'. Must be one of: ${KNOWN_PRIVACY_LEVELS.join(", ")}`,
@@ -212,7 +203,6 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
       showVersion,
       noOpen,
       noUi,
-      dryRun,
       noUpdateCheck,
       privacyLevel,
       commandArguments: [],
@@ -225,7 +215,6 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
     showVersion,
     noOpen,
     noUi,
-    dryRun,
     noUpdateCheck,
     privacyLevel,
     commandName,
@@ -243,6 +232,7 @@ export function formatHelpText(): string {
     "  context-lens [global-options]   (no command = standalone mode)",
     "  context-lens doctor",
     "  context-lens background <start|stop|status> [--no-ui]",
+    "  context-lens analyze <session.lhar> [options]",
     "",
     "Examples:",
     "  context-lens claude",
@@ -250,9 +240,11 @@ export function formatHelpText(): string {
     "  context-lens gm",
     "  context-lens --privacy=minimal aider --model claude-sonnet-4",
     "  context-lens -- python my_agent.py",
-    "  context-lens --dry-run codex",
     "  context-lens doctor",
     "  context-lens background start --no-ui",
+    "  context-lens analyze ~/.context-lens/data/claude-abc123.lhar",
+    "  context-lens analyze session.lhar --json --main-only",
+    "  context-lens analyze session.lhar --composition=pre-compaction",
     "",
     "Global options:",
     "  -h, --help             Show this help text",
@@ -260,7 +252,6 @@ export function formatHelpText(): string {
     "  --privacy <level>      Set privacy level: minimal|standard|full",
     "  --no-open              Don't auto-open http://localhost:4041",
     "  --no-ui                Run proxy only (no analysis/web UI server)",
-    "  --dry-run              Print planned execution and exit",
     "  --no-update-check      Skip npm update check for this run",
     "",
     "Command aliases:",
@@ -274,6 +265,15 @@ export function formatHelpText(): string {
     "  - 'codex' (subscription mode) requires mitmproxy for HTTPS interception.",
     "  - 'doctor' is a local diagnostics command.",
     "  - 'background' manages detached proxy/web-ui processes.",
+    "  - 'analyze' reads an .lhar file and prints session statistics.",
+    "",
+    "Analyze options:",
+    "  --json                    Output as JSON instead of formatted text",
+    "  --no-path                 Omit the agent path trace",
+    "  --main-only               Only analyze main agent entries",
+    "  --composition=last        Composition of the last entry (default)",
+    "  --composition=pre-compaction  Composition before each compaction",
+    "  --composition=N           Composition at end of user turn N",
   ].join("\n");
 }
 
