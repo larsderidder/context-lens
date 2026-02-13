@@ -1,17 +1,21 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, watch, computed } from 'vue'
 import { useSessionStore } from '@/stores/session'
+import type { InspectorTab } from '@/stores/session'
 import { useSSE } from '@/composables/useSSE'
+import { classifyEntries } from '@/utils/messages'
 import AppToolbar from '@/components/AppToolbar.vue'
 import DashboardView from '@/components/DashboardView.vue'
 import InspectorPanel from '@/components/InspectorPanel.vue'
 import SessionRail from '@/components/SessionRail.vue'
 import EmptyState from '@/components/EmptyState.vue'
+import type { ConversationGroup, ProjectedEntry } from '@/api-types'
 
 const store = useSessionStore()
 const syncingFromHash = ref(false)
 const appReady = ref(false)
 const HASH_SESSIONS = '#sessions'
+const INSPECTOR_TABS: readonly InspectorTab[] = ['overview', 'messages', 'timeline']
 let refreshInterval: ReturnType<typeof setInterval> | null = null
 
 // Track navigation direction for slide transitions
@@ -55,18 +59,59 @@ watch(connected, (val) => {
   store.connected = val
 })
 
-function parseSessionIdFromHash(hash: string): string | null {
-  const match = hash.match(/^#session\/(.+)$/)
-  if (!match) return null
+interface ParsedHashRoute {
+  sessionId: string | null
+  tab: InspectorTab | null
+  turn: number | null
+}
+
+function parseHashRoute(hash: string): ParsedHashRoute {
+  const match = hash.match(/^#session\/([^?]+)(?:\?(.*))?$/)
+  if (!match) return { sessionId: null, tab: null, turn: null }
+
   const decoded = decodeURIComponent(match[1]).trim()
-  return decoded || null
+  const sessionId = decoded || null
+  if (!sessionId) return { sessionId: null, tab: null, turn: null }
+
+  const params = new URLSearchParams(match[2] ?? '')
+
+  const tabRaw = params.get('tab')
+  const tab = tabRaw && INSPECTOR_TABS.includes(tabRaw as InspectorTab)
+    ? (tabRaw as InspectorTab)
+    : null
+
+  const turnRaw = params.get('turn')
+  const parsedTurn = turnRaw ? Number.parseInt(turnRaw, 10) : NaN
+  const turn = Number.isFinite(parsedTurn) && parsedTurn > 0 ? parsedTurn : null
+
+  return { sessionId, tab, turn }
+}
+
+function getMainEntriesOldestFirst(session: ConversationGroup): ProjectedEntry[] {
+  return classifyEntries([...session.entries].reverse())
+    .filter((item) => item.isMain)
+    .map((item) => item.entry)
+}
+
+function selectedNonLatestTurnNumber(): number | null {
+  if (store.selectionMode !== 'pinned') return null
+  const session = store.selectedSession
+  if (!session) return null
+  const mainEntries = getMainEntriesOldestFirst(session)
+  if (mainEntries.length === 0) return null
+  const selectedId = store.selectedEntryId
+  if (selectedId == null) return null
+  const turnIndex = mainEntries.findIndex((entry) => entry.id === selectedId)
+  if (turnIndex < 0) return null
+  const turnNumber = turnIndex + 1
+  return turnNumber < mainEntries.length ? turnNumber : null
 }
 
 async function applyHashRoute() {
   syncingFromHash.value = true
   try {
     const hash = window.location.hash || ''
-    const sessionId = parseSessionIdFromHash(hash)
+    const { sessionId, tab, turn } = parseHashRoute(hash)
 
     if (sessionId) {
       const exists = store.summaries.some(s => s.id === sessionId)
@@ -75,6 +120,24 @@ async function applyHashRoute() {
         return
       }
       await store.selectSession(sessionId)
+      if (tab) {
+        store.setInspectorTab(tab)
+      }
+      if (turn != null && store.selectedSession) {
+        const mainEntries = getMainEntriesOldestFirst(store.selectedSession)
+        if (mainEntries.length > 0) {
+          const clamped = Math.min(Math.max(turn, 1), mainEntries.length)
+          if (clamped < mainEntries.length) {
+            store.pinEntry(mainEntries[clamped - 1].id)
+          } else {
+            store.followLive()
+          }
+        } else {
+          store.followLive()
+        }
+      } else {
+        store.followLive()
+      }
       store.setView('inspector')
       return
     }
@@ -87,9 +150,17 @@ async function applyHashRoute() {
 
 function syncHashFromStore() {
   if (syncingFromHash.value) return
-  const desired = store.view === 'inspector' && store.selectedSessionId
-    ? `#session/${encodeURIComponent(store.selectedSessionId)}`
-    : HASH_SESSIONS
+  let desired = HASH_SESSIONS
+  if (store.view === 'inspector' && store.selectedSessionId) {
+    const params = new URLSearchParams()
+    params.set('tab', store.inspectorTab)
+    const nonLatestTurn = selectedNonLatestTurnNumber()
+    if (nonLatestTurn != null) {
+      params.set('turn', String(nonLatestTurn))
+    }
+    const query = params.toString()
+    desired = `#session/${encodeURIComponent(store.selectedSessionId)}${query ? `?${query}` : ''}`
+  }
   if (window.location.hash !== desired) {
     window.location.hash = desired
   }
@@ -100,7 +171,14 @@ function onHashChange() {
 }
 
 watch(
-  () => [store.view, store.selectedSessionId] as const,
+  () => [
+    store.view,
+    store.selectedSessionId,
+    store.inspectorTab,
+    store.selectionMode,
+    store.selectedEntryId,
+    store.selectedSession?.entries.length,
+  ] as const,
   () => {
     syncHashFromStore()
   },

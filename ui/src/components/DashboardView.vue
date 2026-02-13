@@ -277,6 +277,7 @@ function collapseAll() {
 
 // ── Navigation ──
 function inspectSession(id: string) {
+  store.setInspectorTab('overview')
   store.selectSession(id)
   store.setView('inspector')
 }
