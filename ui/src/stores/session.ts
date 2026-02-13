@@ -16,6 +16,7 @@ import {
   deleteConversation as apiDeleteConversation,
   resetAll as apiResetAll,
 } from '@/api'
+import { classifyEntries } from '@/utils/messages'
 
 export type ViewMode = 'inspector' | 'dashboard'
 export type InspectorTab = 'overview' | 'messages' | 'timeline'
@@ -153,7 +154,11 @@ export const useSessionStore = defineStore('session', () => {
     const session = selectedSession.value
     if (!session || session.entries.length === 0) return null
     if (selectionMode.value === 'live') {
-      return session.entries[0]
+      // In live mode, follow the latest *main* entry so subagent turns
+      // don't hijack the view. Entries are newest-first.
+      const classified = classifyEntries([...session.entries].reverse())
+      const latestMain = [...classified].reverse().find((item) => item.isMain)
+      return latestMain?.entry ?? session.entries[0]
     }
     const pinned = session.entries.find((entry) => entry.id === selectedEntryId.value)
     return pinned ?? session.entries[0]

@@ -18,10 +18,8 @@ const classifiedOldestFirst = computed(() => {
   return classifyEntries([...session.value.entries].reverse())
 })
 
-const showAll = computed(() => store.messagesMode === 'all')
-
+// Scrubber always shows only main turns, regardless of messagesMode
 const visibleClassified = computed(() => {
-  if (showAll.value) return classifiedOldestFirst.value
   return classifiedOldestFirst.value.filter((item) => item.isMain)
 })
 
@@ -34,9 +32,6 @@ const turnCount = computed(() => visibleEntries.value.length)
 const selectedTurnIndex = computed(() => {
   const selected = selectedEntry.value
   if (!selected) return -1
-  if (showAll.value) {
-    return visibleEntries.value.findIndex((e) => e.id === selected.id)
-  }
   // Find which main turn the selected entry belongs to
   let currentMain = -1
   for (const item of classifiedOldestFirst.value) {
@@ -103,9 +98,7 @@ const newBadgeLeft = computed(() => {
 })
 
 // Sub-agent calls in each turn (for the density dots below the spark).
-// In "all" mode every entry is its own slot, so sub-call counting is skipped.
 const subCallsPerTurn = computed(() => {
-  if (showAll.value) return visibleEntries.value.map(() => 0)
   const result: number[] = []
   let currentSubs = 0
   let mainIdx = -1
