@@ -1,6 +1,6 @@
 {
   "name": "context-lens",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "type": "module",
   "description": "Local HTTP proxy that intercepts LLM API calls and visualizes context windows",
   "main": "dist/proxy/server.js",
