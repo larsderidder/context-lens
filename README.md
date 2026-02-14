@@ -52,7 +52,6 @@ context-lens --version
 context-lens --privacy=minimal claude
 context-lens --no-open codex
 context-lens --no-ui -- claude
-context-lens --dry-run -- gemini --model gemini-2.5-flash
 context-lens doctor
 context-lens background start --no-ui
 context-lens background status
@@ -63,7 +62,6 @@ context-lens background stop
 - `--privacy <minimal|standard|full>`: controls privacy mode passed to the analysis server
 - `--no-open`: do not auto-open `http://localhost:4041` when launching a command
 - `--no-ui`: run proxy only (no analysis/web UI server) for capture-only data gathering
-- `--dry-run`: print resolved command/env plan without starting proxy/tool processes
 - `--no-update-check`: skip npm update check for this run
 
 `--no-ui` is not compatible with `codex` subscription mode (`mitmproxy` ingestion depends on `http://localhost:4041/api/ingest`).
