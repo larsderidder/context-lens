@@ -18,7 +18,7 @@ import {
 } from '@/api'
 import { classifyEntries } from '@/utils/messages'
 
-export type ViewMode = 'inspector' | 'dashboard'
+export type ViewMode = 'inspector' | 'dashboard' | 'compare'
 export type InspectorTab = 'overview' | 'messages' | 'timeline'
 export type DensityMode = 'comfortable' | 'compact'
 export type SelectionMode = 'live' | 'pinned'
@@ -51,6 +51,10 @@ export const useSessionStore = defineStore('session', () => {
   const messageFocusIndex = ref<number | null>(null)
   const messageFocusOpenDetail = ref(false)
   const messageFocusFile = ref<string | null>(null)
+
+  // Compare mode state
+  const compareSessionIds = ref<Set<string>>(new Set())
+  const compareMode = ref(false)
 
   // Messages tab persistent state
   const messagesMode = ref<'all' | 'main'>('main')
@@ -330,6 +334,39 @@ export const useSessionStore = defineStore('session', () => {
     messageFocusToken.value += 1
   }
 
+  function toggleCompareSession(id: string) {
+    const next = new Set(compareSessionIds.value)
+    if (next.has(id)) {
+      next.delete(id)
+    } else {
+      next.add(id)
+    }
+    compareSessionIds.value = next
+  }
+
+  async function enterCompare(ids?: Set<string>) {
+    const target = ids ?? compareSessionIds.value
+    if (target.size < 2) return
+    compareSessionIds.value = new Set(target)
+    compareMode.value = true
+    view.value = 'compare'
+
+    // Load entries for all selected sessions
+    const loadPromises: Promise<void>[] = []
+    for (const id of target) {
+      if (!loadedConversations.value.has(id)) {
+        loadPromises.push(loadConversationEntries(id))
+      }
+    }
+    await Promise.all(loadPromises)
+  }
+
+  function exitCompare(targetView: 'dashboard' | 'inspector' = 'dashboard') {
+    compareMode.value = false
+    compareSessionIds.value = new Set()
+    view.value = targetView
+  }
+
   function clearMessageFocus() {
     messageFocusCategory.value = null
     messageFocusTool.value = null
@@ -462,6 +499,8 @@ export const useSessionStore = defineStore('session', () => {
     timelineShowLimitOverlay,
     timelineShowCacheOverlay,
     recentlyUpdated,
+    compareSessionIds,
+    compareMode,
 
     // Computed
     filteredConversations,
@@ -489,6 +528,9 @@ export const useSessionStore = defineStore('session', () => {
     focusMessageByIndex,
     focusMessageFile,
     clearMessageFocus,
+    toggleCompareSession,
+    enterCompare,
+    exitCompare,
     loadEntryDetail,
     getEntryDetail,
     entryDetailLoading,

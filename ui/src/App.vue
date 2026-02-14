@@ -8,6 +8,7 @@ import AppToolbar from '@/components/AppToolbar.vue'
 import DashboardView from '@/components/DashboardView.vue'
 import InspectorPanel from '@/components/InspectorPanel.vue'
 import SessionRail from '@/components/SessionRail.vue'
+import CompareView from '@/components/CompareView.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import type { ConversationGroup, ProjectedEntry } from '@/api-types'
 
@@ -19,7 +20,7 @@ const INSPECTOR_TABS: readonly InspectorTab[] = ['overview', 'messages', 'timeli
 let refreshInterval: ReturnType<typeof setInterval> | null = null
 
 // Track navigation direction for slide transitions
-const lastView = ref<'dashboard' | 'inspector' | 'empty' | null>(null)
+const lastView = ref<'dashboard' | 'inspector' | 'compare' | 'empty' | null>(null)
 const viewTransitionName = computed(() => {
   const current = store.view
   const previous = lastView.value
@@ -107,10 +108,29 @@ function selectedNonLatestTurnNumber(): number | null {
   return turnNumber < mainEntries.length ? turnNumber : null
 }
 
+function parseCompareHash(hash: string): string[] | null {
+  const match = hash.match(/^#compare\/(.+)$/)
+  if (!match) return null
+  return match[1].split(',').map(s => decodeURIComponent(s.trim())).filter(Boolean)
+}
+
 async function applyHashRoute() {
   syncingFromHash.value = true
   try {
     const hash = window.location.hash || ''
+
+    // Compare route: #compare/id1,id2[,id3...]
+    const compareIds = parseCompareHash(hash)
+    if (compareIds && compareIds.length >= 2) {
+      // Validate that at least 2 of the IDs exist
+      const valid = compareIds.filter(id => store.summaries.some(s => s.id === id))
+      if (valid.length >= 2) {
+        await store.enterCompare(new Set(valid))
+        return
+      }
+      // Fall through to dashboard if not enough valid IDs
+    }
+
     const { sessionId, tab, turn } = parseHashRoute(hash)
 
     if (sessionId) {
@@ -151,7 +171,10 @@ async function applyHashRoute() {
 function syncHashFromStore() {
   if (syncingFromHash.value) return
   let desired = HASH_SESSIONS
-  if (store.view === 'inspector' && store.selectedSessionId) {
+  if (store.view === 'compare' && store.compareSessionIds.size >= 2) {
+    const ids = Array.from(store.compareSessionIds).map(id => encodeURIComponent(id)).join(',')
+    desired = `#compare/${ids}`
+  } else if (store.view === 'inspector' && store.selectedSessionId) {
     const params = new URLSearchParams()
     params.set('tab', store.inspectorTab)
     const nonLatestTurn = selectedNonLatestTurnNumber()
@@ -178,6 +201,8 @@ watch(
     store.selectionMode,
     store.selectedEntryId,
     store.selectedSession?.entries.length,
+    store.compareMode,
+    store.compareSessionIds.size,
   ] as const,
   () => {
     syncHashFromStore()
@@ -231,6 +256,7 @@ onUnmounted(() => {
       <div class="main-content">
         <Transition :name="viewTransitionName">
           <DashboardView v-if="store.view === 'dashboard'" key="dashboard" />
+          <CompareView v-else-if="store.view === 'compare'" key="compare" />
           <div v-else-if="store.view === 'inspector'" key="inspector" class="inspector-content">
             <InspectorPanel v-if="store.selectedSession" />
             <div v-else class="loading-placeholder">

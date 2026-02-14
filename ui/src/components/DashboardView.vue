@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import SearchInput from '@/components/SearchInput.vue'
 import { useSessionStore } from '@/stores/session'
 import { fmtTokens, fmtCost, shortModel, sourceBadgeClass, healthColor } from '@/utils/format'
@@ -17,6 +17,35 @@ const sortMode = ref<'recent' | 'priority' | 'cost'>('recent')
 const expandedIds = ref<Set<string>>(new Set())
 const sourceMenuOpen = ref(false)
 const searchQuery = ref('')
+const selectingForCompare = ref(false)
+
+// Reset selection mode when compare state is cleared externally (e.g. exitCompare)
+watch(() => store.compareSessionIds.size, (size) => {
+  if (size === 0 && selectingForCompare.value) {
+    selectingForCompare.value = false
+  }
+})
+
+function toggleSelectMode() {
+  selectingForCompare.value = !selectingForCompare.value
+  if (!selectingForCompare.value) {
+    store.compareSessionIds = new Set()
+  }
+}
+
+function isSelectedForCompare(id: string): boolean {
+  return store.compareSessionIds.has(id)
+}
+
+function handleRowClick(id: string) {
+  if (selectingForCompare.value) {
+    store.toggleCompareSession(id)
+  } else {
+    toggleExpand(id)
+  }
+}
+
+const compareCount = computed(() => store.compareSessionIds.size)
 
 // ── Source filter (local multi-select, independent of store.sourceFilter) ──
 const activeSources = ref<Set<string> | null>(null) // null = all
@@ -349,6 +378,16 @@ function onKeydown(e: KeyboardEvent) {
       />
 
       <div class="filter-group">
+        <!-- Compare toggle -->
+        <button
+          class="compare-toggle"
+          :class="{ active: selectingForCompare }"
+          @click="toggleSelectMode"
+          title="Select sessions to compare"
+        >
+          <i class="i-carbon-compare" /> Compare
+        </button>
+
         <!-- Source filter dropdown -->
         <div v-if="allSources.length > 1" class="filter-dropdown">
           <button
@@ -386,6 +425,7 @@ function onKeydown(e: KeyboardEvent) {
       <table class="ledger">
         <thead>
           <tr>
+            <th v-if="selectingForCompare" class="col-select"></th>
             <th class="col-priority"></th>
             <th class="col-source">Source</th>
             <th class="col-model">Model</th>
@@ -406,11 +446,16 @@ function onKeydown(e: KeyboardEvent) {
               class="main-row"
               :class="{
                 expanded: isExpanded(s.id),
-                selected: isExpanded(s.id),
+                selected: isExpanded(s.id) || isSelectedForCompare(s.id),
                 pulse: store.recentlyUpdated.has(s.id),
               }"
-              @click="toggleExpand(s.id)"
+              @click="handleRowClick(s.id)"
             >
+              <td v-if="selectingForCompare" class="col-select">
+                <span class="compare-check" :class="{ checked: isSelectedForCompare(s.id) }">
+                  <i class="i-carbon-checkmark" />
+                </span>
+              </td>
               <td class="col-priority">
                 <div class="priority-bar" :class="getPriority(s.id).barClass"></div>
               </td>
@@ -466,7 +511,7 @@ function onKeydown(e: KeyboardEvent) {
 
             <!-- Expand row -->
             <tr class="expand-row" :class="{ open: isExpanded(s.id) }">
-              <td colspan="11">
+              <td :colspan="selectingForCompare ? 12 : 11">
                 <div class="expand-content">
                   <div class="expand-inner">
                     <!-- Loading state -->
@@ -530,6 +575,16 @@ function onKeydown(e: KeyboardEvent) {
       </table>
 
     </div>
+
+    <!-- Compare action bar -->
+    <Transition name="compare-bar">
+      <div v-if="selectingForCompare && compareCount >= 2" class="compare-bar">
+        <span class="compare-bar-text">{{ compareCount }} sessions selected</span>
+        <button class="compare-bar-btn" @click="store.enterCompare()">
+          <i class="i-carbon-compare" /> Compare
+        </button>
+      </div>
+    </Transition>
 
     <!-- Empty state -->
     <div v-if="sortedSummaries.length === 0 && (searchQuery || activeSources)" class="dashboard-empty">
@@ -1196,8 +1251,104 @@ function onKeydown(e: KeyboardEvent) {
   }
 }
 
+// ── Compare mode ──
+.compare-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s, background 0.12s;
+
+  &:hover { border-color: var(--border-mid); color: var(--text-secondary); }
+  &.active {
+    border-color: rgba(14, 165, 233, 0.4);
+    color: var(--accent-blue);
+    background: var(--accent-blue-dim);
+  }
+}
+
+.col-select { width: 32px; text-align: center !important; padding: 0 4px !important; }
+
+.compare-check {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: 1.5px solid var(--border-mid);
+  border-radius: var(--radius-sm);
+  color: transparent;
+  font-size: 10px;
+  transition: background 0.1s, border-color 0.1s, color 0.1s;
+  margin: 0 auto;
+
+  &.checked {
+    background: var(--accent-blue);
+    border-color: var(--accent-blue);
+    color: #fff;
+  }
+}
+
+.compare-bar {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 20px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-bright);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  z-index: 100;
+}
+
+.compare-bar-text {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.compare-bar-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 14px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--accent-blue);
+  color: #fff;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.1s;
+
+  &:hover { opacity: 0.9; }
+}
+
+.compare-bar-enter-active,
+.compare-bar-leave-active {
+  transition: opacity 0.2s, transform 0.2s;
+}
+
+.compare-bar-enter-from,
+.compare-bar-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(10px);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .expand-content { transition: none; }
   .inspect-btn { transition: none; }
+  .compare-bar-enter-active,
+  .compare-bar-leave-active { transition: none; }
 }
 </style>

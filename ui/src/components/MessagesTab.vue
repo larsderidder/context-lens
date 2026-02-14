@@ -106,17 +106,17 @@ const chronoTurnBoundaries = computed(() => {
 
 // Global turn number of the selected entry (1-based), derived from the session's
 // full entry list so that post-compaction turns don't reset to "Turn 1".
-// In "all" mode, every entry (including subagent) counts as a turn.
+// Always counts only main entries so turn labels stay consistent with the
+// turn scrubber (which only navigates main turns).
 const globalTurnNumber = computed(() => {
   const s = session.value
   const e = entry.value
   if (!s || !e) return 1
   // entries are newest-first; reverse for chronological order
   const classified = classifyEntries([...s.entries].reverse())
-  const showAll = store.messagesMode === 'all'
   let idx = 0
   for (const item of classified) {
-    if (showAll || item.isMain) idx++
+    if (item.isMain) idx++
     if (item.entry.id === e.id) return idx
   }
   return 1
@@ -716,10 +716,7 @@ watch(
               <button :class="{ on: viewMode === 'chrono' }" @click="viewMode = 'chrono'">Chronological</button>
               <button :class="{ on: viewMode === 'category' }" @click="viewMode = 'category'">By Category</button>
             </div>
-            <div v-if="hasSubAgentEntries && viewMode === 'chrono'" class="message-view-toggle agent-toggle">
-              <button :class="{ on: store.messagesMode === 'main' }" @click="store.messagesMode = 'main'">Main</button>
-              <button :class="{ on: store.messagesMode === 'all' }" @click="store.messagesMode = 'all'">All</button>
-            </div>
+
           </div>
 
           <template v-if="viewMode === 'category'">

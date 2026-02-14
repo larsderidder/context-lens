@@ -186,6 +186,17 @@ function onSessionIdKeydown(e: KeyboardEvent) {
       </span>
     </template>
 
+    <template v-if="store.compareMode">
+      <span class="toolbar-sep"></span>
+      <span class="compare-label">
+        <i class="i-carbon-compare" />
+        Comparing {{ store.compareSessionIds.size }} sessions
+      </span>
+      <button class="compare-exit-btn" @click="store.exitCompare()">
+        <i class="i-carbon-close" /> Exit
+      </button>
+    </template>
+
     <!-- ═══ Right: global controls ═══ -->
     <div class="toolbar-right">
       <span class="connection" :class="{ live: store.connected }">
@@ -537,4 +548,33 @@ function onSessionIdKeydown(e: KeyboardEvent) {
 .dropdown-leave-active { transition: opacity 0.08s, transform 0.08s; }
 .dropdown-enter-from,
 .dropdown-leave-to { opacity: 0; transform: translateY(-4px); }
+
+// ── Compare mode ──
+.compare-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--text-sm);
+  color: var(--accent-blue);
+  white-space: nowrap;
+}
+
+.compare-exit-btn {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: color 0.1s, border-color 0.1s;
+
+  &:hover {
+    color: var(--text-secondary);
+    border-color: var(--border-mid);
+  }
+}
 </style>
