@@ -1,11 +1,13 @@
 {
   "name": "context-lens",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "type": "module",
   "description": "Local HTTP proxy that intercepts LLM API calls and visualizes context windows",
-  "main": "dist/server.js",
+  "main": "dist/proxy/server.js",
   "bin": {
-    "context-lens": "./dist/cli.js"
+    "context-lens": "./dist/cli.js",
+    "context-lens-proxy": "./dist/proxy/server.js",
+    "context-lens-analysis": "./dist/analysis/server.js"
   },
   "scripts": {
     "generate:types": "json2ts schema/lhar.schema.json src/lhar-types.generated.ts --unreachableDefinitions",
@@ -13,10 +15,10 @@
     "build": "pnpm run generate:version && pnpm run generate:types && tsc",
     "clean:test": "node -e \"require('node:fs').rmSync('dist-test', { recursive: true, force: true })\"",
     "build:test": "pnpm run generate:version && pnpm run generate:types && pnpm run clean:test && tsc -p tsconfig.test.json",
-    "start": "node dist/server.js",
+    "start": "node dist/cli.js",
     "test": "pnpm run build:test && node --test --experimental-test-isolation=none 'dist-test/test/**/*.test.js'",
     "dev": "tsc --watch",
-    "postbuild": "chmod +x dist/cli.js",
+    "postbuild": "chmod +x dist/cli.js dist/proxy/server.js dist/analysis/server.js",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "prepublishOnly": "pnpm run build"
@@ -58,5 +60,10 @@
     "@types/node": "^25.2.2",
     "json-schema-to-typescript": "^15.0.4",
     "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.19.9",
+    "hono": "^4.11.9",
+    "valibot": "^1.2.0"
   }
 }

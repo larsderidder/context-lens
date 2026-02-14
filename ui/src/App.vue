@@ -1,21 +1,26 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, watch, computed } from 'vue'
 import { useSessionStore } from '@/stores/session'
+import type { InspectorTab } from '@/stores/session'
 import { useSSE } from '@/composables/useSSE'
+import { classifyEntries } from '@/utils/messages'
 import AppToolbar from '@/components/AppToolbar.vue'
 import DashboardView from '@/components/DashboardView.vue'
 import InspectorPanel from '@/components/InspectorPanel.vue'
 import SessionRail from '@/components/SessionRail.vue'
+import CompareView from '@/components/CompareView.vue'
 import EmptyState from '@/components/EmptyState.vue'
+import type { ConversationGroup, ProjectedEntry } from '@/api-types'
 
 const store = useSessionStore()
 const syncingFromHash = ref(false)
 const appReady = ref(false)
 const HASH_SESSIONS = '#sessions'
+const INSPECTOR_TABS: readonly InspectorTab[] = ['overview', 'messages', 'timeline']
 let refreshInterval: ReturnType<typeof setInterval> | null = null
 
 // Track navigation direction for slide transitions
-const lastView = ref<'dashboard' | 'inspector' | 'empty' | null>(null)
+const lastView = ref<'dashboard' | 'inspector' | 'compare' | 'empty' | null>(null)
 const viewTransitionName = computed(() => {
   const current = store.view
   const previous = lastView.value
@@ -55,18 +60,78 @@ watch(connected, (val) => {
   store.connected = val
 })
 
-function parseSessionIdFromHash(hash: string): string | null {
-  const match = hash.match(/^#session\/(.+)$/)
-  if (!match) return null
+interface ParsedHashRoute {
+  sessionId: string | null
+  tab: InspectorTab | null
+  turn: number | null
+}
+
+function parseHashRoute(hash: string): ParsedHashRoute {
+  const match = hash.match(/^#session\/([^?]+)(?:\?(.*))?$/)
+  if (!match) return { sessionId: null, tab: null, turn: null }
+
   const decoded = decodeURIComponent(match[1]).trim()
-  return decoded || null
+  const sessionId = decoded || null
+  if (!sessionId) return { sessionId: null, tab: null, turn: null }
+
+  const params = new URLSearchParams(match[2] ?? '')
+
+  const tabRaw = params.get('tab')
+  const tab = tabRaw && INSPECTOR_TABS.includes(tabRaw as InspectorTab)
+    ? (tabRaw as InspectorTab)
+    : null
+
+  const turnRaw = params.get('turn')
+  const parsedTurn = turnRaw ? Number.parseInt(turnRaw, 10) : NaN
+  const turn = Number.isFinite(parsedTurn) && parsedTurn > 0 ? parsedTurn : null
+
+  return { sessionId, tab, turn }
+}
+
+function getMainEntriesOldestFirst(session: ConversationGroup): ProjectedEntry[] {
+  return classifyEntries([...session.entries].reverse())
+    .filter((item) => item.isMain)
+    .map((item) => item.entry)
+}
+
+function selectedNonLatestTurnNumber(): number | null {
+  if (store.selectionMode !== 'pinned') return null
+  const session = store.selectedSession
+  if (!session) return null
+  const mainEntries = getMainEntriesOldestFirst(session)
+  if (mainEntries.length === 0) return null
+  const selectedId = store.selectedEntryId
+  if (selectedId == null) return null
+  const turnIndex = mainEntries.findIndex((entry) => entry.id === selectedId)
+  if (turnIndex < 0) return null
+  const turnNumber = turnIndex + 1
+  return turnNumber < mainEntries.length ? turnNumber : null
+}
+
+function parseCompareHash(hash: string): string[] | null {
+  const match = hash.match(/^#compare\/(.+)$/)
+  if (!match) return null
+  return match[1].split(',').map(s => decodeURIComponent(s.trim())).filter(Boolean)
 }
 
 async function applyHashRoute() {
   syncingFromHash.value = true
   try {
     const hash = window.location.hash || ''
-    const sessionId = parseSessionIdFromHash(hash)
+
+    // Compare route: #compare/id1,id2[,id3...]
+    const compareIds = parseCompareHash(hash)
+    if (compareIds && compareIds.length >= 2) {
+      // Validate that at least 2 of the IDs exist
+      const valid = compareIds.filter(id => store.summaries.some(s => s.id === id))
+      if (valid.length >= 2) {
+        await store.enterCompare(new Set(valid))
+        return
+      }
+      // Fall through to dashboard if not enough valid IDs
+    }
+
+    const { sessionId, tab, turn } = parseHashRoute(hash)
 
     if (sessionId) {
       const exists = store.summaries.some(s => s.id === sessionId)
@@ -75,6 +140,24 @@ async function applyHashRoute() {
         return
       }
       await store.selectSession(sessionId)
+      if (tab) {
+        store.setInspectorTab(tab)
+      }
+      if (turn != null && store.selectedSession) {
+        const mainEntries = getMainEntriesOldestFirst(store.selectedSession)
+        if (mainEntries.length > 0) {
+          const clamped = Math.min(Math.max(turn, 1), mainEntries.length)
+          if (clamped < mainEntries.length) {
+            store.pinEntry(mainEntries[clamped - 1].id)
+          } else {
+            store.followLive()
+          }
+        } else {
+          store.followLive()
+        }
+      } else {
+        store.followLive()
+      }
       store.setView('inspector')
       return
     }
@@ -87,9 +170,20 @@ async function applyHashRoute() {
 
 function syncHashFromStore() {
   if (syncingFromHash.value) return
-  const desired = store.view === 'inspector' && store.selectedSessionId
-    ? `#session/${encodeURIComponent(store.selectedSessionId)}`
-    : HASH_SESSIONS
+  let desired = HASH_SESSIONS
+  if (store.view === 'compare' && store.compareSessionIds.size >= 2) {
+    const ids = Array.from(store.compareSessionIds).map(id => encodeURIComponent(id)).join(',')
+    desired = `#compare/${ids}`
+  } else if (store.view === 'inspector' && store.selectedSessionId) {
+    const params = new URLSearchParams()
+    params.set('tab', store.inspectorTab)
+    const nonLatestTurn = selectedNonLatestTurnNumber()
+    if (nonLatestTurn != null) {
+      params.set('turn', String(nonLatestTurn))
+    }
+    const query = params.toString()
+    desired = `#session/${encodeURIComponent(store.selectedSessionId)}${query ? `?${query}` : ''}`
+  }
   if (window.location.hash !== desired) {
     window.location.hash = desired
   }
@@ -100,7 +194,16 @@ function onHashChange() {
 }
 
 watch(
-  () => [store.view, store.selectedSessionId] as const,
+  () => [
+    store.view,
+    store.selectedSessionId,
+    store.inspectorTab,
+    store.selectionMode,
+    store.selectedEntryId,
+    store.selectedSession?.entries.length,
+    store.compareMode,
+    store.compareSessionIds.size,
+  ] as const,
   () => {
     syncHashFromStore()
   },
@@ -151,8 +254,9 @@ onUnmounted(() => {
       
       <!-- Main content area with transitions -->
       <div class="main-content">
-        <Transition :name="viewTransitionName" mode="out-in">
+        <Transition :name="viewTransitionName">
           <DashboardView v-if="store.view === 'dashboard'" key="dashboard" />
+          <CompareView v-else-if="store.view === 'compare'" key="compare" />
           <div v-else-if="store.view === 'inspector'" key="inspector" class="inspector-content">
             <InspectorPanel v-if="store.selectedSession" />
             <div v-else class="loading-placeholder">
@@ -233,8 +337,7 @@ onUnmounted(() => {
 }
 
 .view-slide-forward-leave-active {
-  transition: transform 0.22s cubic-bezier(0.25, 0.46, 0.45, 0.94),
-              opacity 0.18s ease;
+  display: none;
 }
 
 .view-slide-forward-enter-from {
@@ -242,25 +345,17 @@ onUnmounted(() => {
   opacity: 0;
 }
 
-.view-slide-forward-leave-to {
-  transform: translateX(-20%);
-  opacity: 0;
-}
-
-// Back: Inspector → Dashboard (dashboard zooms/fades in, inspector slides out right)
+// Back: Inspector → Dashboard (inspector slides out right, dashboard appears instantly underneath)
 .view-slide-back-enter-active {
-  transition: transform 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94),
-              opacity 0.2s ease;
+  transition: none;
 }
 
 .view-slide-back-leave-active {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
   transition: transform 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94),
               opacity 0.18s ease;
-}
-
-.view-slide-back-enter-from {
-  transform: scale(0.96);
-  opacity: 0;
 }
 
 .view-slide-back-leave-to {

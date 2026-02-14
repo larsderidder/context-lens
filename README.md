@@ -34,6 +34,7 @@ npx context-lens ...
 context-lens claude
 context-lens codex
 context-lens gemini
+context-lens gm               # alias for gemini
 context-lens aider --model claude-sonnet-4
 context-lens pi
 context-lens -- python my_agent.py
@@ -42,6 +43,44 @@ context-lens -- python my_agent.py
 Or without installing: replace `context-lens` with `npx context-lens`.
 
 This starts the proxy (port 4040), opens the web UI (http://localhost:4041), sets the right env vars, and runs your command. Multiple tools can share one proxy; just open more terminals.
+
+## CLI options
+
+```bash
+context-lens --help
+context-lens --version
+context-lens --privacy=minimal claude
+context-lens --no-open codex
+context-lens --no-ui -- claude
+context-lens --dry-run -- gemini --model gemini-2.5-flash
+context-lens doctor
+context-lens background start --no-ui
+context-lens background status
+context-lens background stop
+```
+
+- `--help`, `--version`: show usage/version and exit
+- `--privacy <minimal|standard|full>`: controls privacy mode passed to the analysis server
+- `--no-open`: do not auto-open `http://localhost:4041` when launching a command
+- `--no-ui`: run proxy only (no analysis/web UI server) for capture-only data gathering
+- `--dry-run`: print resolved command/env plan without starting proxy/tool processes
+- `--no-update-check`: skip npm update check for this run
+
+`--no-ui` is not compatible with `codex` subscription mode (`mitmproxy` ingestion depends on `http://localhost:4041/api/ingest`).
+
+Built-in commands:
+- `doctor`: run local diagnostics (ports, mitmproxy availability, cert path, writable dirs, background state)
+- `background start [--no-ui]`: start detached proxy (and analysis/web UI unless `--no-ui`)
+- `background status`: show detached process state
+- `background stop`: stop detached process state
+
+Aliases:
+- `cc` -> `claude`
+- `cpi` -> `pi`
+- `cx` -> `codex`
+- `gm` -> `gemini`
+
+By default, the CLI does a cached (once per day) non-blocking check for new npm versions and prints an upgrade hint when a newer release is available. Disable globally with `CONTEXT_LENS_NO_UPDATE_CHECK=1`.
 
 ## Supported Providers
 
@@ -153,22 +192,25 @@ If Codex fails with certificate trust errors, install/trust the mitmproxy CA cer
 
 ## How It Works
 
-Context Lens sits between your coding tool and the LLM API, capturing requests in transit.
-
-**Reverse proxy (Claude Code, aider, OpenAI API tools)**
+Context Lens sits between your coding tool and the LLM API, capturing requests in transit. It has two parts: a **proxy** and an **analysis server**.
 
 ```
-Tool  ─HTTP─▶  Context Lens (:4040)  ─HTTPS─▶  api.anthropic.com / api.openai.com
-                      │
-                      ▼
-                 Web UI (:4041)
+Tool  ─HTTP─▶  Proxy (:4040)  ─HTTPS─▶  api.anthropic.com / api.openai.com
+                    │
+              capture files
+                    │
+            Analysis Server (:4041)  →  Web UI
 ```
 
-The CLI sets env vars like `ANTHROPIC_BASE_URL=http://localhost:4040` so the tool sends requests to the proxy instead of the real API. The proxy buffers each request body, parses the JSON to extract context structure (system prompts, tools, messages), forwards the raw bytes upstream with all original headers intact, then captures the response on the way back. The tool never knows it's being proxied.
+The **proxy** (`src/proxy/`) forwards requests to the LLM API and writes each request/response pair to disk. It has **zero external dependencies** (only Node.js built-ins), so you can read the entire proxy source and verify it does nothing unexpected with your API keys. This is an intentional architectural constraint: your API keys pass through the proxy, so it must stay small, auditable, and free of transitive supply-chain risk.
+
+The **analysis server** picks up those captures, parses request bodies, estimates tokens, groups requests into conversations, computes composition breakdowns, calculates costs, scores context health, and scans for prompt injection patterns. It serves the web UI and API. The two sides communicate only through capture files on disk, so the analysis server, CLI, and web UI are free to use whatever dependencies they need without affecting the proxy's trust boundary.
+
+The CLI sets env vars like `ANTHROPIC_BASE_URL=http://localhost:4040` so the tool sends requests to the proxy instead of the real API. The tool never knows it's being proxied.
 
 **Forward HTTPS proxy (Codex subscription mode)**
 
-Some tools can't be reverse-proxied. Codex with a ChatGPT subscription authenticates against `chatgpt.com`, which is behind Cloudflare. A reverse proxy changes the TLS fingerprint, causing Cloudflare to reject the request with a 403. For these tools, Context Lens uses mitmproxy as a forward HTTPS proxy instead:
+Codex with a ChatGPT subscription authenticates against `chatgpt.com`, which is behind Cloudflare. A reverse proxy changes the TLS fingerprint, causing Cloudflare to reject the request. For this case, Context Lens uses mitmproxy as a forward HTTPS proxy:
 
 ```
 Tool  ─HTTPS via proxy─▶  mitmproxy (:8080)  ─HTTPS─▶  chatgpt.com
@@ -176,14 +218,10 @@ Tool  ─HTTPS via proxy─▶  mitmproxy (:8080)  ─HTTPS─▶  chatgpt.com
                             mitm_addon.py
                                   │
                                   ▼
-                          Web UI /api/ingest
+                          Analysis Server /api/ingest
 ```
 
-The tool makes its own TLS connection through the proxy, preserving its native TLS fingerprint. The mitmproxy addon intercepts completed request/response pairs and posts them to Context Lens's ingest API. The tool needs `https_proxy` and `SSL_CERT_FILE` env vars set to route through mitmproxy and trust its CA certificate.
-
-**What the proxy captures**
-
-Each request is parsed to extract: model name, system prompts, tool definitions, message history (with per-message token estimates), and content block types (text, tool calls, tool results, images, thinking). The response is captured to extract usage stats and cost. Requests are grouped into conversations using session IDs (Anthropic `metadata.user_id`), response chaining (OpenAI `previous_response_id`), or a fingerprint of the system prompt + first user message.
+The tool makes its own TLS connection through the proxy, preserving its native fingerprint. The mitmproxy addon intercepts completed request/response pairs and posts them to the analysis server's ingest API. The tool needs `https_proxy` and `SSL_CERT_FILE` env vars set to route through mitmproxy and trust its CA certificate.
 
 ## Why Context Lens?
 
@@ -208,7 +246,7 @@ Context Lens is for developers who want to understand and optimize their coding 
 
 ## Data
 
-Captured requests are kept in memory (last 100) and persisted to `data/state.jsonl` across restarts. Each session is also logged as a separate `.lhar` file in `data/`. Use the Reset button in the UI to clear everything.
+Captured requests are kept in memory (last 100 sessions) and persisted to `~/.context-lens/data/state.jsonl` across restarts. Each session is also logged as a separate `.lhar` file in `~/.context-lens/data/`. Use the Reset button in the UI to clear everything.
 
 ## License
 

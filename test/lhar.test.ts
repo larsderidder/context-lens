@@ -9,6 +9,7 @@ import {
   analyzeComposition,
   buildLharRecord,
   buildSessionLine,
+  extractResponseId,
   parseResponseUsage,
   redactHeaders,
   toLharJson,
@@ -545,6 +546,66 @@ describe("parseResponseUsage", () => {
     const usage = parseResponseUsage({ raw: "not json" });
     assert.equal(usage.inputTokens, 0);
     assert.equal(usage.outputTokens, 0);
+  });
+});
+
+// --- extractResponseId ---
+
+describe("extractResponseId", () => {
+  it("extracts id from non-streaming response", () => {
+    const resp = { id: "resp_abc123", model: "gpt-4o", usage: {} };
+    assert.equal(extractResponseId(resp), "resp_abc123");
+  });
+
+  it("extracts response_id from non-streaming response", () => {
+    const resp = { response_id: "resp_def456", model: "gpt-4o" };
+    assert.equal(extractResponseId(resp), "resp_def456");
+  });
+
+  it("extracts id from streaming response.completed event", () => {
+    const chunks = [
+      "event: response.created",
+      'data: {"type":"response.created","response":{"id":"resp_stream1","status":"in_progress"}}',
+      "",
+      "event: response.completed",
+      'data: {"type":"response.completed","response":{"id":"resp_stream1","status":"completed"}}',
+      "",
+      "data: [DONE]",
+    ].join("\n");
+    assert.equal(
+      extractResponseId({ streaming: true, chunks }),
+      "resp_stream1",
+    );
+  });
+
+  it("extracts id from streaming response.created event", () => {
+    const chunks = [
+      "event: response.created",
+      'data: {"type":"response.created","response":{"id":"resp_created1","status":"in_progress"}}',
+      "",
+    ].join("\n");
+    assert.equal(
+      extractResponseId({ streaming: true, chunks }),
+      "resp_created1",
+    );
+  });
+
+  it("returns null for null response", () => {
+    assert.equal(extractResponseId(null), null);
+  });
+
+  it("returns null for response without id", () => {
+    assert.equal(extractResponseId({ model: "gpt-4o", usage: {} }), null);
+  });
+
+  it("returns null for streaming response without response events", () => {
+    const chunks = [
+      "event: content_block_delta",
+      'data: {"type":"content_block_delta","delta":{"text":"Hello"}}',
+      "",
+      "data: [DONE]",
+    ].join("\n");
+    assert.equal(extractResponseId({ streaming: true, chunks }), null);
   });
 });
 

@@ -6,12 +6,14 @@ import { getExportUrl } from '@/api'
 
 const store = useSessionStore()
 const showExportMenu = ref(false)
+const showResetMenu = ref(false)
 const sessionIdCopied = ref(false)
 
 const isInspector = computed(() => store.view === 'inspector' && !!store.selectedSession)
 
 const session = computed(() => store.selectedSession)
 const hasRequests = computed(() => store.totalRequests > 0)
+const canRemoveSession = computed(() => isInspector.value && !!store.selectedSessionId)
 
 const summary = computed(() => {
   const id = store.selectedSessionId
@@ -39,6 +41,16 @@ function safeFilenamePart(input: string): string {
     .slice(0, 80) || 'unknown'
 }
 
+function buildExportFilename(
+  format: 'lhar' | 'lhar.json',
+  conversationId: string | undefined,
+): string {
+  const ext = format === 'lhar' ? 'lhar' : 'lhar.json'
+  const sessionPart = `session-${safeFilenamePart(conversationId || 'all')}`
+  const privacyPart = 'privacy-standard'
+  return `context-lens-export-${sessionPart}-${privacyPart}.${ext}`
+}
+
 async function downloadWithFilename(url: string, filename: string) {
   const res = await fetch(url)
   if (!res.ok) throw new Error(`Download failed: ${res.status}`)
@@ -60,24 +72,39 @@ async function downloadWithFilename(url: string, filename: string) {
 async function handleExport(format: 'lhar' | 'lhar.json', scope: 'all' | 'session') {
   const convoId = scope === 'session' ? store.selectedSessionId ?? undefined : undefined
   const url = getExportUrl(format, convoId)
-  if (scope === 'session' && convoId) {
-    const ext = format === 'lhar' ? 'lhar' : 'lhar.json'
-    const safeId = safeFilenamePart(convoId)
-    try {
-      await downloadWithFilename(url, `context-lens-session-${safeId}.${ext}`)
-    } catch {
-      window.open(url, '_blank')
-    }
-  } else {
+  const filename = buildExportFilename(format, convoId)
+  try {
+    await downloadWithFilename(url, filename)
+  } catch {
     window.open(url, '_blank')
   }
   showExportMenu.value = false
+}
+
+function toggleExportMenu() {
+  showExportMenu.value = !showExportMenu.value
+  if (showExportMenu.value) showResetMenu.value = false
+}
+
+function toggleResetMenu() {
+  showResetMenu.value = !showResetMenu.value
+  if (showResetMenu.value) showExportMenu.value = false
 }
 
 function handleReset() {
   if (confirm('Clear all captured data?')) {
     store.reset()
   }
+  showResetMenu.value = false
+}
+
+function handleRemoveSession() {
+  const id = store.selectedSessionId
+  if (!id || !canRemoveSession.value) return
+  if (confirm('Remove this session?')) {
+    store.deleteSession(id)
+  }
+  showResetMenu.value = false
 }
 
 function goBack() {
@@ -115,14 +142,14 @@ function onSessionIdKeydown(e: KeyboardEvent) {
 <template>
   <header class="toolbar">
     <!-- ═══ Left: brand or back + session context ═══ -->
-    <button class="toolbar-brand toolbar-brand-btn" @click="goBack">
+    <a class="toolbar-brand toolbar-brand-btn" href="#sessions" @click.prevent="goBack">
       <svg class="logo-mark" width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
         <circle cx="9" cy="9" r="7.5" fill="none" stroke="var(--accent-blue)" stroke-width="1" opacity="0.35" />
         <circle cx="9" cy="9" r="4" fill="none" stroke="var(--accent-blue)" stroke-width="1" opacity="0.6" />
         <circle cx="9" cy="9" r="1.5" fill="var(--accent-blue)" />
       </svg>
       <span class="brand-text">Context Lens</span>
-    </button>
+    </a>
 
     <template v-if="isInspector && session">
       <span class="toolbar-sep"></span>
@@ -159,6 +186,17 @@ function onSessionIdKeydown(e: KeyboardEvent) {
       </span>
     </template>
 
+    <template v-if="store.compareMode">
+      <span class="toolbar-sep"></span>
+      <span class="compare-label">
+        <i class="i-carbon-compare" />
+        Comparing {{ store.compareSessionIds.size }} sessions
+      </span>
+      <button class="compare-exit-btn" @click="store.exitCompare()">
+        <i class="i-carbon-close" /> Exit
+      </button>
+    </template>
+
     <!-- ═══ Right: global controls ═══ -->
     <div class="toolbar-right">
       <span class="connection" :class="{ live: store.connected }">
@@ -182,7 +220,7 @@ function onSessionIdKeydown(e: KeyboardEvent) {
       </template>
 
       <div v-if="hasRequests" class="toolbar-dropdown">
-        <button class="toolbar-control" @click="showExportMenu = !showExportMenu">
+        <button class="toolbar-control" @click="toggleExportMenu">
           <i class="i-carbon-download" /> Export
         </button>
         <Transition name="dropdown">
@@ -198,13 +236,26 @@ function onSessionIdKeydown(e: KeyboardEvent) {
         </Transition>
       </div>
 
-      <button
-        v-if="hasRequests"
-        class="toolbar-control toolbar-control--danger"
-        @click="handleReset"
-      >
-        <i class="i-carbon-trash-can" /> Reset
-      </button>
+      <div v-if="hasRequests" class="toolbar-dropdown">
+        <button class="toolbar-control" @click="toggleResetMenu">
+          <i class="i-carbon-overflow-menu-horizontal" /> Menu
+        </button>
+        <Transition name="dropdown">
+          <div v-if="showResetMenu" class="dropdown-menu" @mouseleave="showResetMenu = false">
+            <button class="dropdown-item dropdown-item--danger" @click="handleReset">
+              <i class="i-carbon-trash-can" /> Reset all
+            </button>
+            <button
+              class="dropdown-item dropdown-item--danger"
+              :class="{ 'dropdown-item--disabled': !canRemoveSession }"
+              :disabled="!canRemoveSession"
+              @click="handleRemoveSession"
+            >
+              <i class="i-carbon-subtract-alt" /> Remove this session
+            </button>
+          </div>
+        </Transition>
+      </div>
     </div>
   </header>
 </template>
@@ -236,6 +287,7 @@ function onSessionIdKeydown(e: KeyboardEvent) {
   background: none;
   padding: 0;
   cursor: pointer;
+  text-decoration: none;
 
   &:hover .brand-text { color: var(--accent-blue); }
   &:focus-visible { @include focus-ring; }
@@ -467,10 +519,62 @@ function onSessionIdKeydown(e: KeyboardEvent) {
     background: var(--bg-hover);
     color: var(--text-primary);
   }
+
+  &:disabled {
+    cursor: default;
+  }
+}
+
+.dropdown-item--danger {
+  &:hover {
+    color: var(--accent-red);
+  }
+}
+
+.dropdown-item--disabled {
+  color: var(--text-ghost);
+
+  i {
+    color: var(--text-ghost);
+  }
+
+  &:hover {
+    background: none;
+    color: var(--text-ghost);
+  }
 }
 
 .dropdown-enter-active { transition: opacity 0.12s, transform 0.12s; }
 .dropdown-leave-active { transition: opacity 0.08s, transform 0.08s; }
 .dropdown-enter-from,
 .dropdown-leave-to { opacity: 0; transform: translateY(-4px); }
+
+// ── Compare mode ──
+.compare-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--text-sm);
+  color: var(--accent-blue);
+  white-space: nowrap;
+}
+
+.compare-exit-btn {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: color 0.1s, border-color 0.1s;
+
+  &:hover {
+    color: var(--text-secondary);
+    border-color: var(--border-mid);
+  }
+}
 </style>

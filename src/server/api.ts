@@ -1,9 +1,21 @@
-import type http from "node:http";
-import url from "node:url";
+import { Hono } from "hono";
+import { streamSSE } from "hono/streaming";
+import * as v from "valibot";
 
+import { ingestCapture } from "../analysis/ingest.js";
 import { parseContextInfo } from "../core.js";
 import { toLharJson, toLharJsonl } from "../lhar.js";
-import type { AgentGroup, CapturedEntry, ConversationGroup } from "../types.js";
+import {
+  IngestCapturePayloadSchema,
+  IngestLegacyPayloadSchema,
+  IngestPayloadSchema,
+} from "../schemas.js";
+import type {
+  AgentGroup,
+  CapturedEntry,
+  ConversationGroup,
+  PrivacyLevel,
+} from "../types.js";
 import { projectEntry } from "./projection.js";
 import type { Store } from "./store.js";
 
@@ -13,58 +25,35 @@ function projectEntryForApi(e: CapturedEntry) {
 
 function getExportEntries(
   store: Store,
-  parsedUrl: url.UrlWithParsedQuery,
+  conversation?: string,
 ): CapturedEntry[] {
-  const convoFilter = parsedUrl.query.conversation as string | undefined;
-  if (!convoFilter) return store.getCapturedRequests();
+  if (!conversation) return store.getCapturedRequests();
   return store
     .getCapturedRequests()
-    .filter((e) => e.conversationId === convoFilter);
+    .filter((e) => e.conversationId === conversation);
 }
 
-function handleIngest(
-  store: Store,
-  req: http.IncomingMessage,
-  res: http.ServerResponse,
-): void {
-  if (req.method !== "POST") {
-    res.writeHead(405);
-    res.end();
-    return;
-  }
-  const bodyChunks: Buffer[] = [];
-  req.on("data", (chunk: Buffer) => {
-    bodyChunks.push(chunk);
-  });
-  req.on("end", () => {
-    try {
-      const data = JSON.parse(Buffer.concat(bodyChunks).toString("utf8"));
-      const provider = data.provider || "unknown";
-      const apiFormat = data.apiFormat || "unknown";
-      const source = data.source || "unknown";
-      const contextInfo = parseContextInfo(
-        provider,
-        data.body || {},
-        apiFormat,
-      );
-      store.storeRequest(
-        contextInfo,
-        data.response || {},
-        source,
-        data.body || {},
-      );
-      console.log(
-        `  📥 Ingested: [${provider}] ${contextInfo.model} from ${source}`,
-      );
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true }));
-    } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : String(e);
-      console.error("Ingest error:", message);
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: message }));
-    }
-  });
+function sanitizeFilenamePart(
+  input: string | null | undefined,
+  fallback: string,
+): string {
+  const sanitized = String(input || "")
+    .trim()
+    .replace(/[^a-zA-Z0-9._-]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 80);
+  return sanitized || fallback;
+}
+
+function buildExportFilename(
+  format: "lhar" | "lhar.json",
+  conversation: string | null | undefined,
+  privacy: PrivacyLevel,
+): string {
+  const sessionPart = `session-${sanitizeFilenamePart(conversation, "all")}`;
+  const privacyPart = `privacy-${sanitizeFilenamePart(privacy, "standard")}`;
+  const ext = format === "lhar" ? "lhar" : "lhar.json";
+  return `context-lens-export-${sessionPart}-${privacyPart}.${ext}`;
 }
 
 /**
@@ -95,15 +84,20 @@ function buildFullConversation(
   entries: CapturedEntry[],
   conversations: Map<string, any>,
 ): ConversationGroup {
+  // Sort newest-first (by timestamp descending) for consistent API output.
+  // The UI and scrubber expect entries[0] to be the latest turn.
+  const sorted = [...entries].sort(
+    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+  );
   const meta = conversations.get(id) || {
     id,
     label: "Unknown",
     source: "unknown",
     workingDirectory: null,
-    firstSeen: entries[entries.length - 1].timestamp,
+    firstSeen: sorted[sorted.length - 1].timestamp,
   };
   const agentMap = new Map<string, CapturedEntry[]>();
-  for (const e of entries) {
+  for (const e of sorted) {
     const ak = e.agentKey || "_default";
     if (!agentMap.has(ak)) agentMap.set(ak, []);
     agentMap.get(ak)?.push(e);
@@ -125,266 +119,236 @@ function buildFullConversation(
   return {
     ...meta,
     agents,
-    entries: entries.map(projectEntryForApi),
+    entries: sorted.map(projectEntryForApi),
   };
-}
-
-function handleRequests(
-  store: Store,
-  _req: http.IncomingMessage,
-  res: http.ServerResponse,
-  parsedUrl: url.UrlWithParsedQuery,
-): void {
-  const isSummary = parsedUrl.query.summary === "true";
-  const { grouped, ungrouped } = buildConversationGroups(store);
-  const conversations = store.getConversations();
-
-  if (isSummary) {
-    // Lightweight: conversation metadata + summary stats, no entries
-    const summaries = [];
-    for (const [id, entries] of grouped) {
-      const meta = conversations.get(id) || {
-        id,
-        label: "Unknown",
-        source: "unknown",
-        workingDirectory: null,
-        firstSeen: entries[entries.length - 1].timestamp,
-      };
-      const latest = entries[0];
-      const totalCost = entries.reduce((sum, e) => sum + (e.costUsd ?? 0), 0);
-      // Token history for sparkline: main agent only, chronological (oldest → newest).
-      // Main agent = most frequent agentKey in the conversation.
-      const keyCounts = new Map<string, number>();
-      for (const e of entries) {
-        const k = e.agentKey || "_default";
-        keyCounts.set(k, (keyCounts.get(k) || 0) + 1);
-      }
-      let mainKey = "_default";
-      let maxCount = 0;
-      for (const [k, count] of keyCounts) {
-        if (count > maxCount) {
-          mainKey = k;
-          maxCount = count;
-        }
-      }
-      const tokenHistory: number[] = [];
-      for (let i = entries.length - 1; i >= 0; i--) {
-        const k = entries[i].agentKey || "_default";
-        if (k === mainKey) {
-          tokenHistory.push(entries[i].contextInfo.totalTokens);
-        }
-      }
-
-      summaries.push({
-        ...meta,
-        entryCount: entries.length,
-        latestTimestamp: latest.timestamp,
-        latestModel: latest.contextInfo.model,
-        latestTotalTokens: latest.contextInfo.totalTokens,
-        contextLimit: latest.contextLimit,
-        totalCost,
-        healthScore: latest.healthScore,
-        tokenHistory,
-      });
-    }
-    summaries.sort(
-      (a, b) =>
-        new Date(b.latestTimestamp).getTime() -
-        new Date(a.latestTimestamp).getTime(),
-    );
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(
-      JSON.stringify({
-        revision: store.getRevision(),
-        conversations: summaries,
-        ungroupedCount: ungrouped.length,
-      }),
-    );
-    return;
-  }
-
-  // Full response (backwards compatible)
-  const convos: ConversationGroup[] = [];
-  for (const [id, entries] of grouped) {
-    convos.push(buildFullConversation(id, entries, conversations));
-  }
-  convos.sort(
-    (a, b) =>
-      new Date(b.entries[0].timestamp).getTime() -
-      new Date(a.entries[0].timestamp).getTime(),
-  );
-  res.writeHead(200, { "Content-Type": "application/json" });
-  res.end(
-    JSON.stringify({
-      revision: store.getRevision(),
-      conversations: convos,
-      ungrouped: ungrouped.map(projectEntryForApi),
-    }),
-  );
-}
-
-function handleConversationDetail(
-  store: Store,
-  convoId: string,
-  res: http.ServerResponse,
-): void {
-  const { grouped } = buildConversationGroups(store);
-  const conversations = store.getConversations();
-  const entries = grouped.get(convoId);
-
-  if (!entries || entries.length === 0) {
-    res.writeHead(404, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "Conversation not found" }));
-    return;
-  }
-
-  const convo = buildFullConversation(convoId, entries, conversations);
-  res.writeHead(200, { "Content-Type": "application/json" });
-  res.end(JSON.stringify(convo));
-}
-
-function handleEvents(
-  store: Store,
-  _req: http.IncomingMessage,
-  res: http.ServerResponse,
-): void {
-  res.writeHead(200, {
-    "Content-Type": "text/event-stream",
-    "Cache-Control": "no-cache",
-    Connection: "keep-alive",
-    "Access-Control-Allow-Origin": "*",
-  });
-
-  // Send initial revision so client knows current state
-  const initial = JSON.stringify({
-    revision: store.getRevision(),
-    type: "connected",
-  });
-  res.write(`data: ${initial}\n\n`);
-
-  const listener = (event: {
-    type: string;
-    revision: number;
-    conversationId?: string | null;
-  }) => {
-    const data = JSON.stringify(event);
-    res.write(`data: ${data}\n\n`);
-  };
-
-  store.on("change", listener);
-
-  // Clean up when client disconnects
-  _req.on("close", () => {
-    store.off("change", listener);
-  });
-}
-
-function handleExportLhar(
-  store: Store,
-  parsedUrl: url.UrlWithParsedQuery,
-  _req: http.IncomingMessage,
-  res: http.ServerResponse,
-): void {
-  const entries = getExportEntries(store, parsedUrl);
-  const jsonl = toLharJsonl(entries, store.getConversations());
-  res.writeHead(200, {
-    "Content-Type": "application/x-ndjson",
-    "Content-Disposition": 'attachment; filename="context-lens-export.lhar"',
-  });
-  res.end(jsonl);
-}
-
-function handleExportLharJson(
-  store: Store,
-  parsedUrl: url.UrlWithParsedQuery,
-  _req: http.IncomingMessage,
-  res: http.ServerResponse,
-): void {
-  const entries = getExportEntries(store, parsedUrl);
-  const wrapped = toLharJson(entries, store.getConversations());
-  res.writeHead(200, {
-    "Content-Type": "application/json",
-    "Content-Disposition":
-      'attachment; filename="context-lens-export.lhar.json"',
-  });
-  res.end(JSON.stringify(wrapped, null, 2));
 }
 
 /**
- * Create an API-only request handler. Returns true if the request was handled,
- * false if it should fall through to static file serving.
+ * Create the Hono app with all API routes.
  */
-export function createApiHandler(
-  store: Store,
-): (req: http.IncomingMessage, res: http.ServerResponse) => boolean {
-  return function handleApi(
-    req: http.IncomingMessage,
-    res: http.ServerResponse,
-  ): boolean {
-    const parsedUrl = url.parse(req.url!, true);
-    const pathname = parsedUrl.pathname;
+export function createApiApp(store: Store): Hono {
+  const app = new Hono();
 
-    if (pathname === "/api/ingest" && req.method === "POST") {
-      handleIngest(store, req, res);
-      return true;
+  // --- Ingest ---
+
+  app.post("/api/ingest", async (c) => {
+    const raw = await c.req.json();
+
+    // Try capture format first (from mitmproxy addon), then legacy format
+    const captureResult = v.safeParse(IngestCapturePayloadSchema, raw);
+    if (captureResult.success) {
+      const data = captureResult.output;
+      ingestCapture(store, {
+        ...data,
+        source: data.source ?? "unknown",
+        requestBody: data.requestBody ?? null,
+      });
+      console.log(
+        `  📥 Ingested (capture): [${data.provider}] from ${data.source ?? "unknown"}`,
+      );
+      return c.json({ ok: true });
     }
 
-    // Entry detail: full uncompacted contextInfo for a specific entry
-    const entryDetailMatch = pathname?.match(/^\/api\/entries\/(\d+)\/detail$/);
-    if (entryDetailMatch && req.method === "GET") {
-      const entryId = parseInt(entryDetailMatch[1], 10);
-      const contextInfo = store.getEntryDetail(entryId);
-      if (contextInfo) {
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ contextInfo }));
-      } else {
-        res.writeHead(404, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Detail not found for this entry" }));
+    const legacyResult = v.safeParse(IngestLegacyPayloadSchema, raw);
+    if (legacyResult.success) {
+      const data = legacyResult.output;
+      const contextInfo = parseContextInfo(
+        data.provider,
+        data.body,
+        data.apiFormat,
+      );
+      store.storeRequest(contextInfo, data.response, data.source, data.body);
+      console.log(
+        `  📥 Ingested: [${data.provider}] ${contextInfo.model} from ${data.source}`,
+      );
+      return c.json({ ok: true });
+    }
+
+    const message = v.summarize(legacyResult.issues);
+    console.error("Ingest validation error:", message);
+    return c.json({ error: message }, 400);
+  });
+
+  // --- Entry detail ---
+
+  app.get("/api/entries/:id/detail", (c) => {
+    const entryId = parseInt(c.req.param("id"), 10);
+    const contextInfo = store.getEntryDetail(entryId);
+    if (contextInfo) {
+      return c.json({ contextInfo });
+    }
+    return c.json({ error: "Detail not found for this entry" }, 404);
+  });
+
+  // --- Conversations ---
+
+  app.delete("/api/conversations/:id", (c) => {
+    const convoId = decodeURIComponent(c.req.param("id"));
+    store.deleteConversation(convoId);
+    return c.json({ ok: true });
+  });
+
+  app.get("/api/conversations/:id", (c) => {
+    const convoId = decodeURIComponent(c.req.param("id"));
+    const { grouped } = buildConversationGroups(store);
+    const conversations = store.getConversations();
+    const entries = grouped.get(convoId);
+
+    if (!entries || entries.length === 0) {
+      return c.json({ error: "Conversation not found" }, 404);
+    }
+
+    return c.json(buildFullConversation(convoId, entries, conversations));
+  });
+
+  // --- Reset ---
+
+  app.post("/api/reset", (c) => {
+    store.resetAll();
+    return c.json({ ok: true });
+  });
+
+  // --- Requests (summary + full) ---
+
+  app.get("/api/requests", (c) => {
+    const isSummary = c.req.query("summary") === "true";
+    const { grouped, ungrouped } = buildConversationGroups(store);
+    const conversations = store.getConversations();
+
+    if (isSummary) {
+      const summaries = [];
+      for (const [id, rawEntries] of grouped) {
+        // Sort newest-first for consistent access patterns
+        const entries = [...rawEntries].sort(
+          (a, b) =>
+            new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+        );
+        const meta = conversations.get(id) || {
+          id,
+          label: "Unknown",
+          source: "unknown",
+          workingDirectory: null,
+          firstSeen: entries[entries.length - 1].timestamp,
+        };
+        const latest = entries[0];
+        const totalCost = entries.reduce((sum, e) => sum + (e.costUsd ?? 0), 0);
+
+        const keyCounts = new Map<string, number>();
+        for (const e of entries) {
+          const k = e.agentKey || "_default";
+          keyCounts.set(k, (keyCounts.get(k) || 0) + 1);
+        }
+        let mainKey = "_default";
+        let maxCount = 0;
+        for (const [k, count] of keyCounts) {
+          if (count > maxCount) {
+            mainKey = k;
+            maxCount = count;
+          }
+        }
+        const tokenHistory: number[] = [];
+        for (let i = entries.length - 1; i >= 0; i--) {
+          const k = entries[i].agentKey || "_default";
+          if (k === mainKey) {
+            tokenHistory.push(entries[i].contextInfo.totalTokens);
+          }
+        }
+
+        summaries.push({
+          ...meta,
+          entryCount: entries.length,
+          latestTimestamp: latest.timestamp,
+          latestModel: latest.contextInfo.model,
+          latestTotalTokens: latest.contextInfo.totalTokens,
+          contextLimit: latest.contextLimit,
+          totalCost,
+          healthScore: latest.healthScore,
+          tokenHistory,
+        });
       }
-      return true;
+      summaries.sort(
+        (a, b) =>
+          new Date(b.latestTimestamp).getTime() -
+          new Date(a.latestTimestamp).getTime(),
+      );
+      return c.json({
+        revision: store.getRevision(),
+        conversations: summaries,
+        ungroupedCount: ungrouped.length,
+      });
     }
 
-    const convoMatch = pathname?.match(/^\/api\/conversations\/(.+)$/);
-    if (convoMatch && req.method === "DELETE") {
-      const convoId = decodeURIComponent(convoMatch[1]);
-      store.deleteConversation(convoId);
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true }));
-      return true;
+    // Full response
+    const convos: ConversationGroup[] = [];
+    for (const [id, entries] of grouped) {
+      convos.push(buildFullConversation(id, entries, conversations));
     }
-    if (convoMatch && req.method === "GET") {
-      const convoId = decodeURIComponent(convoMatch[1]);
-      handleConversationDetail(store, convoId, res);
-      return true;
-    }
+    convos.sort(
+      (a, b) =>
+        new Date(b.entries[0].timestamp).getTime() -
+        new Date(a.entries[0].timestamp).getTime(),
+    );
+    return c.json({
+      revision: store.getRevision(),
+      conversations: convos,
+      ungrouped: ungrouped.map(projectEntryForApi),
+    });
+  });
 
-    if (pathname === "/api/reset" && req.method === "POST") {
-      store.resetAll();
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true }));
-      return true;
-    }
+  // --- SSE events ---
 
-    if (pathname === "/api/requests") {
-      handleRequests(store, req, res, parsedUrl);
-      return true;
-    }
+  app.get("/api/events", (c) => {
+    return streamSSE(c, async (stream) => {
+      const initial = JSON.stringify({
+        revision: store.getRevision(),
+        type: "connected",
+      });
+      await stream.writeSSE({ data: initial });
 
-    if (pathname === "/api/events") {
-      handleEvents(store, req, res);
-      return true;
-    }
+      const listener = (event: {
+        type: string;
+        revision: number;
+        conversationId?: string | null;
+      }) => {
+        const data = JSON.stringify(event);
+        stream.writeSSE({ data }).catch(() => {
+          // Client disconnected
+        });
+      };
 
-    if (pathname === "/api/export/lhar") {
-      handleExportLhar(store, parsedUrl, req, res);
-      return true;
-    }
+      store.on("change", listener);
+      stream.onAbort(() => {
+        store.off("change", listener);
+      });
 
-    if (pathname === "/api/export/lhar.json") {
-      handleExportLharJson(store, parsedUrl, req, res);
-      return true;
-    }
+      // Keep the stream open until the client disconnects
+      await new Promise(() => {});
+    });
+  });
 
-    return false;
-  };
+  // --- Export ---
+
+  app.get("/api/export/lhar", (c) => {
+    const conversation = c.req.query("conversation");
+    const privacy = (c.req.query("privacy") || "standard") as PrivacyLevel;
+    const entries = getExportEntries(store, conversation);
+    const jsonl = toLharJsonl(entries, store.getConversations(), privacy);
+    const filename = buildExportFilename("lhar", conversation, privacy);
+    c.header("Content-Disposition", `attachment; filename="${filename}"`);
+    return c.text(jsonl, 200, {
+      "Content-Type": "application/x-ndjson",
+    });
+  });
+
+  app.get("/api/export/lhar.json", (c) => {
+    const conversation = c.req.query("conversation");
+    const privacy = (c.req.query("privacy") || "standard") as PrivacyLevel;
+    const entries = getExportEntries(store, conversation);
+    const wrapped = toLharJson(entries, store.getConversations(), privacy);
+    const filename = buildExportFilename("lhar.json", conversation, privacy);
+    c.header("Content-Disposition", `attachment; filename="${filename}"`);
+    return c.json(wrapped);
+  });
+
+  return app;
 }

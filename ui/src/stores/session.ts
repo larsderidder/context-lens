@@ -16,8 +16,9 @@ import {
   deleteConversation as apiDeleteConversation,
   resetAll as apiResetAll,
 } from '@/api'
+import { classifyEntries } from '@/utils/messages'
 
-export type ViewMode = 'inspector' | 'dashboard'
+export type ViewMode = 'inspector' | 'dashboard' | 'compare'
 export type InspectorTab = 'overview' | 'messages' | 'timeline'
 export type DensityMode = 'comfortable' | 'compact'
 export type SelectionMode = 'live' | 'pinned'
@@ -49,9 +50,17 @@ export const useSessionStore = defineStore('session', () => {
   const messageFocusTool = ref<string | null>(null)
   const messageFocusIndex = ref<number | null>(null)
   const messageFocusOpenDetail = ref(false)
+  const messageFocusFile = ref<string | null>(null)
+
+  // Compare mode state
+  const compareSessionIds = ref<Set<string>>(new Set())
+  const compareMode = ref(false)
+
+  // Messages tab persistent state
+  const messagesMode = ref<'all' | 'main'>('main')
 
   // Timeline tab persistent state
-  const timelineMode = ref<'all' | 'main'>('all')
+  const timelineMode = ref<'all' | 'main'>('main')
   const timelineStackMode = ref<'absolute' | 'normalized'>('absolute')
   const timelineHiddenLegendKeys = ref(new Set<string>())
   const timelineShowLimitOverlay = ref(true)
@@ -150,7 +159,11 @@ export const useSessionStore = defineStore('session', () => {
     const session = selectedSession.value
     if (!session || session.entries.length === 0) return null
     if (selectionMode.value === 'live') {
-      return session.entries[0]
+      // In live mode, follow the latest *main* entry so subagent turns
+      // don't hijack the view. Entries are newest-first.
+      const classified = classifyEntries([...session.entries].reverse())
+      const latestMain = [...classified].reverse().find((item) => item.isMain)
+      return latestMain?.entry ?? session.entries[0]
     }
     const pinned = session.entries.find((entry) => entry.id === selectedEntryId.value)
     return pinned ?? session.entries[0]
@@ -292,6 +305,7 @@ export const useSessionStore = defineStore('session', () => {
     messageFocusCategory.value = category
     messageFocusTool.value = null
     messageFocusIndex.value = null
+    messageFocusFile.value = null
     messageFocusOpenDetail.value = openDetail
     messageFocusToken.value += 1
   }
@@ -300,6 +314,7 @@ export const useSessionStore = defineStore('session', () => {
     messageFocusCategory.value = category
     messageFocusTool.value = toolName
     messageFocusIndex.value = null
+    messageFocusFile.value = null
     messageFocusToken.value += 1
   }
 
@@ -307,7 +322,49 @@ export const useSessionStore = defineStore('session', () => {
     messageFocusCategory.value = null
     messageFocusTool.value = null
     messageFocusIndex.value = index
+    messageFocusFile.value = null
     messageFocusToken.value += 1
+  }
+
+  function focusMessageFile(filePath: string) {
+    messageFocusCategory.value = 'tool_results'
+    messageFocusTool.value = null
+    messageFocusIndex.value = null
+    messageFocusFile.value = filePath
+    messageFocusToken.value += 1
+  }
+
+  function toggleCompareSession(id: string) {
+    const next = new Set(compareSessionIds.value)
+    if (next.has(id)) {
+      next.delete(id)
+    } else {
+      next.add(id)
+    }
+    compareSessionIds.value = next
+  }
+
+  async function enterCompare(ids?: Set<string>) {
+    const target = ids ?? compareSessionIds.value
+    if (target.size < 2) return
+    compareSessionIds.value = new Set(target)
+    compareMode.value = true
+    view.value = 'compare'
+
+    // Load entries for all selected sessions
+    const loadPromises: Promise<void>[] = []
+    for (const id of target) {
+      if (!loadedConversations.value.has(id)) {
+        loadPromises.push(loadConversationEntries(id))
+      }
+    }
+    await Promise.all(loadPromises)
+  }
+
+  function exitCompare(targetView: 'dashboard' | 'inspector' = 'dashboard') {
+    compareMode.value = false
+    compareSessionIds.value = new Set()
+    view.value = targetView
   }
 
   function clearMessageFocus() {
@@ -315,6 +372,7 @@ export const useSessionStore = defineStore('session', () => {
     messageFocusTool.value = null
     messageFocusIndex.value = null
     messageFocusOpenDetail.value = false
+    messageFocusFile.value = null
   }
 
   /**
@@ -433,12 +491,16 @@ export const useSessionStore = defineStore('session', () => {
     messageFocusTool,
     messageFocusIndex,
     messageFocusOpenDetail,
+    messageFocusFile,
+    messagesMode,
     timelineMode,
     timelineStackMode,
     timelineHiddenLegendKeys,
     timelineShowLimitOverlay,
     timelineShowCacheOverlay,
     recentlyUpdated,
+    compareSessionIds,
+    compareMode,
 
     // Computed
     filteredConversations,
@@ -464,7 +526,11 @@ export const useSessionStore = defineStore('session', () => {
     focusMessageCategory,
     focusMessageTool,
     focusMessageByIndex,
+    focusMessageFile,
     clearMessageFocus,
+    toggleCompareSession,
+    enterCompare,
+    exitCompare,
     loadEntryDetail,
     getEntryDetail,
     entryDetailLoading,

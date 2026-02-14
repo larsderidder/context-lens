@@ -40,10 +40,12 @@ export async function resetAll(): Promise<void> {
   if (!res.ok) throw new Error(`POST /api/reset failed: ${res.status}`)
 }
 
-export function getExportUrl(format: 'lhar' | 'lhar.json', conversationId?: string): string {
-  const base = `${BASE}/api/export/${format}`
-  if (conversationId) {
-    return `${base}?conversation=${encodeURIComponent(conversationId)}`
-  }
-  return base
+export type ExportPrivacy = 'minimal' | 'standard' | 'full'
+
+export function getExportUrl(format: 'lhar' | 'lhar.json', conversationId?: string, privacy?: ExportPrivacy): string {
+  const params = new URLSearchParams()
+  if (conversationId) params.set('conversation', conversationId)
+  if (privacy && privacy !== 'standard') params.set('privacy', privacy)
+  const qs = params.toString()
+  return `${BASE}/api/export/${format}${qs ? `?${qs}` : ''}`
 }

@@ -2,7 +2,7 @@
 
 **LHAR** (LLM HTTP Archive) is to LLM API calls what HAR is for web traffic: a structured format for recording, analyzing, and sharing context window interactions.
 
-Context Lens exports each session as an `.lhar` file. You can load these into other tools, build your own analyzers, or keep them as debugging artifacts.
+Context Lens logs each conversation as an `.lhar` file on disk. You can load these into other tools, build your own analyzers, or keep them as debugging artifacts.
 
 ## Structure
 
@@ -16,7 +16,7 @@ LHAR files use **JSON Lines** format (newline-delimited JSON):
 
 Each line is a complete JSON object. The first line declares the session, subsequent lines are entries (API calls).
 
-For tools that need wrapped JSON, there's also `.lhar.json`:
+For tools that need wrapped JSON, the API/UI export also supports `.lhar.json`:
 
 ```json
 {
@@ -29,7 +29,7 @@ For tools that need wrapped JSON, there's also `.lhar.json`:
 }
 ```
 
-Same data, different packaging. Use `.lhar` for streaming/append workflows, `.lhar.json` for static analysis.
+Same data model, different packaging. Use `.lhar` for streaming/append workflows, `.lhar.json` for static analysis.
 
 ## Records
 
@@ -278,6 +278,8 @@ Raw request/response bodies. Only populated when `CONTEXT_LENS_PRIVACY=full`:
 
 Both fields are `null` under the default `standard` privacy level. `response_body` can be a string (raw SSE chunks) or an object (parsed JSON).
 
+Important: API/UI exports are built from compacted in-memory entries. That means `raw.request_body` / `raw.response_body` may still be `null` in `.lhar.json` API exports even when running with `CONTEXT_LENS_PRIVACY=full`. Disk `.lhar` session logs are the reliable raw-inclusive artifact when privacy is set to `full`.
+
 ## OpenTelemetry Mapping
 
 LHAR is designed to map onto OpenTelemetry traces:
@@ -320,10 +322,14 @@ Context Lens uses the generated TypeScript types (`src/lhar-types.generated.ts`)
 
 ## File Locations
 
-LHAR files are written to `data/` by default:
+LHAR files are written to `~/.context-lens/data/` by default:
 
-- `data/<source>-<trace>.lhar`: individual session files (append-only, one per conversation)
-- `data/state.jsonl`: combined state used for persistence (not LHAR format)
+- `~/.context-lens/data/<source>-<conversation>.lhar`: individual conversation files (append-only)
+- `~/.context-lens/data/state.jsonl`: combined state used for persistence (not LHAR format)
+
+`.lhar.json` is not written to disk automatically; it is produced by the export API/UI.
+
+Legacy note: if an existing `./data/state.jsonl` is found in the project directory, Context Lens keeps using that legacy location.
 
 ## Version
 

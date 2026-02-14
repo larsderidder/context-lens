@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import * as v from "valibot";
 import {
   computeAgentKey,
   computeFingerprint,
@@ -19,9 +20,11 @@ import {
   analyzeComposition,
   buildLharRecord,
   buildSessionLine,
+  extractResponseId,
   normalizeComposition,
   parseResponseUsage,
 } from "../lhar.js";
+import { ConversationLineSchema, EntryLineSchema } from "../schemas.js";
 import { safeFilenamePart } from "../server-utils.js";
 import type {
   CapturedEntry,
@@ -42,10 +45,6 @@ export interface StoreChangeEvent {
 
 type StoreChangeListener = (event: StoreChangeEvent) => void;
 
-// Bump this when adding new one-time migrations. Each migration should check
-// the persisted version before doing expensive work (e.g. reading detail files).
-const CURRENT_STATE_VERSION = 1;
-
 export class Store {
   private readonly dataDir: string;
   private readonly stateFile: string;
@@ -61,7 +60,6 @@ export class Store {
 
   private dataRevision = 0;
   private nextEntryId = 1;
-  private stateVersion = 0;
 
   // SSE change listeners
   private changeListeners = new Set<StoreChangeListener>();
@@ -143,27 +141,45 @@ export class Store {
     const lines = content.split("\n").filter((l) => l.length > 0);
     let loadedEntries = 0;
     let maxId = 0;
+    const loadedEntriesBuffer: CapturedEntry[] = [];
     for (const line of lines) {
       try {
-        const record = JSON.parse(line);
-        if (record.type === "meta") {
-          this.stateVersion = record.version ?? 0;
-        } else if (record.type === "conversation") {
-          const c = record.data as Conversation;
+        const raw = JSON.parse(line);
+
+        if (raw.type === "conversation") {
+          const result = v.safeParse(ConversationLineSchema, raw);
+          if (!result.success) {
+            console.warn(
+              `State: skipping invalid conversation line: ${v.summarize(result.issues)}`,
+            );
+            continue;
+          }
+          const c = result.output.data as Conversation;
           this.conversations.set(c.id, c);
           this.diskSessionsWritten.add(c.id);
-        } else if (record.type === "entry") {
-          const projected = record.data;
+        } else if (raw.type === "entry") {
+          const result = v.safeParse(EntryLineSchema, raw);
+          if (!result.success) {
+            console.warn(
+              `State: skipping invalid entry line (id=${raw.data?.id}): ${v.summarize(result.issues)}`,
+            );
+            continue;
+          }
+          const projected = result.output.data;
+          // The schema validates structure; cast to domain types for fields
+          // where the schema is intentionally looser (tools as unknown[],
+          // nested content blocks as loose objects).
           const entry: CapturedEntry = {
             ...projected,
-            response: projected.response || { raw: true },
+            contextInfo: projected.contextInfo as ContextInfo,
+            response: (projected.response || { raw: true }) as ResponseData,
             requestHeaders: {},
             responseHeaders: {},
             rawBody: undefined,
             healthScore: projected.healthScore ?? null,
             securityAlerts: projected.securityAlerts || [],
           };
-          this.capturedRequests.push(entry);
+          loadedEntriesBuffer.push(entry);
           if (entry.id > maxId) maxId = entry.id;
           loadedEntries++;
         }
@@ -174,24 +190,25 @@ export class Store {
         );
       }
     }
+    // Reverse entries to match runtime order (newest first)
+    this.capturedRequests = loadedEntriesBuffer.reverse();
     if (loadedEntries > 0) {
       this.nextEntryId = maxId + 1;
       this.dataRevision = 1;
-
-      // Run migrations. Each checks stateVersion to skip already-applied work.
-      // Order matters: image migration fixes inflated per-message tokens from
-      // base64 data BEFORE the usage backfill rescales everything proportionally.
+      // Loaded entries are already compact (projectEntry strips heavy data before saving).
+      // Do NOT call compactEntry here. It would destroy the preserved response usage data.
+      // TODO: Consider introducing a formal versioned migration system (schema version
+      // tracking, ordered migration list, "already applied" checks) if the number of
+      // ad hoc migrations here keeps growing. For now each migration is idempotent and
+      // detects whether it needs to run by inspecting the data.
+      //
+      // Order matters: image migration fixes inflated per-message tokens from base64 data
+      // BEFORE the usage backfill rescales everything proportionally.
       const migrated = this.migrateImageTokenCounts();
       this.backfillTotalTokensFromUsage();
       const tokenFixups = this.restoreTokenCountsFromDetails();
       this.backfillHealthScores();
-
-      const needsSave =
-        migrated > 0 ||
-        tokenFixups > 0 ||
-        this.stateVersion < CURRENT_STATE_VERSION;
-      if (needsSave) {
-        this.stateVersion = CURRENT_STATE_VERSION;
+      if (migrated > 0 || tokenFixups > 0) {
         this.saveState();
       }
       console.log(
@@ -355,10 +372,9 @@ export class Store {
     const securityResult = scanSecurity(contextInfo);
     entry.securityAlerts = securityResult.alerts;
 
-    // Track response IDs for Responses API chaining
-    const respId =
-      (responseData as Record<string, any>).id ||
-      (responseData as Record<string, any>).response_id;
+    // Track response IDs for Responses API chaining (works for both
+    // non-streaming JSON and streaming SSE responses)
+    const respId = extractResponseId(responseData);
     if (respId && conversationId) {
       this.responseIdToConvo.set(respId, conversationId);
     }
@@ -413,7 +429,7 @@ export class Store {
     this.logToDisk(entry);
     this.saveEntryDetail(entry);
     this.compactEntry(entry);
-    this.saveState();
+    this.appendToState(entry, conversationId);
     return entry;
   }
 
@@ -506,12 +522,6 @@ export class Store {
   }
 
   /**
-   * Recalculate token counts for messages that contain image blocks.
-   *
-   * Before the image token fix, estimateTokens() would stringify base64 image
-   * data, producing millions of phantom tokens. Persisted entries still have
-   * those inflated counts. This migration recalculates from the compacted
-  /**
    * Backfill totalTokens from API usage data for entries that only have estimates.
    * The estimate (chars/4) can be wildly inaccurate; the API's real token count
    * (input + cacheRead + cacheWrite) is authoritative.
@@ -538,25 +548,34 @@ export class Store {
    * the full uncompacted contextInfo) as the source of truth.
    */
   private restoreTokenCountsFromDetails(): number {
-    // Added in state version 1. Once applied and saved, the corrected token
-    // counts are persisted in state.jsonl and this expensive migration (which
-    // reads thousands of detail files from disk) can be skipped.
-    if (this.stateVersion >= 1) return 0;
+    // Skip if this migration has already completed successfully.
+    const markerPath = path.join(this.dataDir, ".token-restore-done");
+    if (fs.existsSync(markerPath)) return 0;
 
-    let fixed = 0;
+    // First pass: identify candidates that might need fixing.
+    // An entry is a candidate only when it was compacted (fewer messages
+    // than maxCompactMessages) AND messagesTokens matches the truncated
+    // sum. This avoids reading thousands of detail files on every startup.
+    const candidates: CapturedEntry[] = [];
     for (const entry of this.capturedRequests) {
       const ci = entry.contextInfo;
-      // Only entries at the compaction limit could have been truncated.
-      if (ci.messages.length !== this.maxCompactMessages) continue;
+      if (ci.messages.length >= this.maxCompactMessages) continue;
       const msgTokenSum = ci.messages.reduce((s, m) => s + m.tokens, 0);
-      // If messagesTokens matches the sum of compacted messages, the entry
-      // was likely corrupted by the old migration recalculating from truncated
-      // messages. If messagesTokens is already higher, it was never corrupted
-      // (or already fixed).
-      if (ci.messagesTokens !== msgTokenSum) continue;
+      if (ci.messagesTokens === msgTokenSum) {
+        candidates.push(entry);
+      }
+    }
+    if (candidates.length === 0) {
+      this.writeMarker(markerPath);
+      return 0;
+    }
+
+    // Second pass: only read detail files for candidates.
+    let fixed = 0;
+    for (const entry of candidates) {
+      const ci = entry.contextInfo;
       const detail = this.getEntryDetail(entry.id);
       if (!detail || detail.messages.length <= ci.messages.length) continue;
-      // The detail has more messages; the compacted entry's totalTokens is wrong.
       if (
         detail.totalTokens !== ci.totalTokens &&
         detail.totalTokens > ci.totalTokens
@@ -573,7 +592,16 @@ export class Store {
         `Restored totalTokens from detail files for ${fixed} compacted entries`,
       );
     }
+    this.writeMarker(markerPath);
     return fixed;
+  }
+
+  private writeMarker(markerPath: string): void {
+    try {
+      fs.writeFileSync(markerPath, "");
+    } catch {
+      /* non-critical */
+    }
   }
 
   /**
@@ -729,7 +757,13 @@ export class Store {
     const limit = 200;
     switch (b.type) {
       case "tool_use":
-        return { type: "tool_use", id: b.id, name: b.name, input: {} };
+        return {
+          type: "tool_use",
+          id: b.id,
+          name: b.name,
+          // Preserve small path-like keys for file attribution; drop large values
+          input: this.compactToolInput(b.input),
+        };
       case "tool_result": {
         const rc =
           typeof b.content === "string"
@@ -758,6 +792,32 @@ export class Store {
         return b;
       }
     }
+  }
+
+  /**
+   * Compact tool_use input: preserve keys that contain file paths (small strings),
+   * drop large values like file content, diffs, and command output.
+   */
+  private compactToolInput(
+    input: Record<string, any> | undefined,
+  ): Record<string, any> {
+    if (!input || typeof input !== "object") return {};
+    const PATH_KEYS = [
+      "file_path",
+      "path",
+      "filePath",
+      "file",
+      "dir_path",
+      "pattern",
+      "glob",
+    ];
+    const result: Record<string, any> = {};
+    for (const key of PATH_KEYS) {
+      if (typeof input[key] === "string") {
+        result[key] = input[key];
+      }
+    }
+    return result;
   }
 
   private compactMessages(
@@ -819,12 +879,58 @@ export class Store {
     );
   }
 
+  /**
+   * Append a single new entry (and its conversation) to the state file.
+   * This is O(entry size) instead of O(total state size).
+   *
+   * The conversation line is always written so that backfilled fields
+   * (source, workingDirectory) are captured. On loadState, later
+   * conversation lines overwrite earlier ones, so duplicates are harmless.
+   */
+  private appendToState(
+    entry: CapturedEntry,
+    conversationId: string | null,
+  ): void {
+    let lines = "";
+
+    if (conversationId) {
+      const convo = this.conversations.get(conversationId);
+      if (convo) {
+        lines += `${JSON.stringify({ type: "conversation", data: convo })}\n`;
+      }
+    }
+
+    lines += `${JSON.stringify({
+      type: "entry",
+      data: projectEntry(entry, this.compactContextInfo(entry.contextInfo)),
+    })}\n`;
+
+    try {
+      fs.appendFileSync(this.stateFile, lines);
+    } catch (err: unknown) {
+      console.error(
+        "State append error:",
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  }
+
+  /**
+   * Full rewrite of the state file. Used after structural changes
+   * (eviction, deletion, reset, migrations) where append is not sufficient.
+   *
+   * Entries are written oldest-first (chronological) to match the append-only
+   * convention used by appendToState(). loadState() reverses on read to
+   * restore the in-memory newest-first order.
+   */
   private saveState(): void {
-    let lines = `${JSON.stringify({ type: "meta", version: this.stateVersion })}\n`;
+    let lines = "";
     for (const [, convo] of this.conversations) {
       lines += `${JSON.stringify({ type: "conversation", data: convo })}\n`;
     }
-    for (const entry of this.capturedRequests) {
+    // Write oldest-first so loadState's reverse() produces newest-first
+    for (let i = this.capturedRequests.length - 1; i >= 0; i--) {
+      const entry = this.capturedRequests[i];
       lines += `${JSON.stringify({
         type: "entry",
         data: projectEntry(entry, this.compactContextInfo(entry.contextInfo)),

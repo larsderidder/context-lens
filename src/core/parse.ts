@@ -49,11 +49,25 @@ function parseResponsesItem(item: any): {
         : JSON.stringify(args).slice(0, 200)) +
       ")";
     const tokens = estimateTokens(item);
+    // Parse stringified arguments (OpenAI Responses API sends JSON strings)
+    let parsedInput: Record<string, any> = {};
+    if (typeof args === "string" && args.length > 0) {
+      try {
+        const parsed = JSON.parse(args);
+        if (typeof parsed === "object" && parsed !== null) {
+          parsedInput = parsed;
+        }
+      } catch {
+        /* not valid JSON, keep empty */
+      }
+    } else if (typeof args === "object" && args !== null) {
+      parsedInput = args;
+    }
     const block: ContentBlock = {
       type: "tool_use",
       id: item.call_id || "",
       name,
-      input: typeof args === "string" ? {} : args || {},
+      input: parsedInput,
     };
     return {
       message: { role: "assistant", content, contentBlocks: [block], tokens },

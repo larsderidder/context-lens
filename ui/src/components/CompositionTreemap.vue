@@ -3,6 +3,8 @@ import { computed, ref, watch } from 'vue'
 import { hierarchy, treemap as d3Treemap } from 'd3-hierarchy'
 import { fmtTokens } from '@/utils/format'
 import { CATEGORY_META, SIMPLE_GROUPS, SIMPLE_META, buildToolNameMap, classifyMessageRole } from '@/utils/messages'
+import { extractSessionFileAttributions, fileColor, shortFileName } from '@/utils/files'
+import { useSessionStore } from '@/stores/session'
 import type { ProjectedEntry } from '@/api-types'
 
 interface Props {
@@ -11,13 +13,15 @@ interface Props {
 }
 
 const props = defineProps<Props>()
+const store = useSessionStore()
 
 const emit = defineEmits<{
   categoryClick: [category: string]
   toolClick: [toolName: string]
+  fileClick: [filePath: string]
 }>()
 
-const treemapMode = ref<'detailed' | 'simple'>('detailed')
+const treemapMode = ref<'detailed' | 'simple' | 'files'>('detailed')
 const treemapDrillKey = ref<string | null>(null)
 
 const simpleComposition = computed((): { key: string; label: string; color: string; tokens: number }[] => {
@@ -115,12 +119,39 @@ const activeDetailedTreemapNodes = computed((): TreemapNode[] => {
   return topLevelTreemapNodes.value
 })
 
+const fileTreemapNodes = computed((): TreemapNode[] => {
+  const session = store.selectedSession
+  if (!session || session.entries.length === 0) return []
+  const wd = session.workingDirectory
+  const attributions = extractSessionFileAttributions(session.entries, wd)
+  return attributions.map((attr, index) => ({
+    key: `file-${attr.path}-${index}`,
+    label: shortFileName(attr.path),
+    color: fileColor(index),
+    tokens: attr.tokens,
+    category: 'files',
+    toolName: attr.path,
+  }))
+})
+
+const fileTreemapLayout = computed(() => buildTreemapLayout(fileTreemapNodes.value))
+const hasFileData = computed(() => fileTreemapNodes.value.length > 0)
+
 const DETAILED_LEGEND_CAP = 5
 const detailedLegendNodes = computed(() => activeDetailedTreemapNodes.value.slice(0, DETAILED_LEGEND_CAP))
 const hiddenDetailedLegendNodes = computed(() => activeDetailedTreemapNodes.value.slice(DETAILED_LEGEND_CAP))
 const hiddenDetailedLegendTooltip = computed(() =>
   hiddenDetailedLegendNodes.value
     .map((item) => `${item.label}: ${legendPct(item.tokens)}`)
+    .join('\n'),
+)
+
+const FILE_LEGEND_CAP = 6
+const fileLegendNodes = computed(() => fileTreemapNodes.value.slice(0, FILE_LEGEND_CAP))
+const hiddenFileLegendTooltip = computed(() =>
+  fileTreemapNodes.value
+    .slice(FILE_LEGEND_CAP)
+    .map((item) => `${item.toolName || item.label}: ${legendPct(item.tokens)}`)
     .join('\n'),
 )
 
@@ -190,6 +221,12 @@ function onSimpleTreemapClick(groupKey: string) {
   emit('categoryClick', target)
 }
 
+function handleFileTreemapClick(item: TreemapLayoutNode) {
+  if (item.toolName) {
+    emit('fileClick', item.toolName)
+  }
+}
+
 function resetTreemapDrill() {
   treemapDrillKey.value = null
 }
@@ -224,6 +261,7 @@ watch(
       <div class="mode-toggle">
         <button :class="{ on: treemapMode === 'detailed' }" @click="treemapMode = 'detailed'">Detail</button>
         <button :class="{ on: treemapMode === 'simple' }" @click="treemapMode = 'simple'">Simple</button>
+        <button v-if="hasFileData" :class="{ on: treemapMode === 'files' }" @click="treemapMode = 'files'">Files</button>
       </div>
     </div>
     <div class="panel-body">
@@ -256,7 +294,7 @@ watch(
         </button>
       </div>
       <!-- Simple -->
-      <div v-else class="treemap treemap-simple">
+      <div v-else-if="treemapMode === 'simple'" class="treemap treemap-simple">
         <div
           v-for="g in simpleComposition" :key="g.key"
           class="tm-block tm-block-simple"
@@ -268,6 +306,34 @@ watch(
           <span class="tm-label">{{ g.label }}</span>
           <span class="tm-val">{{ fmtTokens(g.tokens) }}</span>
         </div>
+      </div>
+      <!-- Files -->
+      <div v-else-if="treemapMode === 'files'" class="treemap">
+        <button
+          v-for="item in fileTreemapLayout"
+          :key="item.key"
+          class="tm-block tm-block-2d"
+          :style="{
+            left: item.x + '%',
+            top: item.y + '%',
+            width: item.w + '%',
+            height: item.h + '%',
+            background: item.color,
+          }"
+          v-tooltip="`${item.toolName || item.label}: ${item.tokens.toLocaleString()} (${item.pct.toFixed(1)}%)`"
+          @click="handleFileTreemapClick(item)"
+        >
+          <template v-if="item.w >= 18 && item.h >= 16">
+            <span class="tm-label">{{ item.label }}</span>
+            <span class="tm-val">{{ fmtTokens(item.tokens) }}</span>
+          </template>
+          <template v-else-if="item.w >= 12 && item.h >= 12">
+            <span class="tm-label-compact">{{ item.label.slice(0, 8) }}{{ item.label.length > 8 ? '…' : '' }}</span>
+          </template>
+          <template v-else-if="item.w >= 8 && item.h >= 8">
+            <span class="tm-pct">{{ Math.round(item.pct) }}%</span>
+          </template>
+        </button>
       </div>
       <!-- Legend -->
       <div class="legend">
@@ -282,6 +348,20 @@ watch(
             v-tooltip="hiddenDetailedLegendTooltip"
           >
             +{{ activeDetailedTreemapNodes.length - detailedLegendNodes.length }} more
+          </span>
+        </template>
+        <template v-else-if="treemapMode === 'files'">
+          <span v-for="item in fileLegendNodes" :key="`legend-file-${item.key}`" class="legend-item">
+            <span class="legend-dot" :style="{ background: item.color }" />
+            <span class="legend-file-path" v-tooltip="item.toolName || item.label">{{ item.label }}</span>
+            <span class="legend-pct">{{ legendPct(item.tokens) }}</span>
+          </span>
+          <span
+            v-if="fileTreemapNodes.length > fileLegendNodes.length"
+            class="legend-item"
+            v-tooltip="hiddenFileLegendTooltip"
+          >
+            +{{ fileTreemapNodes.length - fileLegendNodes.length }} more
           </span>
         </template>
         <template v-else>
@@ -500,6 +580,15 @@ watch(
 .legend-pct {
   @include mono-text;
   color: var(--text-ghost);
+}
+
+.legend-file-path {
+  @include mono-text;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: help;
 }
 
 </style>

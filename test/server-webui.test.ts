@@ -3,12 +3,19 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-
+import type { Hono } from "hono";
 import { parseContextInfo } from "../src/core.js";
 import type { StoreChangeEvent } from "../src/server/store.js";
 import { Store } from "../src/server/store.js";
-import { createWebUIHandler } from "../src/server/webui.js";
-import { dispatch } from "./helpers/http-mock.js";
+import { createApp } from "../src/server/webui.js";
+
+function sanitizeFilenamePart(input: string): string {
+  return String(input || "")
+    .trim()
+    .replace(/[^a-zA-Z0-9._-]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 80);
+}
 
 function makeStore(): { store: Store; cleanup: () => void } {
   const dir = mkdtempSync(path.join(tmpdir(), "context-lens-test-"));
@@ -30,12 +37,14 @@ function makeStore(): { store: Store; cleanup: () => void } {
 
 describe("webui handler", () => {
   let store: Store;
+  let app: Hono;
   let cleanup: () => void;
 
   beforeEach(() => {
     const made = makeStore();
     store = made.store;
     cleanup = made.cleanup;
+    app = createApp(store, "<html>ok</html>");
   });
 
   afterEach(() => {
@@ -43,8 +52,6 @@ describe("webui handler", () => {
   });
 
   it("POST /api/ingest stores an entry and GET /api/requests returns it", async () => {
-    const handler = createWebUIHandler(store, "<html>ok</html>");
-
     const ingest = {
       provider: "anthropic",
       apiFormat: "anthropic-messages",
@@ -60,21 +67,17 @@ describe("webui handler", () => {
       },
     };
 
-    const res = await dispatch(handler, {
+    const res = await app.request("/api/ingest", {
       method: "POST",
-      url: "/api/ingest",
-      headers: { "content-type": "application/json" },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(ingest),
     });
-    assert.equal(res.statusCode, 200);
-    assert.equal(res.bodyJson().ok, true);
+    assert.equal(res.status, 200);
+    assert.equal((await res.json()).ok, true);
 
-    const reqs = await dispatch(handler, {
-      method: "GET",
-      url: "/api/requests",
-    });
-    assert.equal(reqs.statusCode, 200);
-    const data = reqs.bodyJson();
+    const reqs = await app.request("/api/requests");
+    assert.equal(reqs.status, 200);
+    const data = await reqs.json();
     assert.ok(Array.isArray(data.conversations));
     const totalEntries =
       (data.conversations || []).reduce(
@@ -85,13 +88,10 @@ describe("webui handler", () => {
   });
 
   it("GET /api/export/lhar returns JSONL and POST /api/reset clears state", async () => {
-    const handler = createWebUIHandler(store, "<html>ok</html>");
-
     // Ingest one entry
-    await dispatch(handler, {
+    await app.request("/api/ingest", {
       method: "POST",
-      url: "/api/ingest",
-      headers: { "content-type": "application/json" },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         provider: "anthropic",
         apiFormat: "anthropic-messages",
@@ -109,42 +109,52 @@ describe("webui handler", () => {
       }),
     });
 
-    const exp = await dispatch(handler, {
-      method: "GET",
-      url: "/api/export/lhar",
-    });
-    assert.equal(exp.statusCode, 200);
-    assert.ok(exp.bodyText().includes('"type":"entry"'));
+    const exp = await app.request("/api/export/lhar");
+    assert.equal(exp.status, 200);
+    assert.equal(
+      exp.headers.get("Content-Disposition"),
+      'attachment; filename="context-lens-export-session-all-privacy-standard.lhar"',
+    );
+    const expText = await exp.text();
+    assert.ok(expText.includes('"type":"entry"'));
 
-    const reset = await dispatch(handler, {
-      method: "POST",
-      url: "/api/reset",
-    });
-    assert.equal(reset.statusCode, 200);
+    const reqsBefore = await app.request("/api/requests");
+    const dataBefore = await reqsBefore.json();
+    assert.equal(dataBefore.conversations.length, 1);
+    const convoId = dataBefore.conversations[0].id;
 
-    const reqs = await dispatch(handler, {
-      method: "GET",
-      url: "/api/requests",
-    });
-    const data = reqs.bodyJson();
+    const expScoped = await app.request(
+      `/api/export/lhar.json?conversation=${encodeURIComponent(convoId)}&privacy=minimal`,
+    );
+    assert.equal(expScoped.status, 200);
+    const safeConvoId = sanitizeFilenamePart(convoId);
+    assert.equal(
+      expScoped.headers.get("Content-Disposition"),
+      `attachment; filename="context-lens-export-session-${safeConvoId}-privacy-minimal.lhar.json"`,
+    );
+
+    const reset = await app.request("/api/reset", { method: "POST" });
+    assert.equal(reset.status, 200);
+
+    const reqs = await app.request("/api/requests");
+    const data = await reqs.json();
     assert.equal((data.conversations || []).length, 0);
     assert.equal((data.ungrouped || []).length, 0);
   });
 
   it("DELETE /api/conversations/:id removes a conversation", async () => {
-    const handler = createWebUIHandler(store, "<html>ok</html>");
-
-    await dispatch(handler, {
+    await app.request("/api/ingest", {
       method: "POST",
-      url: "/api/ingest",
-      headers: { "content-type": "application/json" },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         provider: "anthropic",
         apiFormat: "anthropic-messages",
         source: "claude",
         body: {
           model: "claude-sonnet-4-20250514",
-          metadata: { user_id: "session_550e8400-e29b-41d4-a716-446655440000" },
+          metadata: {
+            user_id: "session_550e8400-e29b-41d4-a716-446655440000",
+          },
           messages: [{ role: "user", content: "hi" }],
         },
         response: {
@@ -155,26 +165,20 @@ describe("webui handler", () => {
       }),
     });
 
-    const reqs = await dispatch(handler, {
-      method: "GET",
-      url: "/api/requests",
-    });
-    const data = reqs.bodyJson();
+    const reqs = await app.request("/api/requests");
+    const data = await reqs.json();
     assert.equal(data.conversations.length, 1);
     const convoId = data.conversations[0].id;
 
-    const del = await dispatch(handler, {
-      method: "DELETE",
-      url: `/api/conversations/${encodeURIComponent(convoId)}`,
-    });
-    assert.equal(del.statusCode, 200);
-    assert.equal(del.bodyJson().ok, true);
+    const del = await app.request(
+      `/api/conversations/${encodeURIComponent(convoId)}`,
+      { method: "DELETE" },
+    );
+    assert.equal(del.status, 200);
+    assert.equal((await del.json()).ok, true);
 
-    const reqs2 = await dispatch(handler, {
-      method: "GET",
-      url: "/api/requests",
-    });
-    const data2 = reqs2.bodyJson();
+    const reqs2 = await app.request("/api/requests");
+    const data2 = await reqs2.json();
     assert.equal(data2.conversations.length, 0);
   });
 });
