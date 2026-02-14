@@ -3,10 +3,10 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { Splitpanes, Pane } from 'splitpanes'
 import { useSessionStore } from '@/stores/session'
 import { useExpandable } from '@/composables/useExpandable'
-import { fmtTokens } from '@/utils/format'
+import { fmtTokens, shortModel } from '@/utils/format'
 import { groupMessagesByCategory, buildToolNameMap, extractPreview, CATEGORY_META, classifyMessageRole, classifyEntries } from '@/utils/messages'
 import { makeRelative, shortFileName } from '@/utils/files'
-import type { ParsedMessage, ToolUseBlock } from '@/api-types'
+import type { ParsedMessage, ToolUseBlock, ProjectedEntry } from '@/api-types'
 import DetailPane from '@/components/DetailPane.vue'
 
 const store = useSessionStore()
@@ -20,6 +20,12 @@ const detailOpen = ref(false)
 const detailIndex = ref(0)
 const selectedMsgKey = ref<string | null>(null)
 const selectedMsgOrdinal = ref(1)
+
+// Subagent detail pane: when viewing a subagent entry's messages,
+// these override the normal detail pane props.
+const subagentDetailEntry = ref<ProjectedEntry | null>(null)
+const subagentDetailMessages = ref<{ msg: ParsedMessage; origIdx: number }[]>([])
+const subagentDetailIndex = ref(0)
 
 const toolNameMap = computed(() => {
   return buildToolNameMap(messages.value)
@@ -104,10 +110,79 @@ const chronoTurnBoundaries = computed(() => {
   return boundaries
 })
 
+// ── Subagent interleaving for "All" mode ──
+
+// Subagent entries grouped by the turn boundary they precede.
+// Key = message index of the NEXT turn boundary (from chronoTurnBoundaries).
+// The subagent rows render just before that turn's boundary marker.
+const subagentEntriesByTurnBoundary = computed((): Map<number, ProjectedEntry[]> => {
+  const s = session.value
+  const e = entry.value
+  if (!s || !e || store.messagesMode !== 'all') return new Map()
+
+  // Classify entries oldest-first
+  const classified = classifyEntries([...s.entries].reverse())
+
+  // Build list of main entries and collect subagent entries between them.
+  // groups[i] = subagent entries that come after main entry i and before main entry i+1.
+  const mainEntries: ProjectedEntry[] = []
+  const subsBetween: ProjectedEntry[][] = [] // subsBetween[i] = subs after main[i]
+  let pendingSubs: ProjectedEntry[] = []
+
+  for (const item of classified) {
+    if (item.isMain) {
+      mainEntries.push(item.entry)
+      // Flush pending subs from before this main entry
+      if (mainEntries.length > 1) {
+        subsBetween.push([...pendingSubs])
+      }
+      pendingSubs = []
+    } else {
+      if (mainEntries.length > 0) {
+        pendingSubs.push(item.entry)
+      }
+    }
+  }
+  // Trailing subs after the last main entry
+  subsBetween.push([...pendingSubs])
+
+  // Find which main-entry index the selected entry is
+  const selectedMainIdx = mainEntries.findIndex(me => me.id === e.id)
+  if (selectedMainIdx < 0) return new Map()
+
+  // The turn boundaries (sorted) correspond to main turns visible in the context.
+  // boundary[0] = first visible main turn, boundary[1] = second, etc.
+  // The offset tells us how many main turns were compacted.
+  const boundaries = Array.from(chronoTurnBoundaries.value).sort((a, b) => a - b)
+  const offset = turnOffset.value // number of compacted main turns before boundary[0]
+
+  const result = new Map<number, ProjectedEntry[]>()
+
+  // For each group of subagent entries between main[i] and main[i+1]:
+  // They should appear before the turn boundary for main[i+1].
+  // subsBetween[0] = between main[0] and main[1] -> before boundary for main[1]
+  // subsBetween[k] = between main[k] and main[k+1] -> before boundary for main[k+1]
+  for (let i = 0; i <= selectedMainIdx && i < subsBetween.length; i++) {
+    const subs = subsBetween[i]
+    if (subs.length === 0) continue
+
+    // This group goes before main entry i+1, which is boundary index (i+1 - offset)
+    const boundaryLocalIdx = (i + 1) - offset
+    if (boundaryLocalIdx < 0) continue // compacted away
+    if (boundaryLocalIdx < boundaries.length) {
+      result.set(boundaries[boundaryLocalIdx], subs)
+    }
+    // If boundaryLocalIdx >= boundaries.length, subs are after the last visible turn
+    // (shouldn't happen since we stop at selectedMainIdx)
+  }
+
+  return result
+})
+
 // Global turn number of the selected entry (1-based), derived from the session's
 // full entry list so that post-compaction turns don't reset to "Turn 1".
-// Always counts only main entries so turn labels stay consistent with the
-// turn scrubber (which only navigates main turns).
+// Always counts only main entries so turn labels match the turn scrubber.
+// Subagent entries are shown as interleaved rows in "All" mode, not as turn numbers.
 const globalTurnNumber = computed(() => {
   const s = session.value
   const e = entry.value
@@ -159,6 +234,20 @@ const flatMessages = computed(() => {
   }
   return result
 })
+
+// Whether the detail pane is showing a subagent entry
+const isSubagentDetail = computed(() => subagentDetailEntry.value !== null)
+
+// Detail pane props: switch between normal and subagent mode
+const detailPaneEntry = computed(() =>
+  isSubagentDetail.value ? subagentDetailEntry.value! : entry.value!
+)
+const detailPaneMessages = computed(() =>
+  isSubagentDetail.value ? subagentDetailMessages.value : flatMessages.value
+)
+const detailPaneIndex = computed(() =>
+  isSubagentDetail.value ? subagentDetailIndex.value : detailIndex.value
+)
 
 // Chronological: messages in context order for DetailPane navigation
 const chronoMessages = computed(() => {
@@ -232,7 +321,13 @@ const hasCategoryFallback = computed(() => {
   return !!focusedCategory.value && !!focusCategory.value && focusedCategory.value !== focusCategory.value
 })
 
+function clearSubagentDetail() {
+  subagentDetailEntry.value = null
+  subagentDetailMessages.value = []
+}
+
 function openDetail(flatIdx: number) {
+  clearSubagentDetail()
   detailIndex.value = flatIdx
   syncSelectionSignature(flatIdx)
   detailOpen.value = true
@@ -240,6 +335,7 @@ function openDetail(flatIdx: number) {
 
 function closeDetail() {
   detailOpen.value = false
+  clearSubagentDetail()
 }
 
 function onMessagesKeydown(e: KeyboardEvent) {
@@ -292,8 +388,12 @@ function findIndexBySelectionSignature(): number {
 }
 
 function onDetailNavigate(idx: number) {
-  detailIndex.value = idx
-  syncSelectionSignature(idx)
+  if (isSubagentDetail.value) {
+    subagentDetailIndex.value = idx
+  } else {
+    detailIndex.value = idx
+    syncSelectionSignature(idx)
+  }
 }
 
 function flatIndexOf(catIdx: number, itemIdx: number): number {
@@ -350,6 +450,30 @@ function jumpToFutureMessage(msgIndex: number) {
     targetEntry = entries[0]
   }
   store.pinEntry(targetEntry.id)
+}
+
+// Show a subagent entry's messages in the detail pane without changing
+// the scrubber position or selected main entry.
+async function showSubagentDetail(entryId: number) {
+  const s = session.value
+  if (!s) return
+
+  // Find the entry in the session
+  const subEntry = s.entries.find(e => e.id === entryId)
+  if (!subEntry) return
+
+  // Load full detail if available
+  await store.loadEntryDetail(entryId)
+  void store.entryDetailVersion
+  const detail = store.getEntryDetail(entryId)
+  const msgs = detail?.messages?.length
+    ? detail.messages
+    : subEntry.contextInfo.messages || []
+
+  subagentDetailEntry.value = subEntry
+  subagentDetailMessages.value = msgs.map((msg, i) => ({ msg, origIdx: i }))
+  subagentDetailIndex.value = 0
+  detailOpen.value = true
 }
 
 function toolResultName(msg: ParsedMessage): string | null {
@@ -692,7 +816,7 @@ onMounted(async () => {
 watch(
   flatMessages,
   () => {
-    if (!detailOpen.value) return
+    if (!detailOpen.value || isSubagentDetail.value) return
     const idx = findIndexBySelectionSignature()
     if (idx >= 0 && idx !== detailIndex.value) {
       detailIndex.value = idx
@@ -716,7 +840,10 @@ watch(
               <button :class="{ on: viewMode === 'chrono' }" @click="viewMode = 'chrono'">Chronological</button>
               <button :class="{ on: viewMode === 'category' }" @click="viewMode = 'category'">By Category</button>
             </div>
-
+            <div v-if="hasSubAgentEntries && viewMode === 'chrono'" class="message-view-toggle agent-toggle">
+              <button :class="{ on: store.messagesMode === 'main' }" @click="store.messagesMode = 'main'">Main</button>
+              <button :class="{ on: store.messagesMode === 'all' }" @click="store.messagesMode = 'all'">All</button>
+            </div>
           </div>
 
           <template v-if="viewMode === 'category'">
@@ -782,7 +909,7 @@ watch(
                 v-for="(item, itemIdx) in group.items"
                 :key="item.origIdx"
                 class="msg-row"
-                :class="[rowClassForToolFocus(item.msg), { selected: detailOpen && flatMessages[detailIndex]?.origIdx === item.origIdx }]"
+                :class="[rowClassForToolFocus(item.msg), { selected: detailOpen && !isSubagentDetail && flatMessages[detailIndex]?.origIdx === item.origIdx }]"
                 :data-tool-name="toolResultName(item.msg) || ''"
                 @click="openDetail(flatIndexOf(catIdx, itemIdx))"
               >
@@ -804,6 +931,25 @@ watch(
             </div>
             <div class="chrono-list">
               <template v-for="(item, i) in chronoAllMessages" :key="i">
+                <!-- Subagent entries that occurred before this turn (All mode) -->
+                <template v-if="subagentEntriesByTurnBoundary.has(i)">
+                  <div
+                    v-for="sub in subagentEntriesByTurnBoundary.get(i)"
+                    :key="'sub-' + sub.id"
+                    class="chrono-subagent-row"
+                    @click="showSubagentDetail(sub.id)"
+                    v-tooltip="'Click to view subagent context'"
+                  >
+                    <span class="chrono-gutter subagent-gutter">
+                      {{ fmtTokens(sub.contextInfo.totalTokens) }}
+                    </span>
+                    <span class="chrono-cat-dot subagent-dot" />
+                    <span class="chrono-type subagent-type">subagent</span>
+                    <span class="chrono-preview subagent-preview">{{ sub.agentLabel }}</span>
+                    <span class="chrono-tok subagent-model">{{ shortModel(sub.contextInfo.model) }}</span>
+                  </div>
+                </template>
+
                 <!-- Turn boundary marker -->
                 <div v-if="chronoTurnNumbers.has(i)" class="chrono-turn-marker" :class="{ future: item.future }">
                   <span class="chrono-turn-label">Turn {{ chronoTurnNumbers.get(i) }}</span>
@@ -822,7 +968,7 @@ watch(
                   :class="[
                     rowClassForFileFocus(item.origIdx),
                     {
-                      selected: !item.future && detailOpen && flatMessages[detailIndex]?.origIdx === item.origIdx,
+                      selected: !item.future && detailOpen && !isSubagentDetail && flatMessages[detailIndex]?.origIdx === item.origIdx,
                       future: item.future,
                     },
                   ]"
@@ -849,9 +995,9 @@ watch(
       </Pane>
       <Pane v-if="detailOpen" :min-size="25" :size="58">
         <DetailPane
-          :entry="entry"
-          :messages="flatMessages"
-          :selected-index="detailIndex"
+          :entry="detailPaneEntry"
+          :messages="detailPaneMessages"
+          :selected-index="detailPaneIndex"
           @close="closeDetail"
           @navigate="onDetailNavigate"
         />
@@ -1272,6 +1418,57 @@ watch(
   opacity: 0.6;
   white-space: nowrap;
   flex-shrink: 0;
+}
+
+// ── Subagent rows (All mode) ──
+.chrono-subagent-row {
+  @include data-row;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px var(--space-3) 3px 0;
+  font-size: var(--text-sm);
+  border-left: 3px solid var(--accent-purple);
+  border-bottom: 1px solid rgba(28, 37, 53, 0.25);
+  margin-left: var(--space-2);
+  background: rgba(139, 92, 246, 0.04);
+
+  &:hover {
+    background: rgba(139, 92, 246, 0.1);
+  }
+}
+
+.subagent-gutter {
+  color: var(--accent-purple);
+  opacity: 0.7;
+}
+
+.subagent-dot {
+  background: var(--accent-purple);
+  opacity: 0.6;
+}
+
+.subagent-type {
+  color: var(--accent-purple);
+  opacity: 0.8;
+}
+
+.subagent-preview {
+  @include truncate;
+  @include sans-text;
+  color: var(--text-dim);
+  flex: 1;
+  font-size: var(--text-sm);
+  opacity: 0.7;
+}
+
+.subagent-model {
+  @include mono-text;
+  color: var(--accent-purple);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  flex-shrink: 0;
+  opacity: 0.6;
 }
 
 .focus-file-name {
