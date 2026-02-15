@@ -124,9 +124,20 @@ server.on("error", (err: NodeJS.ErrnoException) => {
 
 // --- Graceful shutdown ---
 
+let shuttingDown = false;
+
 function shutdown(): void {
+  if (shuttingDown) return;
+  shuttingDown = true;
+
   watcher.stop();
   server.close();
+
+  // Force exit after a short grace period. server.close() waits for
+  // active connections (like SSE streams) to drain, which may never
+  // happen. A brief timeout lets in-flight responses finish while
+  // preventing the process from hanging indefinitely.
+  setTimeout(() => process.exit(0), 500);
 }
 
 process.on("SIGINT", shutdown);
