@@ -21,5 +21,8 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
+      - run: pnpm run build:ui
       - run: pnpm exec biome check .
       - run: pnpm test
+      - name: Verify npm package includes UI bundle
+        run: npm pack --dry-run 2>&1 | grep -q 'ui/dist/index.html' || { echo "ERROR: ui/dist/index.html missing from npm tarball"; exit 1; }

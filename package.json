@@ -22,7 +22,7 @@
     "postbuild": "chmod +x dist/cli.js dist/proxy/server.js dist/analysis/server.js",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
-    "prepublishOnly": "pnpm run build && pnpm run build:ui"
+    "prepublishOnly": "pnpm run build && pnpm run build:ui && node -e \"require('node:fs').accessSync('ui/dist/index.html'); console.log('✓ UI bundle verified')\""
   },
   "files": [
     "dist/",
