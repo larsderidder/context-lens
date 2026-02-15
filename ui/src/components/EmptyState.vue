@@ -9,9 +9,14 @@
       <circle cx="24" cy="24" r="3" fill="var(--accent-blue)" opacity="0.4" />
     </svg>
 
-    <div class="empty-title">No requests captured</div>
+    <div class="empty-title">No requests captured yet</div>
     <div class="empty-sub">
-      Point API calls to <code>localhost:4040</code>
+      Start a tool through the CLI to capture traffic:
+    </div>
+    <div class="empty-examples">
+      <code>context-lens claude</code>
+      <code>context-lens codex</code>
+      <code>context-lens gemini</code>
     </div>
   </div>
 </template>
@@ -43,13 +48,19 @@
   @include sans-text;
   font-size: var(--text-sm);
   color: var(--text-muted);
+}
+
+.empty-examples {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 
   code {
     @include mono-text;
     font-size: var(--text-sm);
     color: var(--accent-blue);
     background: var(--accent-blue-dim);
-    padding: 1px 6px;
+    padding: 2px 8px;
     border-radius: var(--radius-sm);
   }
 }

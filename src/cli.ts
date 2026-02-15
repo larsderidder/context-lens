@@ -2,6 +2,7 @@
 
 import { type ChildProcess, spawn } from "node:child_process";
 import fs from "node:fs";
+import http from "node:http";
 import https from "node:https";
 import net from "node:net";
 import { homedir, platform, tmpdir } from "node:os";
@@ -263,8 +264,9 @@ if (parsedArgs.commandName === "analyze") {
         }
       });
 
+      // Always forward stderr so warnings and errors are visible.
       proxyProcess.stderr?.on("data", (data: Buffer) => {
-        if (!proxyReady) process.stderr.write(data);
+        process.stderr.write(data);
       });
 
       proxyProcess.on("error", (err) => {
@@ -307,8 +309,9 @@ if (parsedArgs.commandName === "analyze") {
         }
       });
 
+      // Always forward stderr so warnings and errors are visible.
       analysisProcess.stderr?.on("data", (data: Buffer) => {
-        if (!analysisReady) process.stderr.write(data);
+        process.stderr.write(data);
       });
 
       analysisProcess.on("error", (err) => {
@@ -453,6 +456,43 @@ if (parsedArgs.commandName === "analyze") {
     childProcess.on("exit", (code, signal) => {
       cleanup(signal ? 128 + (signal === "SIGINT" ? 2 : 15) : code || 0);
     });
+
+    // After 15 seconds, check whether the proxy has seen any traffic.
+    // If not, print a one-time hint so the user knows something may be wrong.
+    if (requiresAnalysis) {
+      setTimeout(() => {
+        if (cleanupDidRun) return;
+        const req = http.get(
+          "http://localhost:4041/api/requests?summary=true",
+          { timeout: 2000 },
+          (res) => {
+            let body = "";
+            res.setEncoding("utf8");
+            res.on("data", (chunk: string) => {
+              body += chunk;
+            });
+            res.on("end", () => {
+              try {
+                const data = JSON.parse(body);
+                if (
+                  Array.isArray(data.conversations) &&
+                  data.conversations.length === 0
+                ) {
+                  console.error(
+                    "\n⚠️  No API traffic captured yet. If the tool is running, it may not be routing through the proxy.",
+                  );
+                  console.error(
+                    `   Check that ${commandName} is using the proxy URL (http://localhost:4040).\n`,
+                  );
+                }
+              } catch {}
+            });
+          },
+        );
+        req.on("error", () => {});
+        req.on("timeout", () => req.destroy());
+      }, 15_000);
+    }
   }
 
   /**
@@ -1006,6 +1046,9 @@ async function runDoctor(): Promise<number> {
     console.log(`[${mark}] ${name}: ${detail}`);
     if (!ok) hasFailures = true;
   }
+  function info(name: string, detail: string): void {
+    console.log(`[INFO] ${name}: ${detail}`);
+  }
 
   console.log(`Context Lens doctor v${VERSION}`);
 
@@ -1025,21 +1068,20 @@ async function runDoctor(): Promise<number> {
     analysisListening ? "already running" : "available/not running",
   );
 
+  // mitmproxy is only needed for Codex subscription mode, so report as
+  // informational rather than a hard failure.
   const mitmdumpPath = findBinaryOnPath("mitmdump");
-  report(
-    "mitmdump",
-    !!mitmdumpPath,
-    mitmdumpPath ??
-      "not found (required for Codex; install: pipx install mitmproxy)",
+  info(
+    "mitmdump (Codex only)",
+    mitmdumpPath ?? "not found (install: pipx install mitmproxy)",
   );
 
   const certPath = join(homedir(), ".mitmproxy", "mitmproxy-ca-cert.pem");
-  report(
-    "mitm CA cert",
-    fs.existsSync(certPath),
+  info(
+    "mitm CA cert (Codex only)",
     fs.existsSync(certPath)
       ? certPath
-      : `${certPath} (not present; run 'mitmdump' once to generate it)`,
+      : "not present (run 'mitmdump' once to generate)",
   );
 
   const contextDir = join(homedir(), ".context-lens");
