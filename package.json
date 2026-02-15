@@ -13,6 +13,7 @@
     "generate:types": "json2ts schema/lhar.schema.json src/lhar-types.generated.ts --unreachableDefinitions",
     "generate:version": "node -e \"const v=JSON.parse(require('node:fs').readFileSync('package.json','utf8')).version;require('node:fs').writeFileSync('src/version.generated.ts','export const VERSION = '+JSON.stringify(v)+';\\n')\"",
     "build": "pnpm run generate:version && pnpm run generate:types && tsc",
+    "build:ui": "cd ui && pnpm install --frozen-lockfile && pnpm run build",
     "clean:test": "node -e \"require('node:fs').rmSync('dist-test', { recursive: true, force: true })\"",
     "build:test": "pnpm run generate:version && pnpm run generate:types && pnpm run clean:test && tsc -p tsconfig.test.json",
     "start": "node dist/cli.js",
@@ -21,12 +22,13 @@
     "postbuild": "chmod +x dist/cli.js dist/proxy/server.js dist/analysis/server.js",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
-    "prepublishOnly": "pnpm run build"
+    "prepublishOnly": "pnpm run build && pnpm run build:ui"
   },
   "files": [
     "dist/",
     "public/",
     "schema/",
+    "ui/dist/",
     "mitm_addon.py",
     "screenshot-overview.png",
     "sessions-screenshot.png",

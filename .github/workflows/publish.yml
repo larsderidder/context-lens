@@ -20,6 +20,7 @@ jobs:
       - run: npm config set registry https://registry.npmjs.org/
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
+      - run: pnpm run build:ui
       - run: pnpm exec biome check .
       - run: pnpm test
       - run: npm publish --access public

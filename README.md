@@ -244,7 +244,7 @@ Context Lens is for developers who want to understand and optimize their coding 
 
 ## Data
 
-Captured requests are kept in memory (last 100 sessions) and persisted to `~/.context-lens/data/state.jsonl` across restarts. Each session is also logged as a separate `.lhar` file in `~/.context-lens/data/`. Use the Reset button in the UI to clear everything.
+Captured requests are kept in memory (last 200 sessions) and persisted to `~/.context-lens/data/state.jsonl` across restarts. Each session is also logged as a separate `.lhar` file in `~/.context-lens/data/`. Use the Reset button in the UI to clear everything.
 
 ## License
 
