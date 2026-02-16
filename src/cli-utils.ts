@@ -72,6 +72,7 @@ const TOOL_CONFIG: Record<string, ToolConfig> = {
   gemini: {
     childEnv: {
       GOOGLE_GEMINI_BASE_URL: `${PROXY_URL}/gemini/`, // API-key auth path
+      GOOGLE_VERTEX_BASE_URL: `${PROXY_URL}/gemini/`, // Vertex AI auth path
       CODE_ASSIST_ENDPOINT: `${PROXY_URL}/gemini`, // OAuth/Google login path
     },
     extraArgs: [],
@@ -260,6 +261,11 @@ export function formatHelpText(): string {
     "  cpi -> pi",
     "  cx -> codex",
     "  gm -> gemini",
+    "",
+    "Environment variables:",
+    "  UPSTREAM_OPENAI_URL        Override OpenAI upstream (for OpenAI-compatible APIs)",
+    "  UPSTREAM_ANTHROPIC_URL     Override Anthropic upstream",
+    "  UPSTREAM_GEMINI_URL        Override Gemini upstream",
     "",
     "Notes:",
     "  - No command starts standalone mode (proxy + analysis/web UI by default).",

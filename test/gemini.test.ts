@@ -205,6 +205,7 @@ describe("Gemini support", () => {
       chatgpt: "https://chatgpt.com",
       gemini: "https://generativelanguage.googleapis.com",
       geminiCodeAssist: "https://cloudcode-pa.googleapis.com",
+      vertex: "https://us-central1-aiplatform.googleapis.com",
     };
 
     it("routes standard gemini paths", () => {

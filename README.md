@@ -89,6 +89,7 @@ By default, the CLI does a cached (once per day) non-blocking check for new npm 
 | **Google Gemini** | Reverse Proxy | 🧪 Experimental | `GOOGLE_GEMINI_BASE_URL` |
 | **ChatGPT (Subscription)** | MITM Proxy | ✅ Stable | `https_proxy` |
 | **Pi Coding Agent** | Reverse Proxy (temporary per-run config) | ✅ Stable | `PI_CODING_AGENT_DIR` (set by wrapper) |
+| **OpenAI-Compatible** | Reverse Proxy | ✅ Stable | `UPSTREAM_OPENAI_URL` + `OPENAI_BASE_URL` |
 | **Aider / Generic** | Reverse Proxy | ✅ Stable | Detects standard patterns |
 
 ## What You Get
@@ -176,6 +177,27 @@ Example `~/.pi/agent/models.json`:
 ```
 
 Tested with: Claude Opus 4.6, Gemini 2.5 Flash (via Gemini CLI subscription), GPT-OSS 120B (via Antigravity). The `openai-codex` provider (ChatGPT subscription) has the same Cloudflare limitation as Codex and is not supported through the reverse proxy.
+
+### OpenAI-Compatible Endpoints
+
+Many providers expose OpenAI-compatible APIs (OpenRouter, Together, Groq, Fireworks, Ollama, vLLM, OpenCode Zen, etc.). Context Lens supports these out of the box since it already parses `/v1/chat/completions` and `/v1/responses` request formats. The model name is extracted from the request body, so token estimates and cost tracking work automatically for known models.
+
+To route traffic through the proxy, override the OpenAI upstream URL to point at your provider:
+
+```bash
+UPSTREAM_OPENAI_URL=https://opencode.ai/zen/v1 context-lens -- opencode "prompt"
+```
+
+Or in manual/standalone mode:
+
+```bash
+UPSTREAM_OPENAI_URL=https://openrouter.ai/api context-lens background start
+OPENAI_BASE_URL=http://localhost:4040/my-tool my-tool "prompt"
+```
+
+The `UPSTREAM_OPENAI_URL` variable tells the proxy where to forward requests that are classified as OpenAI format. The source tag (`/my-tool/` prefix) is still stripped before forwarding, so the upstream receives clean API paths.
+
+Note: `UPSTREAM_OPENAI_URL` is global. All OpenAI-format requests go to that upstream. If you need to use a custom endpoint and the real OpenAI API simultaneously, use separate proxy instances or the mitmproxy approach below.
 
 ### Codex Subscription Mode
 

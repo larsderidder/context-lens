@@ -14,6 +14,7 @@ const DEFAULT_UPSTREAMS: Upstreams = {
   chatgpt: "https://chatgpt.com",
   gemini: "https://generativelanguage.googleapis.com",
   geminiCodeAssist: "https://cloudcode-pa.googleapis.com",
+  vertex: "https://us-central1-aiplatform.googleapis.com",
 };
 
 describe("proxy/routing", () => {
@@ -61,6 +62,15 @@ describe("proxy/routing", () => {
     it("detects gemini from x-goog-api-key header", () => {
       const r = classifyRequest("/some/path", { "x-goog-api-key": "key" });
       assert.equal(r.provider, "gemini");
+    });
+
+    it("detects vertex from Vertex AI path", () => {
+      const r = classifyRequest(
+        "/v1beta1/projects/my-project/locations/us-central1/publishers/google/models/gemini-2.5-pro:generateContent",
+        {},
+      );
+      assert.equal(r.provider, "vertex");
+      assert.equal(r.apiFormat, "gemini");
     });
 
     it("returns unknown for unrecognized paths", () => {
@@ -144,6 +154,20 @@ describe("proxy/routing", () => {
       );
       assert.ok(r.targetUrl.startsWith("https://cloudcode-pa.googleapis.com"));
       assert.equal(r.provider, "gemini");
+    });
+
+    it("routes Vertex AI paths to location-based upstream", () => {
+      const r = resolveTargetUrl(
+        "/v1beta1/projects/my-project/locations/us-central1/publishers/google/models/gemini-2.5-pro:generateContent",
+        null,
+        {},
+        DEFAULT_UPSTREAMS,
+      );
+      assert.equal(
+        r.targetUrl,
+        "https://us-central1-aiplatform.googleapis.com/v1beta1/projects/my-project/locations/us-central1/publishers/google/models/gemini-2.5-pro:generateContent",
+      );
+      assert.equal(r.provider, "vertex");
     });
   });
 });

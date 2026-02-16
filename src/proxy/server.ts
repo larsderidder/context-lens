@@ -61,5 +61,8 @@ server.listen(config.port, config.bindHost, () => {
     console.log(`\nUpstream: OpenAI → ${config.upstreams.openai}`);
     console.log(`         Anthropic → ${config.upstreams.anthropic}`);
     console.log(`         Gemini → ${config.upstreams.gemini}`);
+    if (process.env.UPSTREAM_OPENAI_URL) {
+      console.log(`\n⚠️  OpenAI upstream overridden via UPSTREAM_OPENAI_URL`);
+    }
   }
 });
