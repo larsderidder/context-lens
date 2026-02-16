@@ -5,6 +5,7 @@ export type Provider =
   | "openai"
   | "chatgpt"
   | "gemini"
+  | "vertex"
   | "unknown";
 
 export type ApiFormat =
@@ -125,6 +126,7 @@ export interface Upstreams {
   chatgpt: string;
   gemini: string;
   geminiCodeAssist: string;
+  vertex: string;
 }
 
 export interface ResolveTargetResult {

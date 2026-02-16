@@ -274,7 +274,11 @@ export function parseContextInfo(
       info.tools = body.tools;
       info.toolsTokens = estimateTokens(JSON.stringify(body.tools));
     }
-  } else if (provider === "gemini" || apiFormat === "gemini") {
+  } else if (
+    provider === "gemini" ||
+    provider === "vertex" ||
+    apiFormat === "gemini"
+  ) {
     // Gemini API: contents[], systemInstruction, tools[{functionDeclarations}]
     // Code Assist wraps everything inside body.request: {contents, systemInstruction, tools, ...}
     const geminiBody = body.request || body;

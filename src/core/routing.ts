@@ -15,6 +15,7 @@ import type {
 export const API_PATH_SEGMENTS = new Set([
   "v1",
   "v1beta",
+  "v1beta1",
   "v1alpha",
   "v1internal",
   "responses",
@@ -67,6 +68,15 @@ export function classifyRequest(
     return { provider: "anthropic", apiFormat: "unknown" };
   if (headers["anthropic-version"])
     return { provider: "anthropic", apiFormat: "unknown" };
+
+  // Vertex AI: must come BEFORE Gemini (Vertex paths also contain :generateContent)
+  // Matches /v1beta1/projects/{project}/locations/{location}/publishers/google/models/{model}:generateContent
+  const isVertexPath = pathname.match(
+    /\/v1[^/]*\/projects\/[^/]+\/locations\/[^/]+\/publishers\/google\/models\//,
+  );
+  if (isVertexPath) {
+    return { provider: "vertex", apiFormat: "gemini" };
+  }
 
   // Gemini: must come BEFORE openai catch-all (which matches /models/)
   const isGeminiPath =
@@ -147,6 +157,19 @@ export function resolveTargetUrl(
         (isCodeAssist ? upstreams.geminiCodeAssist : upstreams.gemini) +
         parsedUrl.pathname +
         search;
+    } else if (provider === "vertex") {
+      // Extract location from Vertex path to build the regional endpoint.
+      // Path: /v1beta1/projects/{project}/locations/{location}/...
+      const locMatch = parsedUrl.pathname.match(/\/locations\/([^/]+)\//);
+      const location = locMatch?.[1];
+      if (location && location !== "global") {
+        targetUrl =
+          `https://${location}-aiplatform.googleapis.com` +
+          parsedUrl.pathname +
+          search;
+      } else {
+        targetUrl = upstreams.vertex + parsedUrl.pathname + search;
+      }
     } else {
       targetUrl = upstreams.openai + parsedUrl.pathname + search;
     }

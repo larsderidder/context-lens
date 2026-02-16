@@ -10,6 +10,8 @@ import {
   buildLharRecord,
   buildSessionLine,
   extractResponseId,
+  extractToolCalls,
+  extractToolDefinitions,
   parseResponseUsage,
   redactHeaders,
   toLharJson,
@@ -1204,5 +1206,238 @@ describe("toLharJson privacy levels", () => {
     const entry = makeEntry({ rawBody: anthropicBasic });
     const result = toLharJson([entry], convos, "standard");
     assert.equal(result.lhar.entries[0].raw.request_body, null);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tool extraction
+// ---------------------------------------------------------------------------
+
+describe("extractToolDefinitions", () => {
+  it("extracts Anthropic-format tools with name and description", () => {
+    const ci = parseContextInfo(
+      "anthropic",
+      {
+        model: "claude-sonnet-4-20250514",
+        messages: [],
+        system: "You are a helpful assistant.",
+        tools: [
+          { name: "Read", description: "Read a file from the filesystem" },
+          { name: "Write", description: "Write content to a file" },
+        ],
+      },
+      "anthropic-messages",
+    );
+
+    const result = extractToolDefinitions(ci);
+    assert.equal(result.length, 2);
+    assert.equal(result[0].name, "Read");
+    assert.equal(result[0].description, "Read a file from the filesystem");
+    assert.equal(result[1].name, "Write");
+    assert.equal(result[1].description, "Write content to a file");
+  });
+
+  it("extracts OpenAI-format tools with function wrapper", () => {
+    const ci = parseContextInfo(
+      "openai",
+      {
+        model: "gpt-4o",
+        messages: [],
+        tools: [
+          {
+            type: "function",
+            function: {
+              name: "get_weather",
+              description: "Get weather for a location",
+              parameters: { type: "object", properties: {} },
+            },
+          },
+        ],
+      },
+      "chat-completions",
+    );
+
+    const result = extractToolDefinitions(ci);
+    assert.equal(result.length, 1);
+    assert.equal(result[0].name, "get_weather");
+    assert.equal(result[0].description, "Get weather for a location");
+  });
+
+  it("handles tools without description", () => {
+    const ci = parseContextInfo(
+      "anthropic",
+      {
+        model: "claude-sonnet-4-20250514",
+        messages: [],
+        tools: [{ name: "Ping" }],
+      },
+      "anthropic-messages",
+    );
+
+    const result = extractToolDefinitions(ci);
+    assert.equal(result.length, 1);
+    assert.equal(result[0].name, "Ping");
+    assert.equal(result[0].description, null);
+  });
+
+  it("returns empty array when no tools provided", () => {
+    const ci = parseContextInfo(
+      "anthropic",
+      {
+        model: "claude-sonnet-4-20250514",
+        messages: [],
+      },
+      "anthropic-messages",
+    );
+
+    const result = extractToolDefinitions(ci);
+    assert.equal(result.length, 0);
+  });
+});
+
+describe("extractToolCalls", () => {
+  it("extracts tool_use blocks from messages", () => {
+    const ci = parseContextInfo(
+      "anthropic",
+      {
+        model: "claude-sonnet-4-20250514",
+        messages: [
+          {
+            role: "user",
+            content: "Read the file",
+          },
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "tool_use",
+                id: "toolu_1",
+                name: "Read",
+                input: { file: "test.ts" },
+              },
+            ],
+          },
+          {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: "toolu_1",
+                content: "file contents",
+              },
+            ],
+          },
+        ],
+      },
+      "anthropic-messages",
+    );
+
+    const result = extractToolCalls(ci);
+    assert.equal(result.length, 1);
+    assert.equal(result[0].name, "Read");
+    assert.equal(result[0].call_id, "toolu_1");
+    assert.deepEqual(result[0].arguments, { file: "test.ts" });
+  });
+
+  it("extracts multiple tool calls from same message", () => {
+    const ci = parseContextInfo(
+      "anthropic",
+      {
+        model: "claude-sonnet-4-20250514",
+        messages: [
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "tool_use",
+                id: "1",
+                name: "Read",
+                input: { file: "a.txt" },
+              },
+              {
+                type: "tool_use",
+                id: "2",
+                name: "Read",
+                input: { file: "b.txt" },
+              },
+            ],
+          },
+        ],
+      },
+      "anthropic-messages",
+    );
+
+    const result = extractToolCalls(ci);
+    assert.equal(result.length, 2);
+    assert.equal(result[0].name, "Read");
+    assert.equal(result[1].name, "Read");
+  });
+
+  it("ignores non-tool_use blocks", () => {
+    const ci = parseContextInfo(
+      "anthropic",
+      {
+        model: "claude-sonnet-4-20250514",
+        messages: [
+          {
+            role: "assistant",
+            content: [
+              { type: "text", text: "Hello" },
+              {
+                type: "tool_use",
+                id: "1",
+                name: "Bash",
+                input: { command: "ls" },
+              },
+            ],
+          },
+        ],
+      },
+      "anthropic-messages",
+    );
+
+    const result = extractToolCalls(ci);
+    assert.equal(result.length, 1);
+    assert.equal(result[0].name, "Bash");
+  });
+
+  it("handles messages without contentBlocks", () => {
+    const ci = parseContextInfo(
+      "anthropic",
+      {
+        model: "claude-sonnet-4-20250514",
+        messages: [
+          {
+            role: "user",
+            content: "Hello",
+          },
+        ],
+      },
+      "anthropic-messages",
+    );
+
+    const result = extractToolCalls(ci);
+    assert.equal(result.length, 0);
+  });
+
+  it("handles tool_use blocks without id", () => {
+    const ci = parseContextInfo(
+      "anthropic",
+      {
+        model: "claude-sonnet-4-20250514",
+        messages: [
+          {
+            role: "assistant",
+            content: [{ type: "tool_use", name: "Ping", input: {} }],
+          },
+        ],
+      },
+      "anthropic-messages",
+    );
+
+    const result = extractToolCalls(ci);
+    assert.equal(result.length, 1);
+    assert.equal(result[0].call_id, null);
+    assert.deepEqual(result[0].arguments, {});
   });
 });

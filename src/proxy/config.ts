@@ -30,6 +30,9 @@ export function loadProxyConfig(): ProxyConfig {
     geminiCodeAssist:
       process.env.UPSTREAM_GEMINI_CODE_ASSIST_URL ||
       "https://cloudcode-pa.googleapis.com",
+    vertex:
+      process.env.UPSTREAM_VERTEX_URL ||
+      "https://us-central1-aiplatform.googleapis.com",
   };
 
   // Bind only to localhost unless explicitly overridden.

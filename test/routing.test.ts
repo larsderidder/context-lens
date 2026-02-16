@@ -55,6 +55,26 @@ describe("detectProvider", () => {
   it("returns unknown for unrecognized paths", () => {
     assert.equal(detectProvider("/unknown/path", {}), "unknown");
   });
+
+  it("detects vertex from Vertex AI path", () => {
+    assert.equal(
+      detectProvider(
+        "/v1/projects/my-project/locations/us-central1/publishers/google/models/gemini-2.0-flash:predict",
+        {},
+      ),
+      "vertex",
+    );
+  });
+
+  it("detects vertex from Vertex AI stream path", () => {
+    assert.equal(
+      detectProvider(
+        "/v1/projects/my-project/locations/us-east1/publishers/google/models/gemini-1.5-pro:streamPredict",
+        {},
+      ),
+      "vertex",
+    );
+  });
 });
 
 describe("detectApiFormat", () => {
@@ -80,6 +100,24 @@ describe("detectApiFormat", () => {
 
   it("returns unknown for unrecognized paths", () => {
     assert.equal(detectApiFormat("/v1/models"), "unknown");
+  });
+
+  it("detects vertex API format as gemini", () => {
+    assert.equal(
+      detectApiFormat(
+        "/v1/projects/my-project/locations/us-central1/publishers/google/models/gemini-2.0-flash:predict",
+      ),
+      "gemini",
+    );
+  });
+
+  it("detects vertex API format for v1beta1 paths", () => {
+    assert.equal(
+      detectApiFormat(
+        "/v1beta1/projects/my-project/locations/us-central1/publishers/google/models/gemini-2.5-pro:generateContent",
+      ),
+      "gemini",
+    );
   });
 });
 
@@ -157,6 +195,7 @@ describe("resolveTargetUrl", () => {
     chatgpt: "https://chatgpt.com",
     gemini: "https://generativelanguage.googleapis.com",
     geminiCodeAssist: "https://cloudcode-pa.googleapis.com",
+    vertex: "https://us-central1-aiplatform.googleapis.com",
   };
 
   it("routes anthropic paths to anthropic upstream", () => {
@@ -227,5 +266,37 @@ describe("resolveTargetUrl", () => {
       upstreams,
     );
     assert.equal(result.targetUrl, "https://api.anthropic.com/v1/messages");
+  });
+
+  it("routes Vertex AI paths to location-based upstream", () => {
+    const result = resolveTargetUrl(
+      {
+        pathname:
+          "/v1beta1/projects/my-project/locations/us-central1/publishers/google/models/gemini-2.5-pro:generateContent",
+      },
+      {},
+      upstreams,
+    );
+    assert.equal(
+      result.targetUrl,
+      "https://us-central1-aiplatform.googleapis.com/v1beta1/projects/my-project/locations/us-central1/publishers/google/models/gemini-2.5-pro:generateContent",
+    );
+    assert.equal(result.provider, "vertex");
+  });
+
+  it("routes Vertex AI with global location to default upstream", () => {
+    const result = resolveTargetUrl(
+      {
+        pathname:
+          "/v1beta1/projects/my-project/locations/global/publishers/google/models/gemini-2.0-flash:generateContent",
+      },
+      {},
+      upstreams,
+    );
+    assert.equal(
+      result.targetUrl,
+      "https://us-central1-aiplatform.googleapis.com/v1beta1/projects/my-project/locations/global/publishers/google/models/gemini-2.0-flash:generateContent",
+    );
+    assert.equal(result.provider, "vertex");
   });
 });

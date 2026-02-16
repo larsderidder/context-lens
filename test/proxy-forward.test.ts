@@ -151,6 +151,7 @@ describe("proxy/forward", () => {
       chatgpt: base,
       gemini: base,
       geminiCodeAssist: base,
+      vertex: base,
     };
 
     handler = createProxyHandler({
