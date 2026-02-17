@@ -130,6 +130,7 @@ export interface LharRecord {
   usage_ext: {
     cache_read_tokens: number;
     cache_write_tokens: number;
+    thinking_tokens: number;
     cost_usd: number | null;
   };
   http: {

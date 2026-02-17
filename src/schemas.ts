@@ -170,6 +170,7 @@ const ProjectedUsageSchema = v.object({
   outputTokens: v.number(),
   cacheReadTokens: v.number(),
   cacheWriteTokens: v.number(),
+  thinkingTokens: v.optional(v.number(), 0),
 });
 
 // ---------------------------------------------------------------------------

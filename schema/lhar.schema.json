@@ -209,6 +209,7 @@
           "properties": {
             "cache_read_tokens": { "type": "number" },
             "cache_write_tokens": { "type": "number" },
+            "thinking_tokens": { "type": "number" },
             "cost_usd": {
               "oneOf": [
                 { "type": "number" },
@@ -216,7 +217,7 @@
               ]
             }
           },
-          "required": ["cache_read_tokens", "cache_write_tokens", "cost_usd"],
+          "required": ["cache_read_tokens", "cache_write_tokens", "thinking_tokens", "cost_usd"],
           "additionalProperties": false
         },
 

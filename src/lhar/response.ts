@@ -3,6 +3,7 @@ export interface ParsedResponseUsage {
   outputTokens: number;
   cacheReadTokens: number;
   cacheWriteTokens: number;
+  thinkingTokens: number;
   model: string | null;
   finishReasons: string[];
   stream: boolean;
@@ -56,6 +57,7 @@ export function parseResponseUsage(responseData: any): ParsedResponseUsage {
     outputTokens: 0,
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
+    thinkingTokens: 0,
     model: null,
     finishReasons: [],
     stream: false,
@@ -76,6 +78,7 @@ export function parseResponseUsage(responseData: any): ParsedResponseUsage {
     result.outputTokens = u.output_tokens || u.completion_tokens || 0;
     result.cacheReadTokens = u.cache_read_input_tokens || 0;
     result.cacheWriteTokens = u.cache_creation_input_tokens || 0;
+    result.thinkingTokens = u.thinking_tokens || 0;
   }
 
   // Gemini usageMetadata (direct or inside Code Assist wrapper .response)
@@ -84,12 +87,14 @@ export function parseResponseUsage(responseData: any): ParsedResponseUsage {
     : responseData.response;
   if (geminiResp?.usageMetadata) {
     const u = geminiResp.usageMetadata;
-    result.inputTokens = u.promptTokenCount || 0;
+    const prompt = u.promptTokenCount || 0;
+    const cached = u.cachedContentTokenCount || 0;
+    // Gemini's promptTokenCount includes cached tokens; subtract to get non-cached input
+    result.inputTokens = prompt - cached;
     result.outputTokens =
-      u.candidatesTokenCount ||
-      u.totalTokenCount - (u.promptTokenCount || 0) ||
-      0;
-    result.cacheReadTokens = u.cachedContentTokenCount || 0;
+      u.candidatesTokenCount || u.totalTokenCount - prompt || 0;
+    result.cacheReadTokens = cached;
+    result.thinkingTokens = u.thoughtsTokenCount || 0;
   }
 
   result.model =
@@ -168,13 +173,17 @@ function parseStreamingUsage(
       }
       // Gemini streaming: usageMetadata in chunks
       if (parsed.usageMetadata) {
-        result.inputTokens =
-          parsed.usageMetadata.promptTokenCount || result.inputTokens;
+        const prompt = parsed.usageMetadata.promptTokenCount || 0;
+        const cached = parsed.usageMetadata.cachedContentTokenCount || 0;
+        // Gemini's promptTokenCount includes cached tokens; subtract to get non-cached input
+        if (prompt > 0) {
+          result.inputTokens = prompt - cached;
+          result.cacheReadTokens = cached;
+        }
         result.outputTokens =
           parsed.usageMetadata.candidatesTokenCount || result.outputTokens;
-        result.cacheReadTokens =
-          parsed.usageMetadata.cachedContentTokenCount ||
-          result.cacheReadTokens;
+        result.thinkingTokens =
+          parsed.usageMetadata.thoughtsTokenCount || result.thinkingTokens;
       }
       if (parsed.candidates?.[0]?.finishReason) {
         result.finishReasons = [parsed.candidates[0].finishReason];

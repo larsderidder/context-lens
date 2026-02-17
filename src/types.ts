@@ -110,6 +110,7 @@ export interface HeaderSignature {
 
 export interface ExtractSourceResult {
   source: string | null;
+  sessionId: string | null;
   cleanPath: string;
 }
 
@@ -256,6 +257,7 @@ export interface ProjectedUsage {
   outputTokens: number;
   cacheReadTokens: number;
   cacheWriteTokens: number;
+  thinkingTokens: number;
 }
 
 export interface ProjectedEntry {

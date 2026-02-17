@@ -928,6 +928,7 @@ export class Store {
         output_tokens: usage.outputTokens,
         cache_read_input_tokens: usage.cacheReadTokens,
         cache_creation_input_tokens: usage.cacheWriteTokens,
+        thinking_tokens: usage.thinkingTokens,
       },
       model: usage.model,
       stop_reason: usage.finishReasons[0] || null,

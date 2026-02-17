@@ -19,7 +19,8 @@ export function projectEntry(
     usage.inputTokens > 0 ||
     usage.outputTokens > 0 ||
     usage.cacheReadTokens > 0 ||
-    usage.cacheWriteTokens > 0;
+    usage.cacheWriteTokens > 0 ||
+    usage.thinkingTokens > 0;
 
   return {
     id: e.id,
@@ -46,6 +47,7 @@ export function projectEntry(
           outputTokens: usage.outputTokens,
           cacheReadTokens: usage.cacheReadTokens,
           cacheWriteTokens: usage.cacheWriteTokens,
+          thinkingTokens: usage.thinkingTokens,
         }
       : null,
     responseModel: usage.model,

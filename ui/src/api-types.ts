@@ -176,6 +176,7 @@ export interface ProjectedUsage {
   outputTokens: number;
   cacheReadTokens: number;
   cacheWriteTokens: number;
+  thinkingTokens: number;
 }
 
 export interface ProjectedEntry {

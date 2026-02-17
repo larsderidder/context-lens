@@ -80,17 +80,43 @@ export const MODEL_PRICING: Record<string, [number, number]> = {
 };
 
 /**
+ * Cache pricing multipliers by provider prefix.
+ *
+ * Each entry maps a model key prefix to `[readMultiplier, writeMultiplier]`
+ * relative to the base input price. For example, Anthropic charges 10% of
+ * the base input rate for cache reads and 25% for cache writes.
+ *
+ * Gemini charges 25% of base input for cached content (reads). Gemini has
+ * no separate "cache write" billing; context caching cost is handled
+ * outside the per-request pricing.
+ */
+const CACHE_PRICING: Record<string, [number, number]> = {
+  "claude-": [0.1, 0.25],
+  "gemini-": [0.25, 0],
+};
+
+/**
+ * Look up cache pricing multipliers for a model key.
+ */
+function getCacheMultipliers(modelKey: string): [number, number] {
+  for (const [prefix, multipliers] of Object.entries(CACHE_PRICING)) {
+    if (modelKey.startsWith(prefix)) return multipliers;
+  }
+  return [0, 0];
+}
+
+/**
  * Estimate cost in USD for a request/response token pair using `MODEL_PRICING`.
  *
- * Cache pricing (Anthropic):
- * - Cache reads: 10% of base input price (0.1x)
- * - Cache writes: 25% of base input price (0.25x)
+ * Cache pricing varies by provider:
+ * - Anthropic: cache reads at 10% of base input, writes at 25%
+ * - Gemini: cached content at 25% of base input, no write cost
  *
  * @param model - Model identifier (substring matched against known keys).
  * @param inputTokens - Input/prompt tokens (non-cached).
  * @param outputTokens - Output/completion tokens.
- * @param cacheReadTokens - Cache read tokens (charged at 10% for Anthropic).
- * @param cacheWriteTokens - Cache write tokens (charged at 25% for Anthropic).
+ * @param cacheReadTokens - Cache read tokens.
+ * @param cacheWriteTokens - Cache write tokens.
  * @returns Cost in USD, rounded to 6 decimals; `null` if the model is unknown.
  */
 export function estimateCost(
@@ -102,10 +128,9 @@ export function estimateCost(
 ): number | null {
   for (const [key, [inp, out]] of Object.entries(MODEL_PRICING)) {
     if (model.includes(key)) {
-      // Anthropic models have cache pricing (10% for reads, 25% for writes)
-      const isClaude = key.startsWith("claude-");
-      const cacheReadCost = isClaude ? cacheReadTokens * inp * 0.1 : 0;
-      const cacheWriteCost = isClaude ? cacheWriteTokens * inp * 0.25 : 0;
+      const [readMul, writeMul] = getCacheMultipliers(key);
+      const cacheReadCost = cacheReadTokens * inp * readMul;
+      const cacheWriteCost = cacheWriteTokens * inp * writeMul;
 
       return (
         Math.round(

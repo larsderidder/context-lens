@@ -821,10 +821,11 @@ describe("Store", () => {
         healthScore: null,
         securityAlerts: [],
         usage: {
-          inputTokens: 200,
+          inputTokens: 150,
           outputTokens: 40,
           cacheReadTokens: 50,
           cacheWriteTokens: 0,
+          thinkingTokens: 0,
         },
         responseModel: null,
         stopReason: null,
@@ -842,7 +843,9 @@ describe("Store", () => {
     store.loadState();
 
     const ci = store.getCapturedRequests()[0].contextInfo;
-    assert.equal(ci.totalTokens, 250); // prompt + cached content
+    // Gemini's promptTokenCount (200) already includes cachedContentTokenCount (50),
+    // so authoritative total = promptTokenCount = 200 (not 250)
+    assert.equal(ci.totalTokens, 200);
 
     try {
       rmSync(dir, { recursive: true, force: true });

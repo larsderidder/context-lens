@@ -7,6 +7,7 @@ import {
   parseContextInfo,
   resolveTargetUrl,
 } from "../src/core.js";
+import { parseResponseUsage } from "../src/lhar.js";
 
 describe("Gemini support", () => {
   describe("detectProvider", () => {
@@ -195,6 +196,140 @@ describe("Gemini support", () => {
       // 1M input @ $0.10 + 1M output @ $0.40 = $0.50
       const cost = estimateCost("gemini-2.0-flash", 1_000_000, 1_000_000);
       assert.equal(cost, 0.5);
+    });
+
+    it("calculates cache read cost at 25% for Gemini models", () => {
+      // Gemini 2.5 Pro: base input = $1.25/M
+      // 5775 non-cached input @ $1.25/M = $0.00721875
+      // 196461 cache read @ $0.3125/M (25% of $1.25) = $0.061394...
+      // Total input cost ~ $0.068613
+      const cost = estimateCost("gemini-2.5-pro", 5775, 0, 196461, 0);
+      assert.ok(cost !== null);
+      // 5775 * 1.25 / 1M + 196461 * 1.25 * 0.25 / 1M
+      // = 0.00721875 + 0.06139406... = 0.068613 (rounded to 6 dp)
+      assert.equal(cost, 0.068613);
+    });
+
+    it("applies cache pricing to reduce cost vs full-price input", () => {
+      // 202236 total input, 196461 cached, 5775 non-cached
+      // With cache: 5775 * 1.25/1M + 196461 * 0.3125/1M = $0.068613
+      // Without cache: 202236 * 1.25/1M = $0.252795
+      const withCache = estimateCost("gemini-2.5-pro", 5775, 0, 196461, 0);
+      const withoutCache = estimateCost("gemini-2.5-pro", 202236, 0, 0, 0);
+      assert.ok(withCache !== null && withoutCache !== null);
+      assert.ok(withCache < withoutCache, "cached cost should be lower");
+      // Cache should save roughly 73% on input cost
+      const savings = 1 - withCache / withoutCache;
+      assert.ok(savings > 0.7, `savings should be > 70%, got ${(savings * 100).toFixed(1)}%`);
+    });
+
+    it("does not charge for Gemini cache writes", () => {
+      // Gemini has no per-request cache write billing
+      const withWrites = estimateCost("gemini-2.5-pro", 100_000, 0, 0, 50_000);
+      const withoutWrites = estimateCost("gemini-2.5-pro", 100_000, 0, 0, 0);
+      assert.equal(withWrites, withoutWrites);
+    });
+  });
+
+  describe("parseResponseUsage (Gemini)", () => {
+    it("parses non-streaming Gemini response with cache and thinking tokens", () => {
+      const resp = {
+        modelVersion: "gemini-2.5-pro-preview-05-06",
+        usageMetadata: {
+          promptTokenCount: 202236,
+          cachedContentTokenCount: 196461,
+          candidatesTokenCount: 148,
+          thoughtsTokenCount: 188,
+          totalTokenCount: 202572,
+        },
+        candidates: [{ finishReason: "STOP" }],
+      };
+      const usage = parseResponseUsage(resp);
+      // inputTokens should be non-cached portion
+      assert.equal(usage.inputTokens, 202236 - 196461); // 5775
+      assert.equal(usage.outputTokens, 148);
+      assert.equal(usage.cacheReadTokens, 196461);
+      assert.equal(usage.thinkingTokens, 188);
+      assert.equal(usage.model, "gemini-2.5-pro-preview-05-06");
+      assert.deepEqual(usage.finishReasons, ["STOP"]);
+    });
+
+    it("parses Gemini response without caching", () => {
+      const resp = {
+        modelVersion: "gemini-2.0-flash",
+        usageMetadata: {
+          promptTokenCount: 1000,
+          candidatesTokenCount: 200,
+          totalTokenCount: 1200,
+        },
+        candidates: [{ finishReason: "STOP" }],
+      };
+      const usage = parseResponseUsage(resp);
+      assert.equal(usage.inputTokens, 1000);
+      assert.equal(usage.outputTokens, 200);
+      assert.equal(usage.cacheReadTokens, 0);
+      assert.equal(usage.thinkingTokens, 0);
+    });
+
+    it("parses streaming Gemini response with cache and thinking tokens", () => {
+      const chunks = [
+        'data: {"candidates":[{"content":{"parts":[{"text":"Hello"}]}}],"usageMetadata":{"promptTokenCount":202236,"cachedContentTokenCount":196461,"candidatesTokenCount":10,"thoughtsTokenCount":50},"modelVersion":"gemini-2.5-pro-preview-05-06"}',
+        "",
+        'data: {"candidates":[{"content":{"parts":[{"text":" world"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":202236,"cachedContentTokenCount":196461,"candidatesTokenCount":148,"thoughtsTokenCount":188},"modelVersion":"gemini-2.5-pro-preview-05-06"}',
+        "",
+        "data: [DONE]",
+      ].join("\n");
+      const usage = parseResponseUsage({ streaming: true, chunks });
+      assert.equal(usage.stream, true);
+      // Should use the last chunk's values (streaming overwrites)
+      assert.equal(usage.inputTokens, 202236 - 196461); // 5775
+      assert.equal(usage.outputTokens, 148);
+      assert.equal(usage.cacheReadTokens, 196461);
+      assert.equal(usage.thinkingTokens, 188);
+      assert.equal(usage.model, "gemini-2.5-pro-preview-05-06");
+      assert.deepEqual(usage.finishReasons, ["STOP"]);
+    });
+
+    it("parses Code Assist wrapped Gemini response", () => {
+      const resp = {
+        response: {
+          modelVersion: "gemini-2.5-pro",
+          usageMetadata: {
+            promptTokenCount: 5000,
+            cachedContentTokenCount: 3000,
+            candidatesTokenCount: 100,
+            thoughtsTokenCount: 50,
+          },
+          candidates: [{ finishReason: "STOP" }],
+        },
+      };
+      const usage = parseResponseUsage(resp);
+      assert.equal(usage.inputTokens, 5000 - 3000); // 2000
+      assert.equal(usage.outputTokens, 100);
+      assert.equal(usage.cacheReadTokens, 3000);
+      assert.equal(usage.thinkingTokens, 50);
+      assert.equal(usage.model, "gemini-2.5-pro");
+    });
+
+    it("preserves thinking tokens through compacted response format", () => {
+      // Simulates what compactEntry produces (Anthropic-style field names)
+      const compacted = {
+        usage: {
+          input_tokens: 5775,
+          output_tokens: 148,
+          cache_read_input_tokens: 196461,
+          cache_creation_input_tokens: 0,
+          thinking_tokens: 188,
+        },
+        model: "gemini-2.5-pro-preview-05-06",
+        stop_reason: "STOP",
+      };
+      const usage = parseResponseUsage(compacted);
+      assert.equal(usage.inputTokens, 5775);
+      assert.equal(usage.outputTokens, 148);
+      assert.equal(usage.cacheReadTokens, 196461);
+      assert.equal(usage.thinkingTokens, 188);
+      assert.equal(usage.model, "gemini-2.5-pro-preview-05-06");
     });
   });
 

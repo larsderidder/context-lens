@@ -74,6 +74,7 @@ function mkEntry(overrides: {
     usage_ext: {
       cache_read_tokens: 0,
       cache_write_tokens: 0,
+      thinking_tokens: 0,
       cost_usd: overrides.costUsd ?? 0.01,
     },
     http: {
@@ -458,6 +459,7 @@ describe("timing and cache stats", () => {
     e1.usage_ext = {
       cache_read_tokens: 900,
       cache_write_tokens: 100,
+      thinking_tokens: 0,
       cost_usd: 0.01,
     };
     e1.gen_ai.usage = {
@@ -486,6 +488,7 @@ describe("timing and cache stats", () => {
     e1.usage_ext = {
       cache_read_tokens: 900,
       cache_write_tokens: 100,
+      thinking_tokens: 0,
       cost_usd: 0.01,
     };
 

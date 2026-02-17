@@ -177,6 +177,7 @@ export function buildLharRecord(
     usage_ext: {
       cache_read_tokens: usage.cacheReadTokens,
       cache_write_tokens: usage.cacheWriteTokens,
+      thinking_tokens: usage.thinkingTokens,
       cost_usd: entry.costUsd,
     },
 
