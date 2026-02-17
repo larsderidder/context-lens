@@ -31,7 +31,8 @@ export function getCategoryColor(category: string, fallback = '#475569'): string
 /** Group map used by the treemap "simple" mode. */
 export const SIMPLE_GROUPS: Record<string, string[]> = {
   system: ['system_prompt', 'system_injections'],
-  tools: ['tool_definitions', 'tool_calls', 'tool_results'],
+  tools: ['tool_definitions', 'tool_calls'],
+  results: ['tool_results'],
   conversation: ['assistant_text', 'user_text', 'thinking'],
   other: ['images', 'cache_markers', 'other'],
 }
@@ -39,6 +40,7 @@ export const SIMPLE_GROUPS: Record<string, string[]> = {
 export const SIMPLE_META: Record<string, { label: string; color: string }> = {
   system: { label: 'System', color: '#2563eb' },
   tools: { label: 'Tools', color: '#db2777' },
+  results: { label: 'Results', color: '#059669' },
   conversation: { label: 'Conversation', color: '#d97706' },
   other: { label: 'Other', color: '#4b5563' },
 }
