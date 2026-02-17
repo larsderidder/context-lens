@@ -23,6 +23,7 @@ function projectEntryForApi(e: CapturedEntry) {
   return projectEntry(e, e.contextInfo);
 }
 
+
 function getExportEntries(
   store: Store,
   conversation?: string,
@@ -128,6 +129,10 @@ function buildFullConversation(
  */
 export function createApiApp(store: Store): Hono {
   const app = new Hono();
+
+  // --- Health ---
+
+  app.get("/health", (c) => c.json({ status: "ok" }));
 
   // --- Ingest ---
 

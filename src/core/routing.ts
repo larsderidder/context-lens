@@ -123,11 +123,11 @@ export function extractSource(pathname: string): ExtractSourceResult {
       decoded.includes("\\") ||
       decoded.includes("..")
     ) {
-      return { source: null, cleanPath: pathname };
+      return { source: null, sessionId: null, cleanPath: pathname };
     }
-    return { source: decoded, cleanPath: match[2] || "/" };
+    return { source: decoded, sessionId: null, cleanPath: match[2] || "/" };
   }
-  return { source: null, cleanPath: pathname };
+  return { source: null, sessionId: null, cleanPath: pathname };
 }
 
 /**

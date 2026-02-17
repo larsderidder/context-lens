@@ -16,6 +16,8 @@ export interface ProxyConfig {
   port: number;
   allowTargetOverride: boolean;
   captureDir: string;
+  /** When set, POST captures to this URL instead of writing files to captureDir. */
+  ingestUrl: string | null;
 }
 
 export function loadProxyConfig(): ProxyConfig {
@@ -47,11 +49,14 @@ export function loadProxyConfig(): ProxyConfig {
     process.env.CONTEXT_LENS_CAPTURE_DIR ||
     join(homedir(), ".context-lens", "captures");
 
+  const ingestUrl = process.env.CONTEXT_LENS_INGEST_URL || null;
+
   return {
     upstreams,
     bindHost,
     port,
     allowTargetOverride,
     captureDir,
+    ingestUrl,
   };
 }
