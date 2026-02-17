@@ -157,7 +157,12 @@ export function createApiApp(store: Store): Hono {
         data.body,
         data.apiFormat,
       );
-      store.storeRequest(contextInfo, data.response, data.source, data.body);
+      store.storeRequest(
+        contextInfo,
+        data.response,
+        data.source,
+        data.body,
+      );
       console.log(
         `  📥 Ingested: [${data.provider}] ${contextInfo.model} from ${data.source}`,
       );

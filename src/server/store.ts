@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import * as v from "valibot";
@@ -45,6 +46,8 @@ export interface StoreChangeEvent {
 
 type StoreChangeListener = (event: StoreChangeEvent) => void;
 
+const CODEX_SESSION_TTL_MS = 5 * 60 * 1000;
+
 export class Store {
   private readonly dataDir: string;
   private readonly stateFile: string;
@@ -57,6 +60,10 @@ export class Store {
   private conversations = new Map<string, Conversation>(); // fingerprint -> conversation
   private responseIdToConvo = new Map<string, string>(); // response_id -> conversationId
   private diskSessionsWritten = new Set<string>();
+  private codexSessionTracker = new Map<
+    string,
+    { conversationId: string; lastSeen: number }
+  >();
 
   private dataRevision = 0;
   private nextEntryId = 1;
@@ -225,47 +232,105 @@ export class Store {
     rawBody?: Record<string, any>,
     meta?: RequestMeta,
     requestHeaders?: Record<string, string>,
+    sessionId?: string | null,
   ): CapturedEntry {
     const resolvedSource = detectSource(contextInfo, source, requestHeaders);
-    const fingerprint = computeFingerprint(
+    const workingDirectory = extractWorkingDirectory(
+      contextInfo,
+      rawBody ?? null,
+    );
+    const responseId = extractResponseId(responseData);
+
+    let fingerprint = computeFingerprint(
       contextInfo,
       rawBody ?? null,
       this.responseIdToConvo,
+      resolvedSource,
+      workingDirectory,
     );
-    const rawSessionId = extractSessionId(rawBody ?? null);
+
+    const rawSessionId = sessionId ?? extractSessionId(rawBody ?? null);
 
     // Register or look up conversation
     let conversationId: string | null = null;
-    if (fingerprint) {
-      if (!this.conversations.has(fingerprint)) {
-        this.conversations.set(fingerprint, {
-          id: fingerprint,
-          label: extractConversationLabel(contextInfo),
-          source: resolvedSource || "unknown",
-          workingDirectory: extractWorkingDirectory(
-            contextInfo,
-            rawBody ?? null,
-          ),
-          firstSeen: new Date().toISOString(),
-          sessionId: rawSessionId,
-        });
-      } else {
-        const convo = this.conversations.get(fingerprint)!;
-        // Backfill source if first request couldn't detect it
-        if (
-          convo.source === "unknown" &&
-          resolvedSource &&
-          resolvedSource !== "unknown"
-        ) {
-          convo.source = resolvedSource;
-        }
-        // Backfill working directory if first request didn't have it
-        if (!convo.workingDirectory) {
-          const wd = extractWorkingDirectory(contextInfo, rawBody ?? null);
-          if (wd) convo.workingDirectory = wd;
+
+    // Explicit session ID from the caller (e.g. mitmproxy addon) takes
+    // precedence over all fingerprint-based grouping strategies.
+    if (sessionId) {
+      conversationId = createHash("sha256")
+        .update(sessionId)
+        .digest("hex")
+        .slice(0, 16);
+    } else if (fingerprint && resolvedSource === "codex") {
+      // Codex has no built-in conversation IDs. Group by working directory
+      // + system prompt fingerprint, with a TTL to split idle sessions.
+      // Compute a base fingerprint without response-ID chaining so the
+      // tracker key stays stable across turns.
+      const baseKey = computeFingerprint(
+        contextInfo,
+        rawBody ?? null,
+        new Map<string, string>(),
+        resolvedSource,
+        workingDirectory,
+      );
+      const now = Date.now();
+
+      if (rawBody?.previous_response_id) {
+        const chained = this.responseIdToConvo.get(rawBody.previous_response_id);
+        if (chained) {
+          conversationId = chained;
+          if (baseKey) {
+            this.codexSessionTracker.set(baseKey, {
+              conversationId,
+              lastSeen: now,
+            });
+          }
         }
       }
+
+      if (!conversationId && baseKey) {
+        const tracked = this.codexSessionTracker.get(baseKey);
+        if (tracked && now - tracked.lastSeen <= CODEX_SESSION_TTL_MS) {
+          conversationId = tracked.conversationId;
+          tracked.lastSeen = now;
+        } else {
+          conversationId = createHash("sha256")
+            .update(`${baseKey}\0${now}`)
+            .digest("hex")
+            .slice(0, 16);
+          this.codexSessionTracker.set(baseKey, {
+            conversationId,
+            lastSeen: now,
+          });
+        }
+      }
+    } else if (fingerprint) {
       conversationId = fingerprint;
+    }
+
+    if (conversationId && !this.conversations.has(conversationId)) {
+      this.conversations.set(conversationId, {
+        id: conversationId,
+        label: extractConversationLabel(contextInfo),
+        source: resolvedSource || "unknown",
+        workingDirectory,
+        firstSeen: new Date().toISOString(),
+        sessionId: rawSessionId,
+      });
+    } else if (conversationId) {
+      const convo = this.conversations.get(conversationId)!;
+      // Backfill source if first request couldn't detect it
+      if (
+        convo.source === "unknown" &&
+        resolvedSource &&
+        resolvedSource !== "unknown"
+      ) {
+        convo.source = resolvedSource;
+      }
+      // Backfill working directory if first request didn't have it
+      if (!convo.workingDirectory && workingDirectory) {
+        convo.workingDirectory = workingDirectory;
+      }
     }
 
     // Agent key: distinguishes agents within a session (main vs subagents)
@@ -374,9 +439,8 @@ export class Store {
 
     // Track response IDs for Responses API chaining (works for both
     // non-streaming JSON and streaming SSE responses)
-    const respId = extractResponseId(responseData);
-    if (respId && conversationId) {
-      this.responseIdToConvo.set(respId, conversationId);
+    if (responseId && conversationId) {
+      this.responseIdToConvo.set(responseId, conversationId);
     }
 
     this.capturedRequests.unshift(entry);

@@ -265,6 +265,7 @@ export const IngestCapturePayloadSchema = v.object({
   responseBody: v.optional(v.string(), ""),
   responseIsStreaming: v.optional(v.boolean(), false),
   responseBytes: v.optional(v.number(), 0),
+  sessionId: v.optional(v.nullable(v.string()), null),
   timings: v.optional(
     v.object({
       send_ms: v.number(),

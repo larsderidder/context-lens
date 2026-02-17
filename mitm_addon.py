@@ -14,14 +14,19 @@ Manual usage:
     https_proxy=http://localhost:8888 SSL_CERT_FILE=~/.mitmproxy/mitmproxy-ca-cert.pem codex "prompt"
 
 View at http://localhost:4041
+
+Environment variables:
+  CONTEXT_LENS_SESSION_ID - session ID for grouping (default: "")
 """
 
 import json
+import os
 import time
 import urllib.request
 from mitmproxy import http
 
 INGEST_URL = "http://localhost:4041/api/ingest"
+CONTEXT_LENS_SESSION_ID = os.environ.get("CONTEXT_LENS_SESSION_ID", "").strip()
 
 # Patterns to capture: (host_substring, path_substring) -> (provider, source)
 CAPTURE_PATTERNS = [
@@ -137,6 +142,7 @@ def response(flow: http.HTTPFlow):
         "responseBody": response_body,
         "responseIsStreaming": response_is_streaming,
         "responseBytes": len(flow.response.raw_content),
+        "sessionId": CONTEXT_LENS_SESSION_ID or None,
         "timings": {
             "send_ms": 0,
             "wait_ms": 0,

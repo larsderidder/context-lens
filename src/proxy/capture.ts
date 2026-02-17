@@ -25,6 +25,7 @@ export interface CaptureData {
   responseBody: string;
   responseIsStreaming: boolean;
   responseBytes: number;
+  sessionId?: string | null;
   timings: {
     send_ms: number;
     wait_ms: number;

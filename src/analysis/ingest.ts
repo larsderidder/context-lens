@@ -82,5 +82,6 @@ export function ingestCapture(store: Store, capture: CaptureData): void {
     requestBody ?? undefined,
     meta,
     capture.requestHeaders,
+    capture.sessionId ?? null,
   );
 }

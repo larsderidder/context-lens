@@ -126,6 +126,144 @@ describe("Store", () => {
     cleanup();
   });
 
+  it("creates stable codex conversations per working directory", () => {
+    const { store, cleanup } = makeStore();
+
+    const body1 = {
+      model: "gpt-4o",
+      input: [
+        {
+          role: "user",
+          content:
+            "[{\"type\":\"input_text\",\"text\":\"<environment_context>\\n  <cwd>/tmp/run-1</cwd>\\n</environment_context>\"}]",
+        },
+        { role: "user", content: "first turn" },
+      ],
+    };
+    const body2 = {
+      model: "gpt-4o",
+      input: [
+        {
+          role: "user",
+          content:
+            "[{\"type\":\"input_text\",\"text\":\"<environment_context>\\n  <cwd>/tmp/run-1</cwd>\\n</environment_context>\"}]",
+        },
+        { role: "user", content: "follow-up turn" },
+      ],
+    };
+    const body3 = {
+      model: "gpt-4o",
+      input: [
+        {
+          role: "user",
+          content:
+            "[{\"type\":\"input_text\",\"text\":\"<environment_context>\\n  <cwd>/tmp/run-2</cwd>\\n</environment_context>\"}]",
+        },
+        { role: "user", content: "new run" },
+      ],
+    };
+
+    const ci1 = parseContextInfo("openai", body1, "responses");
+    const ci2 = parseContextInfo("openai", body2, "responses");
+    const ci3 = parseContextInfo("openai", body3, "responses");
+
+    const e1 = store.storeRequest(
+      ci1,
+      {
+        id: "resp_abc",
+        model: "gpt-4o",
+        usage: { prompt_tokens: 50, completion_tokens: 10 },
+        choices: [{ finish_reason: "stop" }],
+      } as any,
+      "codex",
+      body1,
+    );
+    const e2 = store.storeRequest(
+      ci2,
+      {
+        id: "resp_def",
+        model: "gpt-4o",
+        usage: { prompt_tokens: 20, completion_tokens: 8 },
+        choices: [{ finish_reason: "stop" }],
+      } as any,
+      "codex",
+      body2,
+    );
+    const e3 = store.storeRequest(
+      ci3,
+      {
+        id: "resp_ghi",
+        model: "gpt-4o",
+        usage: { prompt_tokens: 20, completion_tokens: 8 },
+        choices: [{ finish_reason: "stop" }],
+      } as any,
+      "codex",
+      body3,
+    );
+
+    assert.ok(e1.conversationId, "first turn should be grouped");
+    assert.equal(e2.conversationId, e1.conversationId);
+    assert.notEqual(e3.conversationId, e1.conversationId);
+    assert.equal(store.getConversations().size, 2);
+
+    cleanup();
+  });
+
+  it("splits codex sessions after idle window", () => {
+    const { store, cleanup } = makeStore();
+
+    const body = {
+      model: "gpt-4o",
+      input: [
+        {
+          role: "user",
+          content:
+            "[{\"type\":\"input_text\",\"text\":\"<environment_context>\\n  <cwd>/tmp/run-1</cwd>\\n</environment_context>\"}]",
+        },
+        { role: "user", content: "first turn" },
+      ],
+    };
+
+    const ci = parseContextInfo("openai", body, "responses");
+
+    const realNow = Date.now;
+    try {
+      Date.now = () => 1_000_000;
+      const e1 = store.storeRequest(
+        ci,
+        {
+          id: "resp_abc",
+          model: "gpt-4o",
+          usage: { prompt_tokens: 50, completion_tokens: 10 },
+          choices: [{ finish_reason: "stop" }],
+        } as any,
+        "codex",
+        body,
+      );
+
+      Date.now = () => 1_000_000 + 5 * 60 * 1000 + 1;
+      const e2 = store.storeRequest(
+        ci,
+        {
+          id: "resp_def",
+          model: "gpt-4o",
+          usage: { prompt_tokens: 50, completion_tokens: 10 },
+          choices: [{ finish_reason: "stop" }],
+        } as any,
+        "codex",
+        body,
+      );
+
+      assert.ok(e1.conversationId);
+      assert.ok(e2.conversationId);
+      assert.notEqual(e2.conversationId, e1.conversationId);
+    } finally {
+      Date.now = realNow;
+    }
+
+    cleanup();
+  });
+
   it("uses API usage as authoritative total tokens and computes cache-aware cost", () => {
     const { store, cleanup } = makeStore();
 

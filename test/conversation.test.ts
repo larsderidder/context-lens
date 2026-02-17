@@ -391,16 +391,38 @@ describe("computeFingerprint", () => {
     assert.equal(fp, "existing-convo-fp");
   });
 
-  it("produces stable fingerprint for responses API using first real prompt", () => {
-    const info = parseContextInfo("openai", codexResponses, "responses");
-    const fp = computeFingerprint(info, codexResponses, new Map());
-    assert.ok(fp);
-    assert.equal(fp?.length, 16);
+  it("includes working directory in codex fingerprints", () => {
+    const body1 = {
+      ...codexResponses,
+      input: [
+        {
+          role: "user",
+          content:
+            "[{\"type\":\"input_text\",\"text\":\"<environment_context>\\n  <cwd>/tmp/run-1</cwd>\\n</environment_context>\"}]",
+        },
+        ...codexResponses.input.slice(1),
+      ],
+    };
+    const body2 = {
+      ...codexResponses,
+      input: [
+        {
+          role: "user",
+          content:
+            "[{\"type\":\"input_text\",\"text\":\"<environment_context>\\n  <cwd>/tmp/run-2</cwd>\\n</environment_context>\"}]",
+        },
+        ...codexResponses.input.slice(1),
+      ],
+    };
 
-    // Same request should produce same fingerprint (stable across turns)
-    const info2 = parseContextInfo("openai", codexResponses, "responses");
-    const fp2 = computeFingerprint(info2, codexResponses, new Map());
-    assert.equal(fp, fp2);
+    const info1 = parseContextInfo("openai", body1, "responses");
+    const info2 = parseContextInfo("openai", body2, "responses");
+    const fp1 = computeFingerprint(info1, body1, new Map(), "codex", "/tmp/run-1");
+    const fp2 = computeFingerprint(info2, body2, new Map(), "codex", "/tmp/run-2");
+
+    assert.ok(fp1);
+    assert.ok(fp2);
+    assert.notEqual(fp1, fp2);
   });
 
   it("produces different fingerprints for responses API with different prompts", () => {

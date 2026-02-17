@@ -276,6 +276,8 @@ export function computeFingerprint(
   contextInfo: ContextInfo,
   rawBody: Record<string, any> | null | undefined,
   responseIdToConvo: Map<string, string>,
+  source?: string | null,
+  workingDirectory?: string | null,
 ): string | null {
   const sessionId = extractSessionId(rawBody);
   if (sessionId) {
@@ -305,6 +307,17 @@ export function computeFingerprint(
   const systemText = (contextInfo.systemPrompts || [])
     .map((sp) => sp.content)
     .join("\n");
+
+  if (source === "codex") {
+    const cwd =
+      workingDirectory ?? extractWorkingDirectory(contextInfo, rawBody ?? null);
+    if (!systemText && !promptText && !cwd) return null;
+    return createHash("sha256")
+      .update(`${cwd ?? ""}\0${systemText}\0${promptText}`)
+      .digest("hex")
+      .slice(0, 16);
+  }
+
   if (!systemText && !promptText) return null;
   return createHash("sha256")
     .update(`${systemText}\0${promptText}`)
