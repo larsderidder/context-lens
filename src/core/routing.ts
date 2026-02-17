@@ -103,10 +103,16 @@ export function classifyRequest(
 /**
  * Extract a "source tool" tag from a request path.
  *
- * Example: `/claude/v1/messages` => `{ source: 'claude', cleanPath: '/v1/messages' }`.
+ * Examples:
+ * `/claude/v1/messages` => `{ source: 'claude', sessionId: null, cleanPath: '/v1/messages' }`.
+ * `/claude/ab12cd34/v1/messages` => `{ source: 'claude', sessionId: 'ab12cd34', cleanPath: '/v1/messages' }`.
  *
  * This tag is used for attribution in the UI/LHAR and for per-tool grouping.
  */
+function isSessionId(segment: string): boolean {
+  return /^[a-f0-9]{8}$/.test(segment);
+}
+
 export function extractSource(pathname: string): ExtractSourceResult {
   const match = pathname.match(/^\/([^/]+)(\/.*)?$/);
   if (match?.[2] && !API_PATH_SEGMENTS.has(match[1])) {
@@ -123,11 +129,21 @@ export function extractSource(pathname: string): ExtractSourceResult {
       decoded.includes("\\") ||
       decoded.includes("..")
     ) {
-      return { source: null, cleanPath: pathname };
+      return { source: null, sessionId: null, cleanPath: pathname };
     }
-    return { source: decoded, cleanPath: match[2] || "/" };
+    const rest = match[2] || "/";
+    const sessionMatch = rest.match(/^\/([^/]+)(\/.*)?$/);
+    if (sessionMatch?.[2] && isSessionId(sessionMatch[1])) {
+      return {
+        source: decoded,
+        sessionId: sessionMatch[1],
+        cleanPath: sessionMatch[2] || "/",
+      };
+    }
+
+    return { source: decoded, sessionId: null, cleanPath: rest };
   }
-  return { source: null, cleanPath: pathname };
+  return { source: null, sessionId: null, cleanPath: pathname };
 }
 
 /**

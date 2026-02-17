@@ -84,12 +84,21 @@ describe("proxy/routing", () => {
     it("extracts source prefix from path", () => {
       const r = extractSource("/claude/v1/messages");
       assert.equal(r.source, "claude");
+      assert.equal(r.sessionId, null);
+      assert.equal(r.cleanPath, "/v1/messages");
+    });
+
+    it("extracts source and sessionId prefix from path", () => {
+      const r = extractSource("/claude/ab12cd34/v1/messages");
+      assert.equal(r.source, "claude");
+      assert.equal(r.sessionId, "ab12cd34");
       assert.equal(r.cleanPath, "/v1/messages");
     });
 
     it("does not treat API path segments as source", () => {
       const r = extractSource("/v1/messages");
       assert.equal(r.source, null);
+      assert.equal(r.sessionId, null);
       assert.equal(r.cleanPath, "/v1/messages");
     });
 

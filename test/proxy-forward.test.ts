@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import http from "node:http";
+import zlib from "node:zlib";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
 import type { CaptureData } from "../src/proxy/capture.js";
@@ -89,7 +90,7 @@ async function proxyRequest(
     method: string;
     path: string;
     headers?: Record<string, string>;
-    body?: string;
+    body?: string | Buffer;
   },
 ): Promise<{
   status: number;
@@ -229,6 +230,22 @@ describe("proxy/forward", () => {
     assert.equal(captures[0].path, "/v1/messages");
   });
 
+  it("captures source and sessionId from URL path prefix", async () => {
+    upstream.setResponse({ body: '{"ok":true}' });
+
+    await proxyRequest(handler, {
+      method: "POST",
+      path: "/claude/ab12cd34/v1/messages",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: "test", messages: [] }),
+    });
+
+    assert.equal(captures.length, 1);
+    assert.equal(captures[0].source, "claude");
+    assert.equal(captures[0].sessionId, "ab12cd34");
+    assert.equal(captures[0].path, "/v1/messages");
+  });
+
   it("captures non-JSON body with null requestBody", async () => {
     upstream.setResponse({ body: "OK" });
 
@@ -242,6 +259,25 @@ describe("proxy/forward", () => {
     assert.equal(captures.length, 1);
     assert.equal(captures[0].requestBody, null);
     assert.equal(captures[0].requestBytes, 16);
+  });
+
+  it("parses gzipped JSON request bodies for capture", async () => {
+    upstream.setResponse({ body: '{"ok":true}' });
+    const requestJson = JSON.stringify({ model: "test", messages: [] });
+    const gzipped = zlib.gzipSync(Buffer.from(requestJson, "utf8"));
+
+    await proxyRequest(handler, {
+      method: "POST",
+      path: "/v1/messages",
+      headers: {
+        "content-type": "application/json",
+        "content-encoding": "gzip",
+      },
+      body: gzipped,
+    });
+
+    assert.equal(captures.length, 1);
+    assert.deepEqual(captures[0].requestBody, JSON.parse(requestJson));
   });
 
   it("does not capture GET requests", async () => {

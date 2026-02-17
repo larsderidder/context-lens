@@ -125,6 +125,14 @@ describe("extractSource", () => {
   it("extracts source prefix from path", () => {
     const result = extractSource("/claude/v1/messages");
     assert.equal(result.source, "claude");
+    assert.equal(result.sessionId, null);
+    assert.equal(result.cleanPath, "/v1/messages");
+  });
+
+  it("extracts source and sessionId prefix from path", () => {
+    const result = extractSource("/claude/ab12cd34/v1/messages");
+    assert.equal(result.source, "claude");
+    assert.equal(result.sessionId, "ab12cd34");
     assert.equal(result.cleanPath, "/v1/messages");
   });
 
@@ -146,6 +154,7 @@ describe("extractSource", () => {
     ]) {
       const result = extractSource(`/${seg}/something`);
       assert.equal(result.source, null, `should not treat /${seg} as source`);
+      assert.equal(result.sessionId, null);
       assert.equal(result.cleanPath, `/${seg}/something`);
     }
   });
@@ -153,6 +162,7 @@ describe("extractSource", () => {
   it("returns null source for paths with no prefix", () => {
     const result = extractSource("/v1/messages");
     assert.equal(result.source, null);
+    assert.equal(result.sessionId, null);
     assert.equal(result.cleanPath, "/v1/messages");
   });
 
