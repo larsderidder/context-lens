@@ -398,7 +398,7 @@ describe("computeFingerprint", () => {
         {
           role: "user",
           content:
-            "[{\"type\":\"input_text\",\"text\":\"<environment_context>\\n  <cwd>/tmp/run-1</cwd>\\n</environment_context>\"}]",
+            '[{"type":"input_text","text":"<environment_context>\\n  <cwd>/tmp/run-1</cwd>\\n</environment_context>"}]',
         },
         ...codexResponses.input.slice(1),
       ],
@@ -409,7 +409,7 @@ describe("computeFingerprint", () => {
         {
           role: "user",
           content:
-            "[{\"type\":\"input_text\",\"text\":\"<environment_context>\\n  <cwd>/tmp/run-2</cwd>\\n</environment_context>\"}]",
+            '[{"type":"input_text","text":"<environment_context>\\n  <cwd>/tmp/run-2</cwd>\\n</environment_context>"}]',
         },
         ...codexResponses.input.slice(1),
       ],
@@ -417,8 +417,20 @@ describe("computeFingerprint", () => {
 
     const info1 = parseContextInfo("openai", body1, "responses");
     const info2 = parseContextInfo("openai", body2, "responses");
-    const fp1 = computeFingerprint(info1, body1, new Map(), "codex", "/tmp/run-1");
-    const fp2 = computeFingerprint(info2, body2, new Map(), "codex", "/tmp/run-2");
+    const fp1 = computeFingerprint(
+      info1,
+      body1,
+      new Map(),
+      "codex",
+      "/tmp/run-1",
+    );
+    const fp2 = computeFingerprint(
+      info2,
+      body2,
+      new Map(),
+      "codex",
+      "/tmp/run-2",
+    );
 
     assert.ok(fp1);
     assert.ok(fp2);

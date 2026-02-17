@@ -135,7 +135,7 @@ describe("Store", () => {
         {
           role: "user",
           content:
-            "[{\"type\":\"input_text\",\"text\":\"<environment_context>\\n  <cwd>/tmp/run-1</cwd>\\n</environment_context>\"}]",
+            '[{"type":"input_text","text":"<environment_context>\\n  <cwd>/tmp/run-1</cwd>\\n</environment_context>"}]',
         },
         { role: "user", content: "first turn" },
       ],
@@ -146,7 +146,7 @@ describe("Store", () => {
         {
           role: "user",
           content:
-            "[{\"type\":\"input_text\",\"text\":\"<environment_context>\\n  <cwd>/tmp/run-1</cwd>\\n</environment_context>\"}]",
+            '[{"type":"input_text","text":"<environment_context>\\n  <cwd>/tmp/run-1</cwd>\\n</environment_context>"}]',
         },
         { role: "user", content: "follow-up turn" },
       ],
@@ -157,7 +157,7 @@ describe("Store", () => {
         {
           role: "user",
           content:
-            "[{\"type\":\"input_text\",\"text\":\"<environment_context>\\n  <cwd>/tmp/run-2</cwd>\\n</environment_context>\"}]",
+            '[{"type":"input_text","text":"<environment_context>\\n  <cwd>/tmp/run-2</cwd>\\n</environment_context>"}]',
         },
         { role: "user", content: "new run" },
       ],
@@ -218,7 +218,7 @@ describe("Store", () => {
         {
           role: "user",
           content:
-            "[{\"type\":\"input_text\",\"text\":\"<environment_context>\\n  <cwd>/tmp/run-1</cwd>\\n</environment_context>\"}]",
+            '[{"type":"input_text","text":"<environment_context>\\n  <cwd>/tmp/run-1</cwd>\\n</environment_context>"}]',
         },
         { role: "user", content: "first turn" },
       ],

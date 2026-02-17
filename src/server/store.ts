@@ -241,7 +241,7 @@ export class Store {
     );
     const responseId = extractResponseId(responseData);
 
-    let fingerprint = computeFingerprint(
+    const fingerprint = computeFingerprint(
       contextInfo,
       rawBody ?? null,
       this.responseIdToConvo,
@@ -276,7 +276,9 @@ export class Store {
       const now = Date.now();
 
       if (rawBody?.previous_response_id) {
-        const chained = this.responseIdToConvo.get(rawBody.previous_response_id);
+        const chained = this.responseIdToConvo.get(
+          rawBody.previous_response_id,
+        );
         if (chained) {
           conversationId = chained;
           if (baseKey) {
