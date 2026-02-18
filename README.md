@@ -28,6 +28,67 @@ Or run directly:
 npx context-lens ...
 ```
 
+## Docker
+
+A pre-built image is published to GitHub Container Registry on every release:
+
+```bash
+docker run -d \
+  -p 4040:4040 \
+  -p 4041:4041 \
+  -e CONTEXT_LENS_BIND_HOST=0.0.0.0 \
+  -v ~/.context-lens:/root/.context-lens \
+  ghcr.io/larsderidder/context-lens:latest
+```
+
+Or with Docker Compose (uses `~/.context-lens` on the host, so data is shared with any local install):
+
+```bash
+docker compose up -d
+```
+
+Then open http://localhost:4041 and point your tools at the proxy:
+
+```bash
+ANTHROPIC_BASE_URL=http://localhost:4040/claude claude
+OPENAI_BASE_URL=http://localhost:4040 codex
+```
+
+### Environment variables
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `CONTEXT_LENS_BIND_HOST` | `127.0.0.1` | Set to `0.0.0.0` to accept connections from outside the container |
+| `CONTEXT_LENS_INGEST_URL` | _(file-based)_ | POST captures to a remote URL instead of writing to disk |
+| `CONTEXT_LENS_PRIVACY` | `standard` | Privacy level: `minimal`, `standard`, or `full` |
+| `CONTEXT_LENS_NO_UPDATE_CHECK` | `0` | Set to `1` to skip the npm update check |
+
+### Split-container setup
+
+If you want to run the proxy and the analysis server as separate containers (no shared filesystem needed), set `CONTEXT_LENS_INGEST_URL` so the proxy POSTs captures directly to the analysis server over the Docker network:
+
+```yaml
+services:
+  proxy:
+    image: ghcr.io/larsderidder/context-lens:latest
+    command: ["node", "dist/proxy/server.js"]
+    ports:
+      - "4040:4040"
+    environment:
+      CONTEXT_LENS_BIND_HOST: "0.0.0.0"
+      CONTEXT_LENS_INGEST_URL: "http://analysis:4041/api/ingest"
+
+  analysis:
+    image: ghcr.io/larsderidder/context-lens:latest
+    command: ["node", "dist/analysis/server.js"]
+    ports:
+      - "4041:4041"
+    environment:
+      CONTEXT_LENS_BIND_HOST: "0.0.0.0"
+    volumes:
+      - ~/.context-lens:/root/.context-lens
+```
+
 ## Quick Start
 
 ```bash
