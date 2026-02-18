@@ -7,7 +7,8 @@
   "bin": {
     "context-lens": "./dist/cli.js",
     "context-lens-proxy": "./dist/proxy/server.js",
-    "context-lens-analysis": "./dist/analysis/server.js"
+    "context-lens-analysis": "./dist/analysis/server.js",
+    "picl": "./dist/cli.js"
   },
   "scripts": {
     "generate:types": "json2ts schema/lhar.schema.json src/lhar-types.generated.ts --unreachableDefinitions",

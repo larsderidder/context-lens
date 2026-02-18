@@ -25,7 +25,16 @@ const __dirname = dirname(__filename);
 
 const LOCKFILE = "/tmp/context-lens.lock";
 
-const parsedArgs = parseCliArgs(process.argv.slice(2));
+// When invoked as `picl`, default to the `pi` tool if no command is given.
+const binaryName = process.argv[1] ? process.argv[1].split("/").pop() : "";
+const rawArgs = process.argv.slice(2);
+const isPiclInvocation =
+  binaryName === "picl" &&
+  !rawArgs.some((a) => !a.startsWith("-")) &&
+  !rawArgs.includes("--");
+const parsedArgs = parseCliArgs(
+  isPiclInvocation ? ["pi", ...rawArgs] : rawArgs,
+);
 if (parsedArgs.error) {
   console.error(parsedArgs.error);
   process.exit(1);

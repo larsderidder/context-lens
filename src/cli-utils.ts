@@ -14,7 +14,6 @@ const MITM_PROXY_URL = `http://localhost:${MITM_PORT}`;
 const PI_AGENT_DIR_PREFIX = "/tmp/context-lens-pi-agent-";
 const COMMAND_ALIASES: Record<string, string> = {
   cc: "claude",
-  cpi: "pi",
   cx: "codex",
   gm: "gemini",
 };
@@ -258,9 +257,11 @@ export function formatHelpText(): string {
     "",
     "Command aliases:",
     "  cc -> claude",
-    "  cpi -> pi",
     "  cx -> codex",
     "  gm -> gemini",
+    "",
+    "Binary aliases:",
+    "  picl  Equivalent to 'context-lens pi'",
     "",
     "Environment variables:",
     "  UPSTREAM_OPENAI_URL        Override OpenAI upstream (for OpenAI-compatible APIs)",
