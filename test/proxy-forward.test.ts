@@ -1,14 +1,10 @@
 import assert from "node:assert/strict";
 import http from "node:http";
-import zlib from "node:zlib";
 import { afterEach, beforeEach, describe, it } from "node:test";
-
+import zlib from "node:zlib";
+import type { Upstreams } from "@contextio/core";
+import { createProxyHandler, type ForwardOptions } from "@contextio/proxy";
 import type { CaptureData } from "../src/proxy/capture.js";
-import {
-  createProxyHandler,
-  type ForwardOptions,
-} from "../src/proxy/forward.js";
-import type { Upstreams } from "../src/proxy/routing.js";
 
 // --- Test infrastructure ---
 
@@ -158,7 +154,15 @@ describe("proxy/forward", () => {
     handler = createProxyHandler({
       upstreams,
       allowTargetOverride: false,
-      onCapture: (capture) => captures.push(capture),
+      logTraffic: false,
+      plugins: [
+        {
+          name: "test-capture",
+          onCapture: (capture) => {
+            captures.push(capture);
+          },
+        },
+      ],
     });
   });
 

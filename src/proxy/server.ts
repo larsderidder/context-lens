@@ -3,33 +3,22 @@
 /**
  * Context Lens Proxy — standalone entry point.
  *
- * A minimal HTTP proxy that forwards LLM API requests to their upstream
- * providers and writes raw captures to disk for analysis.
+ * Wraps @contextio/proxy with context-lens capture handling:
+ * either writing capture files to disk or POSTing them to an ingest URL.
  *
- * ZERO DEPENDENCIES CONSTRAINT
- * ============================
- * This proxy (everything under src/proxy/) must stay zero external
- * dependencies. Only Node.js built-in modules (node:http, node:https,
- * node:fs, node:path, node:os, node:url) are allowed. No npm packages.
- *
- * Why: users route their API keys through this proxy. Keeping the code
- * small and dependency-free means the entire proxy can be audited by
- * reading a single directory. No transitive supply-chain risk.
- *
- * The analysis server, CLI, and web UI are separate processes that
- * communicate via capture files on disk, and those are free to use
- * whatever dependencies they need.
- *
- * Capture files are written to CONTEXT_LENS_CAPTURE_DIR (default:
- * ~/.context-lens/captures/) as atomic JSON files. A separate analysis
- * server watches that directory and provides the web UI.
+ * TRUST BOUNDARY
+ * ==============
+ * This proxy sees API keys. The only dependencies are @contextio/core and
+ * @contextio/proxy, both zero-external-dependency packages you control.
+ * The capture layer (capture.ts) and config (config.ts) are local to this
+ * directory. Together that is the full auditable surface.
  */
 
-import http from "node:http";
+import type { ProxyPlugin } from "@contextio/core";
+import { createProxy } from "@contextio/proxy";
 
 import { createCaptureIngestor, createCaptureWriter } from "./capture.js";
 import { loadProxyConfig } from "./config.js";
-import { createProxyHandler, type ProxyPlugin } from "./forward.js";
 
 async function loadPluginsFromEnv(): Promise<ProxyPlugin[]> {
   const pluginsEnv =
@@ -52,7 +41,9 @@ async function loadPluginsFromEnv(): Promise<ProxyPlugin[]> {
           plugins.push(plugin as ProxyPlugin);
           console.log(`Loaded proxy plugin: ${plugin.name} (${specifier})`);
         } else {
-          console.error(`Plugin "${specifier}" factory returned invalid plugin`);
+          console.error(
+            `Plugin "${specifier}" factory returned invalid plugin`,
+          );
         }
       } else if (
         pluginOrFactory &&
@@ -64,7 +55,9 @@ async function loadPluginsFromEnv(): Promise<ProxyPlugin[]> {
           `Loaded proxy plugin: ${pluginOrFactory.name} (${specifier})`,
         );
       } else {
-        console.error(`Plugin "${specifier}" export is not a plugin or factory`);
+        console.error(
+          `Plugin "${specifier}" export is not a plugin or factory`,
+        );
       }
     } catch (err: unknown) {
       console.error(
@@ -80,6 +73,7 @@ async function main(): Promise<void> {
   const config = loadProxyConfig();
   const plugins = await loadPluginsFromEnv();
 
+  // Add a capture plugin that either writes to disk or POSTs to ingest URL.
   let onCapture: (capture: import("./capture.js").CaptureData) => void;
   if (config.ingestUrl) {
     const ingestor = createCaptureIngestor(config.ingestUrl);
@@ -90,39 +84,54 @@ async function main(): Promise<void> {
     onCapture = (capture) => writer.write(capture);
   }
 
-  const server = http.createServer(
-    createProxyHandler({
-      upstreams: config.upstreams,
-      allowTargetOverride: config.allowTargetOverride,
-      plugins,
-      onCapture,
-    }),
-  );
+  const capturePlugin: ProxyPlugin = {
+    name: "context-lens-capture",
+    onCapture,
+  };
 
-  server.on("error", (err: NodeJS.ErrnoException) => {
-    if (err.code === "EADDRINUSE") {
-      console.log(`🔍 Context Lens Proxy already running on port ${config.port}`);
+  const proxy = createProxy({
+    port: config.port,
+    bindHost: config.bindHost,
+    allowTargetOverride: config.allowTargetOverride,
+    upstreams: config.upstreams,
+    plugins: [...plugins, capturePlugin],
+    logTraffic: true,
+  });
+
+  try {
+    await proxy.start();
+  } catch (err: unknown) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "EADDRINUSE") {
+      console.log(
+        `🔍 Context Lens Proxy already running on port ${config.port}`,
+      );
       process.exit(0);
     }
     throw err;
-  });
+  }
 
-  server.listen(config.port, config.bindHost, () => {
-    console.log(
-      `🔍 Context Lens Proxy running on http://${config.bindHost}:${config.port}`,
-    );
-    if (!config.ingestUrl) {
-      console.log(`📁 Captures → ${config.captureDir}`);
+  if (!config.ingestUrl) {
+    console.log(`📁 Captures → ${config.captureDir}`);
+  }
+  if (!process.env.CONTEXT_LENS_CLI) {
+    console.log(`\nUpstream: OpenAI → ${config.upstreams.openai}`);
+    console.log(`         Anthropic → ${config.upstreams.anthropic}`);
+    console.log(`         Gemini → ${config.upstreams.gemini}`);
+    if (process.env.UPSTREAM_OPENAI_URL) {
+      console.log(`\n⚠️  OpenAI upstream overridden via UPSTREAM_OPENAI_URL`);
     }
-    if (!process.env.CONTEXT_LENS_CLI) {
-      console.log(`\nUpstream: OpenAI → ${config.upstreams.openai}`);
-      console.log(`         Anthropic → ${config.upstreams.anthropic}`);
-      console.log(`         Gemini → ${config.upstreams.gemini}`);
-      if (process.env.UPSTREAM_OPENAI_URL) {
-        console.log(`\n⚠️  OpenAI upstream overridden via UPSTREAM_OPENAI_URL`);
-      }
-    }
-  });
+  }
+
+  process.stdin.resume();
+  let shuttingDown = false;
+  const shutdown = (): void => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    proxy.stop().then(() => process.exit(0));
+  };
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
 }
 
 main().catch((err) => {

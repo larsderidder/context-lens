@@ -5,7 +5,10 @@ import { loadProxyConfig } from "../src/proxy/config.js";
 
 type EnvSnapshot = Record<string, string | undefined>;
 
-function withEnv(vars: Record<string, string | undefined>, fn: () => void): void {
+function withEnv(
+  vars: Record<string, string | undefined>,
+  fn: () => void,
+): void {
   const before: EnvSnapshot = {};
   for (const key of Object.keys(vars)) {
     before[key] = process.env[key];

@@ -133,6 +133,7 @@ export interface Upstreams {
 export interface ResolveTargetResult {
   targetUrl: string;
   provider: Provider;
+  apiFormat: ApiFormat;
 }
 
 // --- Server-side types ---

@@ -6,7 +6,7 @@ import {
   extractSource,
   resolveTargetUrl,
   type Upstreams,
-} from "../src/proxy/routing.js";
+} from "@contextio/core";
 
 const DEFAULT_UPSTREAMS: Upstreams = {
   openai: "https://api.openai.com/v1",

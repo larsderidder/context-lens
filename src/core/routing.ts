@@ -159,7 +159,7 @@ export function resolveTargetUrl(
   headers: Record<string, string | undefined>,
   upstreams: Upstreams,
 ): ResolveTargetResult {
-  const provider = classifyRequest(parsedUrl.pathname, headers).provider;
+  const { provider, apiFormat } = classifyRequest(parsedUrl.pathname, headers);
   const search = parsedUrl.search || "";
   let targetUrl = headers["x-target-url"];
   if (!targetUrl) {
@@ -192,5 +192,5 @@ export function resolveTargetUrl(
   } else if (!targetUrl.startsWith("http")) {
     targetUrl = targetUrl + parsedUrl.pathname + search;
   }
-  return { targetUrl, provider };
+  return { targetUrl, provider, apiFormat };
 }

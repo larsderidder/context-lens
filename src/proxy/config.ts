@@ -2,13 +2,12 @@
  * Proxy configuration.
  *
  * Reads from environment variables with safe defaults.
- * Zero external dependencies.
  */
 
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-import type { Upstreams } from "./routing.js";
+import type { Upstreams } from "@contextio/core";
 
 export interface ProxyConfig {
   upstreams: Upstreams;

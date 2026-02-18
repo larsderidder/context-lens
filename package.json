@@ -66,6 +66,8 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
+    "@contextio/core": "file:../contextio/packages/core",
+    "@contextio/proxy": "file:../contextio/packages/proxy",
     "@hono/node-server": "^1.19.9",
     "hono": "^4.11.9",
     "valibot": "^1.2.0"

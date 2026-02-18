@@ -1,3 +1,4 @@
+import type { JsonValue } from "@contextio/core";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import * as v from "valibot";
@@ -145,7 +146,7 @@ export function createApiApp(store: Store): Hono {
       ingestCapture(store, {
         ...data,
         source: data.source ?? "unknown",
-        requestBody: data.requestBody ?? null,
+        requestBody: (data.requestBody ?? null) as JsonValue | null,
       });
       console.log(
         `  📥 Ingested (capture): [${data.provider}] from ${data.source ?? "unknown"}`,
