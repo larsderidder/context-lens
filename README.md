@@ -28,6 +28,58 @@ Or run directly:
 npx context-lens ...
 ```
 
+## Quick Start
+
+```bash
+context-lens claude
+context-lens codex
+context-lens gemini
+context-lens gm               # alias for gemini
+context-lens aider --model claude-sonnet-4
+context-lens pi
+context-lens -- python my_agent.py
+```
+
+Or without installing: replace `context-lens` with `npx context-lens`.
+
+This starts the proxy (port 4040), opens the web UI (http://localhost:4041), sets the right env vars, and runs your command. Multiple tools can share one proxy; just open more terminals.
+
+## CLI options
+
+```bash
+context-lens --help
+context-lens --version
+context-lens --privacy=minimal claude
+context-lens --no-open codex
+context-lens --no-ui -- claude
+context-lens doctor
+context-lens background start --no-ui
+context-lens background status
+context-lens background stop
+```
+
+- `--help`, `--version`: show usage/version and exit
+- `--privacy <minimal|standard|full>`: controls privacy mode passed to the analysis server
+- `--no-open`: do not auto-open `http://localhost:4041` when launching a command
+- `--no-ui`: run proxy only (no analysis/web UI server) for capture-only data gathering
+- `--no-update-check`: skip npm update check for this run
+
+`--no-ui` is not compatible with `codex` subscription mode (`mitmproxy` ingestion depends on `http://localhost:4041/api/ingest`).
+
+Built-in commands:
+- `doctor`: run local diagnostics (ports, mitmproxy availability, cert path, writable dirs, background state)
+- `background start [--no-ui]`: start detached proxy (and analysis/web UI unless `--no-ui`)
+- `background status`: show detached process state
+- `background stop`: stop detached process state
+
+Aliases:
+- `cc` -> `claude`
+- `cpi` -> `pi`
+- `cx` -> `codex`
+- `gm` -> `gemini`
+
+By default, the CLI does a cached (once per day) non-blocking check for new npm versions and prints an upgrade hint when a newer release is available. Disable globally with `CONTEXT_LENS_NO_UPDATE_CHECK=1`.
+
 ## Docker
 
 A pre-built image is published to GitHub Container Registry on every release:
@@ -88,58 +140,6 @@ services:
     volumes:
       - ~/.context-lens:/root/.context-lens
 ```
-
-## Quick Start
-
-```bash
-context-lens claude
-context-lens codex
-context-lens gemini
-context-lens gm               # alias for gemini
-context-lens aider --model claude-sonnet-4
-context-lens pi
-context-lens -- python my_agent.py
-```
-
-Or without installing: replace `context-lens` with `npx context-lens`.
-
-This starts the proxy (port 4040), opens the web UI (http://localhost:4041), sets the right env vars, and runs your command. Multiple tools can share one proxy; just open more terminals.
-
-## CLI options
-
-```bash
-context-lens --help
-context-lens --version
-context-lens --privacy=minimal claude
-context-lens --no-open codex
-context-lens --no-ui -- claude
-context-lens doctor
-context-lens background start --no-ui
-context-lens background status
-context-lens background stop
-```
-
-- `--help`, `--version`: show usage/version and exit
-- `--privacy <minimal|standard|full>`: controls privacy mode passed to the analysis server
-- `--no-open`: do not auto-open `http://localhost:4041` when launching a command
-- `--no-ui`: run proxy only (no analysis/web UI server) for capture-only data gathering
-- `--no-update-check`: skip npm update check for this run
-
-`--no-ui` is not compatible with `codex` subscription mode (`mitmproxy` ingestion depends on `http://localhost:4041/api/ingest`).
-
-Built-in commands:
-- `doctor`: run local diagnostics (ports, mitmproxy availability, cert path, writable dirs, background state)
-- `background start [--no-ui]`: start detached proxy (and analysis/web UI unless `--no-ui`)
-- `background status`: show detached process state
-- `background stop`: stop detached process state
-
-Aliases:
-- `cc` -> `claude`
-- `cpi` -> `pi`
-- `cx` -> `codex`
-- `gm` -> `gemini`
-
-By default, the CLI does a cached (once per day) non-blocking check for new npm versions and prints an upgrade hint when a newer release is available. Disable globally with `CONTEXT_LENS_NO_UPDATE_CHECK=1`.
 
 ## Supported Providers
 
