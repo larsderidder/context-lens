@@ -185,20 +185,9 @@ services:
 
 ![Findings panel](findings-screenshot.png)
 
-## Manual Mode
+## Advanced
 
-```bash
-pnpm start
-# Port 4040 = proxy, port 4041 = web UI
-
-ANTHROPIC_BASE_URL=http://localhost:4040 claude
-OPENAI_BASE_URL=http://localhost:4040 codex  # API-key/OpenAI-base-url mode
-GOOGLE_GEMINI_BASE_URL=http://localhost:4040 gemini  # experimental
-```
-
-### Source Tagging
-
-Add a path prefix to tag requests by tool:
+Add a path prefix to tag requests by tool in the UI:
 
 ```bash
 ANTHROPIC_BASE_URL=http://localhost:4040/claude claude
