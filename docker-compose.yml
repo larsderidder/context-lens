@@ -2,6 +2,7 @@ services:
   context-lens:
     build: .
     image: context-lens:local
+    container_name: context-lens
     ports:
       - "4040:4040"
       - "4041:4041"
@@ -9,7 +10,7 @@ services:
       CONTEXT_LENS_NO_UPDATE_CHECK: "1"
       CONTEXT_LENS_BIND_HOST: "0.0.0.0"
     volumes:
-      - context-lens-data:/root/.context-lens
+      - ~/.context-lens:/root/.context-lens
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:4041/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
@@ -40,7 +41,4 @@ services:
 #    ports:
 #      - "4041:4041"
 #    volumes:
-#      - context-lens-data:/root/.context-lens
-
-volumes:
-  context-lens-data:
+#      - ~/.context-lens:/root/.context-lens
