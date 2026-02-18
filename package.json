@@ -20,6 +20,7 @@
     "test": "pnpm run build:test && node --test --experimental-test-isolation=none 'dist-test/test/**/*.test.js'",
     "dev": "tsc --watch",
     "postbuild": "chmod +x dist/cli.js dist/proxy/server.js dist/analysis/server.js",
+    "prepare": "git config core.hooksPath .githooks",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "prepublishOnly": "pnpm run build && pnpm run build:ui && node -e \"require('node:fs').accessSync('ui/dist/index.html'); console.log('✓ UI bundle verified')\""

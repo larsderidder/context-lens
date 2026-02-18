@@ -23,7 +23,6 @@ function projectEntryForApi(e: CapturedEntry) {
   return projectEntry(e, e.contextInfo);
 }
 
-
 function getExportEntries(
   store: Store,
   conversation?: string,
