@@ -1,0 +1,16 @@
+.git
+.gitignore
+node_modules
+ui/node_modules
+dist-test
+test
+testdata
+reference
+design-docs
+data
+_archive
+__pycache__
+*.log
+*.tmp
+*.swp
+.DS_Store

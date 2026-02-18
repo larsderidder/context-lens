@@ -97,7 +97,6 @@ describe("cli-utils", () => {
 
   it("resolves known aliases and keeps unknown names", () => {
     assert.equal(resolveCommandAlias("cc"), "claude");
-    assert.equal(resolveCommandAlias("cpi"), "pi");
     assert.equal(resolveCommandAlias("cx"), "codex");
     assert.equal(resolveCommandAlias("gm"), "gemini");
     assert.equal(resolveCommandAlias("python"), "python");
@@ -111,6 +110,6 @@ describe("cli-utils", () => {
     assert.match(help, /context-lens doctor/);
     assert.match(help, /background <start\|stop\|status>/);
     assert.match(help, /cc -> claude/);
-    assert.match(help, /cpi -> pi/);
+    assert.match(help, /picl/);
   });
 });

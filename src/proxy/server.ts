@@ -27,7 +27,7 @@
 
 import http from "node:http";
 
-import { createCaptureWriter } from "./capture.js";
+import { createCaptureIngestor, createCaptureWriter } from "./capture.js";
 import { loadProxyConfig } from "./config.js";
 import { createProxyHandler, type ProxyPlugin } from "./forward.js";
 
@@ -78,17 +78,24 @@ async function loadPluginsFromEnv(): Promise<ProxyPlugin[]> {
 
 async function main(): Promise<void> {
   const config = loadProxyConfig();
-  const captureWriter = createCaptureWriter(config.captureDir);
   const plugins = await loadPluginsFromEnv();
+
+  let onCapture: (capture: import("./capture.js").CaptureData) => void;
+  if (config.ingestUrl) {
+    const ingestor = createCaptureIngestor(config.ingestUrl);
+    onCapture = (capture) => ingestor.post(capture);
+    console.log(`📡 Captures → ${config.ingestUrl}`);
+  } else {
+    const writer = createCaptureWriter(config.captureDir);
+    onCapture = (capture) => writer.write(capture);
+  }
 
   const server = http.createServer(
     createProxyHandler({
       upstreams: config.upstreams,
       allowTargetOverride: config.allowTargetOverride,
       plugins,
-      onCapture: (capture) => {
-        captureWriter.write(capture);
-      },
+      onCapture,
     }),
   );
 
@@ -104,7 +111,9 @@ async function main(): Promise<void> {
     console.log(
       `🔍 Context Lens Proxy running on http://${config.bindHost}:${config.port}`,
     );
-    console.log(`📁 Captures → ${config.captureDir}`);
+    if (!config.ingestUrl) {
+      console.log(`📁 Captures → ${config.captureDir}`);
+    }
     if (!process.env.CONTEXT_LENS_CLI) {
       console.log(`\nUpstream: OpenAI → ${config.upstreams.openai}`);
       console.log(`         Anthropic → ${config.upstreams.anthropic}`);

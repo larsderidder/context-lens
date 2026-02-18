@@ -13,19 +13,9 @@ Works with Claude Code, Codex, Gemini CLI, Aider, Pi, and anything else that tal
 ## Installation
 
 ```bash
-pnpm add -g context-lens
-```
-
-Or with npm:
-
-```bash
 npm install -g context-lens
-```
-
-Or run directly:
-
-```bash
-npx context-lens ...
+# or: pnpm add -g context-lens
+# or: npx context-lens ...
 ```
 
 ## Quick Start
@@ -34,51 +24,87 @@ npx context-lens ...
 context-lens claude
 context-lens codex
 context-lens gemini
-context-lens gm               # alias for gemini
 context-lens aider --model claude-sonnet-4
 context-lens pi
 context-lens -- python my_agent.py
 ```
 
-Or without installing: replace `context-lens` with `npx context-lens`.
-
 This starts the proxy (port 4040), opens the web UI (http://localhost:4041), sets the right env vars, and runs your command. Multiple tools can share one proxy; just open more terminals.
 
-## CLI options
+## CLI Options
 
 ```bash
-context-lens --help
-context-lens --version
-context-lens --privacy=minimal claude
-context-lens --no-open codex
-context-lens --no-ui -- claude
-context-lens doctor
-context-lens background start --no-ui
+context-lens --privacy=minimal claude   # minimal|standard|full
+context-lens --no-open codex            # don't auto-open the UI
+context-lens --no-ui -- claude          # proxy only, no UI
+context-lens doctor                     # check ports, certs, background state
+context-lens background start           # start detached proxy + UI
 context-lens background status
 context-lens background stop
 ```
 
-- `--help`, `--version`: show usage/version and exit
-- `--privacy <minimal|standard|full>`: controls privacy mode passed to the analysis server
-- `--no-open`: do not auto-open `http://localhost:4041` when launching a command
-- `--no-ui`: run proxy only (no analysis/web UI server) for capture-only data gathering
-- `--no-update-check`: skip npm update check for this run
+Aliases: `cc` → `claude`, `cx` → `codex`, `cpi` → `pi`, `gm` → `gemini`.
 
-`--no-ui` is not compatible with `codex` subscription mode (`mitmproxy` ingestion depends on `http://localhost:4041/api/ingest`).
+## Docker
 
-Built-in commands:
-- `doctor`: run local diagnostics (ports, mitmproxy availability, cert path, writable dirs, background state)
-- `background start [--no-ui]`: start detached proxy (and analysis/web UI unless `--no-ui`)
-- `background status`: show detached process state
-- `background stop`: stop detached process state
+A pre-built image is published to GitHub Container Registry on every release:
 
-Aliases:
-- `cc` -> `claude`
-- `cpi` -> `pi`
-- `cx` -> `codex`
-- `gm` -> `gemini`
+```bash
+docker run -d \
+  -p 4040:4040 \
+  -p 4041:4041 \
+  -e CONTEXT_LENS_BIND_HOST=0.0.0.0 \
+  -v ~/.context-lens:/root/.context-lens \
+  ghcr.io/larsderidder/context-lens:latest
+```
 
-By default, the CLI does a cached (once per day) non-blocking check for new npm versions and prints an upgrade hint when a newer release is available. Disable globally with `CONTEXT_LENS_NO_UPDATE_CHECK=1`.
+Or with Docker Compose (uses `~/.context-lens` on the host, so data is shared with any local install):
+
+```bash
+docker compose up -d
+```
+
+Then open http://localhost:4041 and point your tools at the proxy:
+
+```bash
+ANTHROPIC_BASE_URL=http://localhost:4040/claude claude
+OPENAI_BASE_URL=http://localhost:4040 codex
+```
+
+### Environment variables
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `CONTEXT_LENS_BIND_HOST` | `127.0.0.1` | Set to `0.0.0.0` to accept connections from outside the container |
+| `CONTEXT_LENS_INGEST_URL` | _(file-based)_ | POST captures to a remote URL instead of writing to disk |
+| `CONTEXT_LENS_PRIVACY` | `standard` | Privacy level: `minimal`, `standard`, or `full` |
+| `CONTEXT_LENS_NO_UPDATE_CHECK` | `0` | Set to `1` to skip the npm update check |
+
+### Split-container setup
+
+If you want to run the proxy and the analysis server as separate containers (no shared filesystem needed), set `CONTEXT_LENS_INGEST_URL` so the proxy POSTs captures directly to the analysis server over the Docker network:
+
+```yaml
+services:
+  proxy:
+    image: ghcr.io/larsderidder/context-lens:latest
+    command: ["node", "dist/proxy/server.js"]
+    ports:
+      - "4040:4040"
+    environment:
+      CONTEXT_LENS_BIND_HOST: "0.0.0.0"
+      CONTEXT_LENS_INGEST_URL: "http://analysis:4041/api/ingest"
+
+  analysis:
+    image: ghcr.io/larsderidder/context-lens:latest
+    command: ["node", "dist/analysis/server.js"]
+    ports:
+      - "4041:4041"
+    environment:
+      CONTEXT_LENS_BIND_HOST: "0.0.0.0"
+    volumes:
+      - ~/.context-lens:/root/.context-lens
+```
 
 ## Supported Providers
 
@@ -124,20 +150,9 @@ By default, the CLI does a cached (once per day) non-blocking check for new npm 
 
 ![Findings panel](findings-screenshot.png)
 
-## Manual Mode
+## Advanced
 
-```bash
-pnpm start
-# Port 4040 = proxy, port 4041 = web UI
-
-ANTHROPIC_BASE_URL=http://localhost:4040 claude
-OPENAI_BASE_URL=http://localhost:4040 codex  # API-key/OpenAI-base-url mode
-GOOGLE_GEMINI_BASE_URL=http://localhost:4040 gemini  # experimental
-```
-
-### Source Tagging
-
-Add a path prefix to tag requests by tool:
+Add a path prefix to tag requests by tool in the UI:
 
 ```bash
 ANTHROPIC_BASE_URL=http://localhost:4040/claude claude
@@ -146,58 +161,29 @@ OPENAI_BASE_URL=http://localhost:4040/aider aider
 
 ### Pi Coding Agent
 
-Pi ignores standard base-URL environment variables. `context-lens pi` works by creating a private per-run temporary Pi config directory under `/tmp/context-lens-pi-agent-*`, symlinking your normal `~/.pi/agent/*` files, and injecting proxy `baseUrl` overrides into its temporary `models.json`.
+`context-lens pi` creates a temporary Pi config directory, symlinks your `~/.pi/agent/` files into it, and injects proxy URLs into a temporary `models.json`. Your real config is never modified and the temp directory is removed on exit.
 
-Your real `~/.pi/agent/models.json` is never modified, and the temporary directory is removed when the command exits.
-
-```bash
-context-lens pi
-```
-
-Pi config paths:
-
-- Real Pi config dir: `~/.pi/agent`
-- Real Pi models file: `~/.pi/agent/models.json` (left untouched)
-- Temporary per-run config dir: `/tmp/context-lens-pi-agent-*`
-- Runtime override providers in temp `models.json`: `anthropic`, `openai`, `google-gemini-cli`, `google-antigravity`
-
-If you prefer not to use the temporary runtime override, you can also edit your real `~/.pi/agent/models.json` directly and set those providers' `baseUrl` values to `http://localhost:4040/pi`.
-
-Example `~/.pi/agent/models.json`:
+If you prefer to configure it manually, set `baseUrl` in `~/.pi/agent/models.json`:
 
 ```json
 {
   "providers": {
     "anthropic": { "baseUrl": "http://localhost:4040/pi" },
     "openai": { "baseUrl": "http://localhost:4040/pi" },
-    "google-gemini-cli": { "baseUrl": "http://localhost:4040/pi" },
-    "google-antigravity": { "baseUrl": "http://localhost:4040/pi" }
+    "google-gemini-cli": { "baseUrl": "http://localhost:4040/pi" }
   }
 }
 ```
 
-Tested with: Claude Opus 4.6, Gemini 2.5 Flash (via Gemini CLI subscription), GPT-OSS 120B (via Antigravity). The `openai-codex` provider (ChatGPT subscription) has the same Cloudflare limitation as Codex and is not supported through the reverse proxy.
-
 ### OpenAI-Compatible Endpoints
 
-Many providers expose OpenAI-compatible APIs (OpenRouter, Together, Groq, Fireworks, Ollama, vLLM, OpenCode Zen, etc.). Context Lens supports these out of the box since it already parses `/v1/chat/completions` and `/v1/responses` request formats. The model name is extracted from the request body, so token estimates and cost tracking work automatically for known models.
-
-To route traffic through the proxy, override the OpenAI upstream URL to point at your provider:
+Many providers expose OpenAI-compatible APIs (OpenRouter, Together, Groq, Fireworks, Ollama, vLLM, OpenCode Zen, etc.). Override the upstream URL to point at your provider:
 
 ```bash
 UPSTREAM_OPENAI_URL=https://opencode.ai/zen/v1 context-lens -- opencode "prompt"
 ```
 
-Or in manual/standalone mode:
-
-```bash
-UPSTREAM_OPENAI_URL=https://openrouter.ai/api context-lens background start
-OPENAI_BASE_URL=http://localhost:4040/my-tool my-tool "prompt"
-```
-
-The `UPSTREAM_OPENAI_URL` variable tells the proxy where to forward requests that are classified as OpenAI format. The source tag (`/my-tool/` prefix) is still stripped before forwarding, so the upstream receives clean API paths.
-
-Note: `UPSTREAM_OPENAI_URL` is global. All OpenAI-format requests go to that upstream. If you need to use a custom endpoint and the real OpenAI API simultaneously, use separate proxy instances or the mitmproxy approach below.
+`UPSTREAM_OPENAI_URL` is global: all OpenAI-format requests go to that upstream. Use separate proxy instances if you need to hit multiple endpoints simultaneously.
 
 ### Codex Subscription Mode
 
@@ -222,26 +208,11 @@ Tool  ─HTTP─▶  Proxy (:4040)  ─HTTPS─▶  api.anthropic.com / api.open
             Analysis Server (:4041)  →  Web UI
 ```
 
-The **proxy** (`src/proxy/`) forwards requests to the LLM API and writes each request/response pair to disk. It has **zero external dependencies** (only Node.js built-ins), so you can read the entire proxy source and verify it does nothing unexpected with your API keys. This is an intentional architectural constraint: your API keys pass through the proxy, so it must stay small, auditable, and free of transitive supply-chain risk.
+The **proxy** forwards requests to the LLM API and writes each request/response pair to disk. It has **zero external dependencies** (only Node.js built-ins), so you can read the entire proxy source and verify it does nothing unexpected with your API keys.
 
-The **analysis server** picks up those captures, parses request bodies, estimates tokens, groups requests into conversations, computes composition breakdowns, calculates costs, scores context health, and scans for prompt injection patterns. It serves the web UI and API. The two sides communicate only through capture files on disk, so the analysis server, CLI, and web UI are free to use whatever dependencies they need without affecting the proxy's trust boundary.
+The **analysis server** picks up those captures, parses request bodies, estimates tokens, groups requests into conversations, computes composition breakdowns, calculates costs, and scores context health. It serves the web UI and API.
 
 The CLI sets env vars like `ANTHROPIC_BASE_URL=http://localhost:4040` so the tool sends requests to the proxy instead of the real API. The tool never knows it's being proxied.
-
-**Forward HTTPS proxy (Codex subscription mode)**
-
-Codex with a ChatGPT subscription authenticates against `chatgpt.com`, which is behind Cloudflare. A reverse proxy changes the TLS fingerprint, causing Cloudflare to reject the request. For this case, Context Lens uses mitmproxy as a forward HTTPS proxy:
-
-```
-Tool  ─HTTPS via proxy─▶  mitmproxy (:8080)  ─HTTPS─▶  chatgpt.com
-                                  │
-                            mitm_addon.py
-                                  │
-                                  ▼
-                          Analysis Server /api/ingest
-```
-
-The tool makes its own TLS connection through the proxy, preserving its native fingerprint. The mitmproxy addon intercepts completed request/response pairs and posts them to the analysis server's ingest API. The tool needs `https_proxy` and `SSL_CERT_FILE` env vars set to route through mitmproxy and trust its CA certificate.
 
 ## Why Context Lens?
 

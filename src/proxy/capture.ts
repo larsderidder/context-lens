@@ -1,13 +1,16 @@
 /**
  * Capture writer for the proxy.
  *
- * Writes raw request/response pairs as JSON files to the capture directory.
- * Uses atomic writes (write to .tmp, then rename) so readers never see
- * partial files. Zero external dependencies.
+ * Two modes (zero external dependencies in both):
+ *   - File mode (default): atomic JSON writes to a capture directory.
+ *   - Ingest mode: POST captures to a remote ingest URL over HTTP.
  */
 
 import fs from "node:fs";
+import http from "node:http";
+import https from "node:https";
 import { join } from "node:path";
+import { URL } from "node:url";
 
 export interface CaptureData {
   timestamp: string;
@@ -83,4 +86,48 @@ export function createCaptureWriter(captureDir: string) {
   }
 
   return { write };
+}
+
+/**
+ * Create a capture poster that sends captures to a remote ingest endpoint.
+ *
+ * Used when CONTEXT_LENS_INGEST_URL is set, so the proxy can run without
+ * a shared filesystem (split-container or remote analysis server setups).
+ * Fire-and-forget: errors are logged but never bubble up to the caller.
+ */
+export function createCaptureIngestor(ingestUrl: string) {
+  const parsed = new URL(ingestUrl);
+  const protocol = parsed.protocol === "https:" ? https : http;
+
+  function post(capture: CaptureData): void {
+    const body = JSON.stringify(capture);
+    const req = protocol.request(
+      {
+        hostname: parsed.hostname,
+        port: parsed.port || (parsed.protocol === "https:" ? 443 : 80),
+        path: parsed.pathname + (parsed.search || ""),
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "content-length": Buffer.byteLength(body),
+        },
+      },
+      (res) => {
+        // Drain the response so the socket is released
+        res.resume();
+        if (res.statusCode && res.statusCode >= 400) {
+          console.error(`Ingest HTTP error: ${res.statusCode} ${ingestUrl}`);
+        }
+      },
+    );
+
+    req.on("error", (err) => {
+      console.error("Ingest POST error:", err.message);
+    });
+
+    req.write(body);
+    req.end();
+  }
+
+  return { post };
 }

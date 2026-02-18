@@ -16,7 +16,8 @@ Manual usage:
 View at http://localhost:4041
 
 Environment variables:
-  CONTEXT_LENS_SESSION_ID - session ID for grouping (default: "")
+  CONTEXT_LENS_INGEST_URL  - ingest endpoint (default: "http://localhost:4041/api/ingest")
+  CONTEXT_LENS_SESSION_ID  - session ID for grouping (default: "")
 """
 
 import json
@@ -25,7 +26,7 @@ import time
 import urllib.request
 from mitmproxy import http
 
-INGEST_URL = "http://localhost:4041/api/ingest"
+INGEST_URL = os.environ.get("CONTEXT_LENS_INGEST_URL", "http://localhost:4041/api/ingest")
 CONTEXT_LENS_SESSION_ID = os.environ.get("CONTEXT_LENS_SESSION_ID", "").strip()
 
 # Patterns to capture: (host_substring, path_substring) -> (provider, source)

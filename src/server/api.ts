@@ -129,6 +129,10 @@ function buildFullConversation(
 export function createApiApp(store: Store): Hono {
   const app = new Hono();
 
+  // --- Health ---
+
+  app.get("/health", (c) => c.json({ status: "ok" }));
+
   // --- Ingest ---
 
   app.post("/api/ingest", async (c) => {

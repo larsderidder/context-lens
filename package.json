@@ -1,13 +1,14 @@
 {
   "name": "context-lens",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "type": "module",
   "description": "Local HTTP proxy that intercepts LLM API calls and visualizes context windows",
   "main": "dist/proxy/server.js",
   "bin": {
     "context-lens": "./dist/cli.js",
     "context-lens-proxy": "./dist/proxy/server.js",
-    "context-lens-analysis": "./dist/analysis/server.js"
+    "context-lens-analysis": "./dist/analysis/server.js",
+    "picl": "./dist/cli.js"
   },
   "scripts": {
     "generate:types": "json2ts schema/lhar.schema.json src/lhar-types.generated.ts --unreachableDefinitions",
@@ -20,6 +21,7 @@
     "test": "pnpm run build:test && node --test --experimental-test-isolation=none 'dist-test/test/**/*.test.js'",
     "dev": "tsc --watch",
     "postbuild": "chmod +x dist/cli.js dist/proxy/server.js dist/analysis/server.js",
+    "prepare": "git config core.hooksPath .githooks",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "prepublishOnly": "pnpm run build && pnpm run build:ui && node -e \"require('node:fs').accessSync('ui/dist/index.html'); console.log('✓ UI bundle verified')\""

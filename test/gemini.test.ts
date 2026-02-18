@@ -220,7 +220,10 @@ describe("Gemini support", () => {
       assert.ok(withCache < withoutCache, "cached cost should be lower");
       // Cache should save roughly 73% on input cost
       const savings = 1 - withCache / withoutCache;
-      assert.ok(savings > 0.7, `savings should be > 70%, got ${(savings * 100).toFixed(1)}%`);
+      assert.ok(
+        savings > 0.7,
+        `savings should be > 70%, got ${(savings * 100).toFixed(1)}%`,
+      );
     });
 
     it("does not charge for Gemini cache writes", () => {
