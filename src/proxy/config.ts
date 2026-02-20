@@ -22,7 +22,7 @@ export interface ProxyConfig {
 
 export function loadProxyConfig(): ProxyConfig {
   const upstreams: Upstreams = {
-    openai: process.env.UPSTREAM_OPENAI_URL || "https://api.openai.com/v1",
+    openai: process.env.UPSTREAM_OPENAI_URL || "https://api.openai.com",
     anthropic:
       process.env.UPSTREAM_ANTHROPIC_URL || "https://api.anthropic.com",
     chatgpt: process.env.UPSTREAM_CHATGPT_URL || "https://chatgpt.com",
