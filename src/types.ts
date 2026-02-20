@@ -145,6 +145,7 @@ export interface Conversation {
   workingDirectory: string | null;
   firstSeen: string;
   sessionId?: string | null;
+  tags?: string[];
 }
 
 // --- Security scanning ---
