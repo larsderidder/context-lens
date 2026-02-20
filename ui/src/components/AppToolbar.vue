@@ -1,8 +1,35 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import { useSessionStore } from '@/stores/session'
 import { fmtCost, shortModel, sourceBadgeClass } from '@/utils/format'
 import { getExportUrl } from '@/api'
+import TagEditor from '@/components/TagEditor.vue'
+
+const showTagEditor = ref(false)
+const toolbarTagsEl = ref<HTMLElement>()
+
+function toggleTagEditor() {
+  showTagEditor.value = !showTagEditor.value
+  if (showTagEditor.value) {
+    store.loadTags()
+  }
+}
+
+function closeTagEditor() {
+  showTagEditor.value = false
+}
+
+function onDocClick(e: MouseEvent) {
+  if (showTagEditor.value && toolbarTagsEl.value && !toolbarTagsEl.value.contains(e.target as Node)) {
+    closeTagEditor()
+  }
+}
+
+onMounted(() => document.addEventListener('click', onDocClick, true))
+onUnmounted(() => document.removeEventListener('click', onDocClick, true))
+
+// Close tag editor when switching sessions
+watch(() => store.selectedSessionId, () => { showTagEditor.value = false })
 
 const store = useSessionStore()
 const showExportMenu = ref(false)
@@ -151,7 +178,8 @@ function onSessionIdKeydown(e: KeyboardEvent) {
       <span class="brand-text">Context Lens</span>
     </a>
 
-    <template v-if="isInspector && session">
+    <Transition name="session-ctx">
+    <div v-if="isInspector && session" class="session-ctx">
       <span class="toolbar-sep"></span>
 
       <span class="session-badge" :class="sourceBadgeClass(session.source)">{{ session.source || '?' }}</span>
@@ -184,7 +212,43 @@ function onSessionIdKeydown(e: KeyboardEvent) {
           bad: summary.healthScore.rating === 'poor',
         }">{{ summary.healthScore.overall }}</span>
       </span>
-    </template>
+      <span class="toolbar-sep"></span>
+      <!-- Tags: compact pill summary, click to open full editor -->
+      <div v-if="selectedSessionId" ref="toolbarTagsEl" class="toolbar-tags" @click.stop>
+        <button
+          class="tags-toggle"
+          :class="{ active: showTagEditor, tagged: (session.tags ?? []).length > 0 }"
+          :title="showTagEditor ? 'Close tag editor' : 'Edit tags'"
+          @click="toggleTagEditor"
+        >
+          <i class="i-carbon-tag" />
+          <template v-if="(session.tags ?? []).length === 0">
+            Tags
+          </template>
+          <template v-else>
+            <span
+              v-for="(tag, i) in (session.tags ?? []).slice(0, 2)"
+              :key="tag"
+              class="toolbar-tag-pill"
+              :class="`tag-color-${i % 8}`"
+            >{{ tag }}</span>
+            <span v-if="(session.tags ?? []).length > 2" class="toolbar-tag-overflow">
+              +{{ (session.tags ?? []).length - 2 }}
+            </span>
+          </template>
+        </button>
+
+        <Transition name="tag-popover">
+          <div v-if="showTagEditor" class="tag-popover">
+            <TagEditor
+              :conversation-id="selectedSessionId"
+              :tags="session.tags ?? []"
+            />
+          </div>
+        </Transition>
+      </div>
+    </div>
+    </Transition>
 
     <template v-if="store.compareMode">
       <span class="toolbar-sep"></span>
@@ -263,6 +327,30 @@ function onSessionIdKeydown(e: KeyboardEvent) {
 <style lang="scss" scoped>
 @use '../styles/mixins' as *;
 
+// ── Session context fade-in ──
+.session-ctx {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.session-ctx-enter-active {
+  transition: opacity 0.2s ease 0.12s;
+}
+
+.session-ctx-leave-active {
+  transition: opacity 0.1s ease;
+  // Keep it from taking space during leave so layout doesn't jump
+  position: absolute;
+  pointer-events: none;
+}
+
+.session-ctx-enter-from,
+.session-ctx-leave-to {
+  opacity: 0;
+}
+
 .toolbar {
   background: var(--bg-surface);
   border-bottom: 1px solid var(--border-dim);
@@ -327,6 +415,7 @@ function onSessionIdKeydown(e: KeyboardEvent) {
 .badge-aider { background: rgba(14, 165, 233, 0.15); color: var(--accent-blue); }
 .badge-kimi { background: rgba(167, 139, 250, 0.15); color: var(--accent-purple); }
 .badge-pi { background: rgba(167, 139, 250, 0.15); color: var(--accent-purple); }
+.badge-gemini { background: rgba(74, 144, 226, 0.15); color: #4a90e2; }
 .badge-unknown { background: var(--bg-raised); color: var(--text-dim); }
 
 .session-model {
@@ -404,6 +493,90 @@ function onSessionIdKeydown(e: KeyboardEvent) {
   pointer-events: none;
   z-index: 5;
 }
+
+// ── Tags in toolbar ──
+.toolbar-tags {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.tags-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px;
+  font-size: var(--text-xs);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.12s, background 0.12s;
+  white-space: nowrap;
+
+  &:hover {
+    color: var(--text-secondary);
+    background: var(--bg-raised);
+  }
+
+  // When active (popover open), show a subtle highlight
+  &.active {
+    color: var(--accent-blue);
+    background: var(--accent-blue-dim);
+    outline: none;
+  }
+
+  &:focus-visible {
+    @include focus-ring;
+  }
+
+  // When tags are present the icon is dimmer — the pills carry the identity
+  &.tagged .i-carbon-tag {
+    opacity: 0.45;
+  }
+}
+
+.toolbar-tag-pill {
+  @include mono-text;
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 2px;
+  text-transform: lowercase;
+  background: var(--bg-raised);
+  color: var(--text-secondary);
+
+  &.tag-color-0 { background: var(--accent-blue-dim);          color: var(--accent-blue); }
+  &.tag-color-1 { background: rgba(16,  185, 129, 0.15);       color: var(--accent-green); }
+  &.tag-color-2 { background: var(--accent-amber-dim);         color: var(--accent-amber); }
+  &.tag-color-3 { background: rgba(139,  92, 246, 0.15);       color: var(--accent-purple); }
+  &.tag-color-4 { background: var(--accent-red-dim);           color: var(--accent-red); }
+  &.tag-color-5 { background: rgba(  6, 182, 212, 0.15);       color: #06b6d4; }
+  &.tag-color-6 { background: rgba(236,  72, 153, 0.15);       color: #ec4899; }
+  &.tag-color-7 { background: rgba(132, 204,  22, 0.15);       color: #84cc16; }
+}
+
+.toolbar-tag-overflow {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.tag-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-mid);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  z-index: 50;
+  box-shadow: var(--shadow-lg);
+  min-width: 200px;
+}
+
+.tag-popover-enter-active { transition: opacity 0.12s, transform 0.1s; }
+.tag-popover-leave-active { transition: opacity 0.08s, transform 0.08s; }
+.tag-popover-enter-from,
+.tag-popover-leave-to { opacity: 0; transform: translateY(-4px); }
 
 // ── Right side ──
 .toolbar-right {

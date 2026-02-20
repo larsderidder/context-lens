@@ -210,6 +210,7 @@ export interface Conversation {
   workingDirectory: string | null;
   firstSeen: string;
   sessionId?: string | null;
+  tags?: string[];
 }
 
 export interface AgentGroup {
@@ -236,6 +237,8 @@ export interface ConversationSummary extends Conversation {
   healthScore: HealthScore | null;
   /** Per-entry totalTokens in chronological order (oldest → newest), for sparkline rendering */
   tokenHistory: number[];
+  /** User-defined tags for this session */
+  tags: string[];
 }
 
 export interface ApiSummaryResponse {
@@ -250,10 +253,21 @@ export interface ApiRequestsResponse {
   ungrouped: ProjectedEntry[];
 }
 
+// --- Tags ---
+
+export interface TagInfo {
+  name: string;
+  count: number;
+}
+
+export interface TagsResponse {
+  tags: TagInfo[];
+}
+
 // --- SSE events ---
 
 export interface SSEEvent {
-  type: "connected" | "entry-added" | "conversation-deleted" | "reset";
+  type: "connected" | "entry-added" | "conversation-deleted" | "reset" | "tags-updated";
   revision: number;
   conversationId?: string | null;
 }

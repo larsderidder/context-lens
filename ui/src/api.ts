@@ -1,4 +1,4 @@
-import type { ApiRequestsResponse, ApiSummaryResponse, ConversationGroup, ContextInfo } from './api-types'
+import type { ApiRequestsResponse, ApiSummaryResponse, ConversationGroup, ContextInfo, TagsResponse } from './api-types'
 
 const BASE = '' // Vite proxy handles /api/* in dev; same-origin in production
 
@@ -48,4 +48,43 @@ export function getExportUrl(format: 'lhar' | 'lhar.json', conversationId?: stri
   if (privacy && privacy !== 'standard') params.set('privacy', privacy)
   const qs = params.toString()
   return `${BASE}/api/export/${format}${qs ? `?${qs}` : ''}`
+}
+
+// --- Tags ---
+
+export async function fetchTags(): Promise<TagsResponse> {
+  const res = await fetch(`${BASE}/api/tags`)
+  if (!res.ok) throw new Error(`GET /api/tags failed: ${res.status}`)
+  return res.json()
+}
+
+export async function setSessionTags(conversationId: string, tags: string[]): Promise<string[]> {
+  const res = await fetch(`${BASE}/api/sessions/${encodeURIComponent(conversationId)}/tags`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tags }),
+  })
+  if (!res.ok) throw new Error(`PATCH tags failed: ${res.status}`)
+  const data = await res.json()
+  return data.tags
+}
+
+export async function addSessionTag(conversationId: string, tag: string): Promise<string[]> {
+  const res = await fetch(`${BASE}/api/sessions/${encodeURIComponent(conversationId)}/tags`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tag }),
+  })
+  if (!res.ok) throw new Error(`POST tag failed: ${res.status}`)
+  const data = await res.json()
+  return data.tags
+}
+
+export async function removeSessionTag(conversationId: string, tag: string): Promise<string[]> {
+  const res = await fetch(`${BASE}/api/sessions/${encodeURIComponent(conversationId)}/tags/${encodeURIComponent(tag)}`, {
+    method: 'DELETE',
+  })
+  if (!res.ok) throw new Error(`DELETE tag failed: ${res.status}`)
+  const data = await res.json()
+  return data.tags
 }
