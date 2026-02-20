@@ -9,7 +9,7 @@ import {
 } from "@contextio/core";
 
 const DEFAULT_UPSTREAMS: Upstreams = {
-  openai: "https://api.openai.com/v1",
+  openai: "https://api.openai.com",
   anthropic: "https://api.anthropic.com",
   chatgpt: "https://chatgpt.com",
   gemini: "https://generativelanguage.googleapis.com",
@@ -127,10 +127,7 @@ describe("proxy/routing", () => {
         {},
         DEFAULT_UPSTREAMS,
       );
-      assert.equal(
-        r.targetUrl,
-        "https://api.openai.com/v1/v1/chat/completions",
-      );
+      assert.equal(r.targetUrl, "https://api.openai.com/v1/chat/completions");
       assert.equal(r.provider, "openai");
     });
 

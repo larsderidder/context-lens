@@ -657,6 +657,7 @@ if (parsedArgs.commandName === "analyze") {
       for (const key of [
         "anthropic",
         "openai",
+        "openai-codex",
         "google-gemini-cli",
         "google-antigravity",
       ]) {

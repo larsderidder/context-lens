@@ -102,7 +102,7 @@ export class CaptureWatcher {
     }
 
     try {
-      this.watcher = fs.watch(this.captureDir, (eventType, filename) => {
+      this.watcher = fs.watch(this.captureDir, (_eventType, filename) => {
         if (!filename) return;
         if (!filename.endsWith(".json") || filename.endsWith(".tmp")) return;
         // Small delay to ensure rename is complete
