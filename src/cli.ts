@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { type ChildProcess, spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import https from "node:https";
@@ -421,6 +422,36 @@ if (parsedArgs.commandName === "analyze") {
       ...process.env,
       ...toolConfig.childEnv,
     };
+
+    // Embed a per-invocation session ID into proxy base URLs so that separate
+    // CLI runs are always grouped into distinct conversations, even when they
+    // start with identical prompts. The session ID is injected as a path
+    // segment after the source tag, which extractSource() picks up as a
+    // stable conversation key for the lifetime of this process.
+    //
+    // Format: http://localhost:4040/<source>/<session-id>/
+    // Example: http://localhost:4040/gemini/a1b2c3d4/
+    //
+    // Codex uses mitmproxy and has its own chaining via previous_response_id.
+    // Claude Code and Pi embed their own session IDs in request metadata.
+    // Tools without built-in session IDs (Gemini, Aider, custom) rely on this.
+    if (!toolConfig.needsMitm) {
+      const sessionTag = randomBytes(4).toString("hex"); // 8 hex chars
+      for (const key of Object.keys(childEnv)) {
+        const val = childEnv[key];
+        if (typeof val !== "string") continue;
+        // Match any value that points at our proxy and ends with /<source> or /<source>/
+        const proxyBase = `http://localhost:4040/`;
+        if (!val.startsWith(proxyBase)) continue;
+        const hadTrailingSlash = val.endsWith("/");
+        const after = val.slice(proxyBase.length).replace(/\/$/, "");
+        // Only inject if the remaining path is just the source tag (no session already)
+        if (after && !after.includes("/")) {
+          const suffix = hadTrailingSlash ? "/" : "";
+          childEnv[key] = `${proxyBase}${after}/${sessionTag}${suffix}`;
+        }
+      }
+    }
 
     // Fill in mitmproxy CA cert path for tools that need HTTPS interception
     if (toolConfig.needsMitm && childEnv.SSL_CERT_FILE === "") {
