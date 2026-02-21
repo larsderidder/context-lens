@@ -112,9 +112,20 @@ if (parsedArgs.commandName === "analyze") {
   const commandArguments = parsedArgs.commandArguments;
   const noOpen = parsedArgs.noOpen;
   const noUi = parsedArgs.noUi;
+  const useMitm = parsedArgs.useMitm;
 
-  // Get tool-specific config
-  const toolConfig = getToolConfig(commandName);
+  // Get tool-specific config, with optional mitmproxy override for pi
+  let toolConfig = getToolConfig(commandName);
+  if (useMitm && commandName === "pi") {
+    toolConfig = {
+      ...toolConfig,
+      childEnv: {
+        https_proxy: `http://localhost:${CLI_CONSTANTS.MITM_PORT}`,
+        SSL_CERT_FILE: "", // filled in below with mitmproxy CA cert path
+      },
+      needsMitm: true,
+    };
+  }
   if (noUi && toolConfig.needsMitm) {
     console.error(
       "Error: --no-ui is not supported for this command because mitm capture requires the analysis ingest API on :4041.",
@@ -465,7 +476,7 @@ if (parsedArgs.commandName === "analyze") {
       }
     }
 
-    if (commandName === "pi") {
+    if (commandName === "pi" && !useMitm) {
       childEnv.PI_CODING_AGENT_DIR = preparePiAgentDir(
         childEnv.PI_CODING_AGENT_DIR,
       );
@@ -1113,13 +1124,13 @@ async function runDoctor(): Promise<number> {
   // informational rather than a hard failure.
   const mitmdumpPath = findBinaryOnPath("mitmdump");
   info(
-    "mitmdump (Codex only)",
+    "mitmdump (Codex, pi --mitm)",
     mitmdumpPath ?? "not found (install: pipx install mitmproxy)",
   );
 
   const certPath = join(homedir(), ".mitmproxy", "mitmproxy-ca-cert.pem");
   info(
-    "mitm CA cert (Codex only)",
+    "mitm CA cert (Codex, pi --mitm)",
     fs.existsSync(certPath)
       ? certPath
       : "not present (run 'mitmdump' once to generate)",

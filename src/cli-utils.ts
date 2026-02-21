@@ -26,6 +26,7 @@ export interface ParsedCliArgs {
   noOpen: boolean;
   noUi: boolean;
   noUpdateCheck: boolean;
+  useMitm: boolean;
   privacyLevel?: string;
   commandName?: string;
   commandArguments: string[];
@@ -114,6 +115,7 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
   let noOpen = false;
   let noUi = false;
   let noUpdateCheck = false;
+  let useMitm = false;
   let privacyLevel: string | undefined;
   let explicitSeparator = false;
   let commandStartIndex = -1;
@@ -148,6 +150,10 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
       noUpdateCheck = true;
       continue;
     }
+    if (arg === "--mitm") {
+      useMitm = true;
+      continue;
+    }
     if (arg === "--privacy") {
       if (i + 1 >= args.length) {
         return {
@@ -156,6 +162,7 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
           noOpen,
           noUi,
           noUpdateCheck,
+          useMitm,
           commandArguments: [],
           error:
             "Error: Missing value for --privacy. Expected one of: minimal, standard, full",
@@ -175,6 +182,7 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
       noOpen,
       noUi,
       noUpdateCheck,
+      useMitm,
       commandArguments: [],
       error: `Error: Unknown option '${arg}'. Run 'context-lens --help' for usage.`,
     };
@@ -187,6 +195,7 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
       noOpen,
       noUi,
       noUpdateCheck,
+      useMitm,
       commandArguments: [],
       error: `Error: Invalid privacy level '${privacyLevel}'. Must be one of: ${KNOWN_PRIVACY_LEVELS.join(", ")}`,
     };
@@ -205,6 +214,7 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
       noOpen,
       noUi,
       noUpdateCheck,
+      useMitm,
       privacyLevel,
       commandArguments: [],
       error: "Error: No command specified after --",
@@ -217,6 +227,7 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
     noOpen,
     noUi,
     noUpdateCheck,
+    useMitm,
     privacyLevel,
     commandName,
     commandArguments,
@@ -254,6 +265,7 @@ export function formatHelpText(): string {
     "  --no-open              Don't auto-open http://localhost:4041",
     "  --no-ui                Run proxy only (no analysis/web UI server)",
     "  --no-update-check      Skip npm update check for this run",
+    "  --mitm                 Use mitmproxy for interception instead of base URL override (pi only)",
     "",
     "Command aliases:",
     "  cc -> claude",
@@ -271,6 +283,7 @@ export function formatHelpText(): string {
     "Notes:",
     "  - No command starts standalone mode (proxy + analysis/web UI by default).",
     "  - 'codex' uses mitmproxy for HTTPS interception (requires mitmproxy; install: pipx install mitmproxy).",
+    "  - 'pi --mitm' uses mitmproxy for full interception, useful for subscription-based models (openai-codex provider).",
     "  - 'doctor' is a local diagnostics command.",
     "  - 'background' manages detached proxy/web-ui processes.",
     "  - 'analyze' reads an .lhar file and prints session statistics.",
