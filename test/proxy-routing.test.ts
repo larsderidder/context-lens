@@ -122,6 +122,34 @@ describe("proxy/routing", () => {
       assert.equal(r.provider, "openai");
     });
 
+    it("routes /codex/responses to chatgpt upstream with /backend-api prefix", () => {
+      const r = resolveTargetUrl(
+        "/codex/responses",
+        null,
+        {},
+        DEFAULT_UPSTREAMS,
+      );
+      assert.equal(
+        r.targetUrl,
+        "https://chatgpt.com/backend-api/codex/responses",
+      );
+      assert.equal(r.provider, "chatgpt");
+    });
+
+    it("routes /backend-api/codex/responses without double prefix", () => {
+      const r = resolveTargetUrl(
+        "/backend-api/codex/responses",
+        null,
+        {},
+        DEFAULT_UPSTREAMS,
+      );
+      assert.equal(
+        r.targetUrl,
+        "https://chatgpt.com/backend-api/codex/responses",
+      );
+      assert.equal(r.provider, "chatgpt");
+    });
+
     it("preserves query string", () => {
       const r = resolveTargetUrl(
         "/v1/messages",
