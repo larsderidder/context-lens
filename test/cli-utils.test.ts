@@ -110,6 +110,6 @@ describe("cli-utils", () => {
     assert.match(help, /context-lens doctor/);
     assert.match(help, /background <start\|stop\|status>/);
     assert.match(help, /cc -> claude/);
-    assert.match(help, /picl/);
+    assert.match(help, /cpi/);
   });
 });
