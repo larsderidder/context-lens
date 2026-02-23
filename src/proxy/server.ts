@@ -21,8 +21,7 @@ import { createCaptureIngestor, createCaptureWriter } from "./capture.js";
 import { loadProxyConfig } from "./config.js";
 
 async function loadPluginsFromEnv(): Promise<ProxyPlugin[]> {
-  const pluginsEnv =
-    process.env.CONTEXT_LENS_PROXY_PLUGINS || process.env.CONTEXT_PROXY_PLUGINS;
+  const pluginsEnv = process.env.CONTEXT_LENS_PROXY_PLUGINS;
   if (!pluginsEnv) return [];
 
   const specifiers = pluginsEnv

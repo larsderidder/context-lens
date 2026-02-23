@@ -47,34 +47,12 @@ afterEach(() => {
 });
 
 describe("proxy/config", () => {
-  it("uses contextio env var aliases when context-lens vars are not set", () => {
-    withEnv(
-      {
-        CONTEXT_LENS_BIND_HOST: undefined,
-        CONTEXT_PROXY_BIND_HOST: "0.0.0.0",
-        CONTEXT_LENS_PROXY_PORT: undefined,
-        CONTEXT_PROXY_PORT: "5050",
-        CONTEXT_LENS_ALLOW_TARGET_OVERRIDE: undefined,
-        CONTEXT_PROXY_ALLOW_TARGET_OVERRIDE: "1",
-      },
-      () => {
-        const config = loadProxyConfig();
-        assert.equal(config.bindHost, "0.0.0.0");
-        assert.equal(config.port, 5050);
-        assert.equal(config.allowTargetOverride, true);
-      },
-    );
-  });
-
-  it("prefers context-lens env vars over contextio aliases", () => {
+  it("respects CONTEXT_LENS_BIND_HOST, CONTEXT_LENS_PROXY_PORT, and CONTEXT_LENS_ALLOW_TARGET_OVERRIDE", () => {
     withEnv(
       {
         CONTEXT_LENS_BIND_HOST: "127.0.0.2",
-        CONTEXT_PROXY_BIND_HOST: "0.0.0.0",
         CONTEXT_LENS_PROXY_PORT: "6060",
-        CONTEXT_PROXY_PORT: "5050",
         CONTEXT_LENS_ALLOW_TARGET_OVERRIDE: "1",
-        CONTEXT_PROXY_ALLOW_TARGET_OVERRIDE: undefined,
       },
       () => {
         const config = loadProxyConfig();

@@ -37,21 +37,12 @@ export function loadProxyConfig(): ProxyConfig {
   };
 
   // Bind only to localhost unless explicitly overridden.
-  const bindHost =
-    process.env.CONTEXT_LENS_BIND_HOST ||
-    process.env.CONTEXT_PROXY_BIND_HOST ||
-    "127.0.0.1";
-  const port = parseInt(
-    process.env.CONTEXT_LENS_PROXY_PORT ||
-      process.env.CONTEXT_PROXY_PORT ||
-      "4040",
-    10,
-  );
+  const bindHost = process.env.CONTEXT_LENS_BIND_HOST || "127.0.0.1";
+  const port = parseInt(process.env.CONTEXT_LENS_PROXY_PORT || "4040", 10);
 
   // Do not honor `x-target-url` unless explicitly enabled.
   const allowTargetOverride =
-    process.env.CONTEXT_LENS_ALLOW_TARGET_OVERRIDE === "1" ||
-    process.env.CONTEXT_PROXY_ALLOW_TARGET_OVERRIDE === "1";
+    process.env.CONTEXT_LENS_ALLOW_TARGET_OVERRIDE === "1";
 
   const captureDir =
     process.env.CONTEXT_LENS_CAPTURE_DIR ||
