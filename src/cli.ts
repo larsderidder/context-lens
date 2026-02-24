@@ -55,6 +55,8 @@ if (parsedArgs.commandName === "analyze") {
   );
 } else if (parsedArgs.commandName === "doctor") {
   void runDoctor().then((exitCode) => process.exit(exitCode));
+} else if (parsedArgs.commandName === "stop") {
+  process.exit(backgroundStop());
 } else if (parsedArgs.commandName === "background") {
   void runBackgroundCommand(parsedArgs.commandArguments, parsedArgs.noUi).then(
     (exitCode) => process.exit(exitCode),
@@ -200,6 +202,7 @@ if (parsedArgs.commandName === "analyze") {
   let mitmReady = false;
   let childProcess: ChildProcess | null = null;
   let piAgentDirToCleanup: string | null = null;
+  let brytiDataDirToCleanup: string | null = null;
   let shouldShutdownServers = false;
   let cleanupDidRun = false;
   const requiresAnalysis = !noUi;
@@ -474,6 +477,10 @@ if (parsedArgs.commandName === "analyze") {
       );
     }
 
+    if (commandName === "bryti") {
+      childEnv.BRYTI_DATA_DIR = prepareBrytiDataDir(childEnv.BRYTI_DATA_DIR);
+    }
+
     // Spawn the child process with inherited stdio (interactive)
     // No shell: true. Avoids intermediate process that breaks signal delivery
     childProcess = spawn(commandName, allArgs, {
@@ -688,6 +695,103 @@ if (parsedArgs.commandName === "analyze") {
     }
   }
 
+  /**
+   * Create a temporary Bryti data directory with a proxy-aware config.yml.
+   *
+   * Bryti reads base_url for each model provider from its config.yml and does
+   * not respect environment variable overrides. We copy the real config (from
+   * the original BRYTI_DATA_DIR or ./data) into a temp dir, rewriting every
+   * provider's base_url to point at the context-lens proxy, then set
+   * BRYTI_DATA_DIR to the temp dir so Bryti picks up the patched config.
+   *
+   * The original config is never modified. The temp dir is cleaned up on exit.
+   *
+   * Bryti also writes runtime state (history, memory, pi agent dir, etc.) into
+   * BRYTI_DATA_DIR. Those paths all live under the temp dir for this session,
+   * which is intentional: captures are ephemeral, not merged back.
+   *
+   * If no config.yml is found in the source data dir, we warn and fall back to
+   * the temp dir without a config patch (bryti will error on its own).
+   */
+  function prepareBrytiDataDir(targetDirEnv: string | undefined): string {
+    const dirPrefix =
+      targetDirEnv && targetDirEnv.length > 0
+        ? targetDirEnv
+        : join(tmpdir(), "context-lens-bryti-");
+    const targetDir = fs.mkdtempSync(dirPrefix);
+    brytiDataDirToCleanup = targetDir;
+
+    // Find the real bryti data dir: check BRYTI_DATA_DIR in current env (before
+    // our override) or fall back to ./data relative to cwd.
+    const realDataDir = resolve(
+      process.env.BRYTI_DATA_DIR || join(process.cwd(), "data"),
+    );
+    const sourceConfigPath = join(realDataDir, "config.yml");
+
+    try {
+      if (!fs.existsSync(sourceConfigPath)) {
+        console.error(
+          `Warning: no Bryti config.yml found at ${sourceConfigPath}. ` +
+            "Bryti will start without a proxy-patched config.",
+        );
+        return targetDir;
+      }
+
+      const raw = fs.readFileSync(sourceConfigPath, "utf-8");
+
+      // Patch every `base_url:` value in the YAML that looks like an HTTP(S)
+      // URL (or is empty, meaning default Anthropic). We replace all provider
+      // base URLs with the proxy URL so all traffic is captured.
+      //
+      // We do a targeted line-level rewrite rather than full YAML parse+emit to
+      // avoid disturbing formatting, comments, or env-var substitution markers
+      // (${VAR}) that would fail a raw parse before substitution.
+      const proxyBase = `${CLI_CONSTANTS.PROXY_URL}/bryti`;
+      const patched = raw
+        .split("\n")
+        .map((line) => {
+          // Match lines like:  base_url: "..." or  base_url: ''  or  base_url:
+          // Only rewrite lines that are clearly provider base_url fields.
+          const m = line.match(/^(\s*base_url:\s*)(.*)$/);
+          if (!m) return line;
+          // Preserve the indent + key, replace the value
+          return `${m[1]}"${proxyBase}"`;
+        })
+        .join("\n");
+
+      const targetConfigPath = join(targetDir, "config.yml");
+      fs.writeFileSync(targetConfigPath, patched, "utf-8");
+
+      // Symlink everything else from the real data dir (history, memory,
+      // extension files, etc.) so bryti picks up existing state.
+      // Skip config.yml (already written above) and the .pi subdir (bryti
+      // regenerates it from config, and mixing temp + real paths would be
+      // confusing).
+      if (fs.existsSync(realDataDir)) {
+        for (const entry of fs.readdirSync(realDataDir, {
+          withFileTypes: true,
+        })) {
+          if (entry.name === "config.yml" || entry.name === ".pi") continue;
+          const src = join(realDataDir, entry.name);
+          const dst = join(targetDir, entry.name);
+          try {
+            fs.symlinkSync(src, dst);
+          } catch {
+            // Non-fatal: if symlink fails, bryti will recreate the dir/file
+          }
+        }
+      }
+
+      return targetDir;
+    } catch (err: unknown) {
+      console.error(
+        "Warning: failed to prepare Bryti proxy config:",
+        err instanceof Error ? err.message : String(err),
+      );
+      return targetDir;
+    }
+  }
+
   // Open browser (cross-platform)
   function openBrowser(url: string): void {
     const cmd =
@@ -722,6 +826,17 @@ if (parsedArgs.commandName === "analyze") {
       } catch (err: unknown) {
         console.error(
           "Warning: failed to clean up temporary Pi config dir:",
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    }
+
+    if (brytiDataDirToCleanup) {
+      try {
+        fs.rmSync(brytiDataDirToCleanup, { recursive: true, force: true });
+      } catch (err: unknown) {
+        console.error(
+          "Warning: failed to clean up temporary Bryti data dir:",
           err instanceof Error ? err.message : String(err),
         );
       }

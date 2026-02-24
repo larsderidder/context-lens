@@ -12,6 +12,7 @@ const PROXY_URL = "http://localhost:4040";
 const MITM_PORT = 8080;
 const MITM_PROXY_URL = `http://localhost:${MITM_PORT}`;
 const PI_AGENT_DIR_PREFIX = "/tmp/context-lens-pi-agent-";
+const BRYTI_DATA_DIR_PREFIX = "/tmp/context-lens-bryti-";
 const COMMAND_ALIASES: Record<string, string> = {
   cc: "claude",
   cx: "codex",
@@ -84,6 +85,16 @@ const TOOL_CONFIG: Record<string, ToolConfig> = {
     // directory where cli.ts writes a proxy-aware models.json.
     childEnv: {
       PI_CODING_AGENT_DIR: PI_AGENT_DIR_PREFIX,
+    },
+    extraArgs: [],
+    serverEnv: {},
+    needsMitm: false,
+  },
+  bryti: {
+    // Bryti reads base_url from its config.yml, not env vars. We point it at
+    // a temporary data dir where cli.ts writes a proxy-aware config.yml copy.
+    childEnv: {
+      BRYTI_DATA_DIR: BRYTI_DATA_DIR_PREFIX,
     },
     extraArgs: [],
     serverEnv: {},
@@ -243,6 +254,7 @@ export function formatHelpText(): string {
     "  context-lens [global-options] -- [command] [args...]",
     "  context-lens [global-options]   (no command = standalone mode)",
     "  context-lens doctor",
+    "  context-lens stop",
     "  context-lens background <start|stop|status> [--no-ui]",
     "  context-lens analyze <session.lhar> [options]",
     "",
@@ -250,9 +262,11 @@ export function formatHelpText(): string {
     "  context-lens claude",
     "  context-lens codex",
     "  context-lens gm",
+    "  context-lens bryti",
     "  context-lens --privacy=minimal aider --model claude-sonnet-4",
     "  context-lens -- python my_agent.py",
     "  context-lens doctor",
+    "  context-lens stop",
     "  context-lens background start --no-ui",
     "  context-lens analyze ~/.context-lens/data/claude-abc123.lhar",
     "  context-lens analyze session.lhar --json --main-only",
@@ -304,6 +318,7 @@ export const CLI_CONSTANTS = {
   MITM_PORT,
   MITM_PROXY_URL,
   PI_AGENT_DIR_PREFIX,
+  BRYTI_DATA_DIR_PREFIX,
   COMMAND_ALIASES,
   KNOWN_PRIVACY_LEVELS,
   // Resolved relative to compiled output (dist/ or dist-test/), matching cli.ts behavior.
