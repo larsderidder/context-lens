@@ -37,6 +37,7 @@ import type {
   ResponseData,
 } from "../types.js";
 import { projectEntry } from "./projection.js";
+import { TagsStore } from "./tags-store.js";
 
 export interface StoreChangeEvent {
   type: string;
@@ -47,6 +48,7 @@ export interface StoreChangeEvent {
 type StoreChangeListener = (event: StoreChangeEvent) => void;
 
 const CODEX_SESSION_TTL_MS = 5 * 60 * 1000;
+const GEMINI_SESSION_TTL_MS = 5 * 60 * 1000;
 
 export class Store {
   private readonly dataDir: string;
@@ -64,12 +66,19 @@ export class Store {
     string,
     { conversationId: string; lastSeen: number }
   >();
+  private geminiSessionTracker = new Map<
+    string,
+    { conversationId: string; lastSeen: number }
+  >();
 
   private dataRevision = 0;
   private nextEntryId = 1;
 
   // SSE change listeners
   private changeListeners = new Set<StoreChangeListener>();
+
+  // Tags storage
+  private tagsStore: TagsStore;
 
   constructor(opts: {
     dataDir: string;
@@ -95,6 +104,8 @@ export class Store {
     } catch {
       /* Directory may already exist */
     }
+
+    this.tagsStore = new TagsStore(this.dataDir);
   }
 
   getRevision(): number {
@@ -221,6 +232,8 @@ export class Store {
       console.log(
         `Restored ${loadedEntries} entries from ${this.conversations.size} conversations`,
       );
+      // Sync tags: remove tags for conversations that no longer exist
+      this.tagsStore.syncTags(new Set(this.conversations.keys()));
     }
   }
 
@@ -305,6 +318,27 @@ export class Store {
             lastSeen: now,
           });
         }
+      }
+    } else if (fingerprint && resolvedSource === "gemini") {
+      // Gemini CLI resends the full message history each turn, like Codex.
+      // Without a session_id, two sessions that start with the same prompt
+      // produce the same content-hash fingerprint and collapse into one
+      // conversation. Apply the same TTL-based splitting as Codex so that
+      // sessions separated by more than GEMINI_SESSION_TTL_MS get distinct IDs.
+      const now = Date.now();
+      const tracked = this.geminiSessionTracker.get(fingerprint);
+      if (tracked && now - tracked.lastSeen <= GEMINI_SESSION_TTL_MS) {
+        conversationId = tracked.conversationId;
+        tracked.lastSeen = now;
+      } else {
+        conversationId = createHash("sha256")
+          .update(`${fingerprint}\0${now}`)
+          .digest("hex")
+          .slice(0, 16);
+        this.geminiSessionTracker.set(fingerprint, {
+          conversationId,
+          lastSeen: now,
+        });
       }
     } else if (fingerprint) {
       conversationId = fingerprint;
@@ -487,6 +521,10 @@ export class Store {
         for (const [rid, rcid] of this.responseIdToConvo) {
           if (rcid === cid) this.responseIdToConvo.delete(rid);
         }
+        for (const [key, tracked] of this.geminiSessionTracker) {
+          if (tracked.conversationId === cid)
+            this.geminiSessionTracker.delete(key);
+        }
       }
     }
 
@@ -502,6 +540,7 @@ export class Store {
   deleteConversation(convoId: string): void {
     this.removeConversationDetails(convoId);
     this.conversations.delete(convoId);
+    this.tagsStore.removeConversation(convoId);
     for (let i = this.capturedRequests.length - 1; i >= 0; i--) {
       if (this.capturedRequests[i].conversationId === convoId)
         this.capturedRequests.splice(i, 1);
@@ -509,6 +548,10 @@ export class Store {
     this.diskSessionsWritten.delete(convoId);
     for (const [rid, cid] of this.responseIdToConvo) {
       if (cid === convoId) this.responseIdToConvo.delete(rid);
+    }
+    for (const [key, tracked] of this.geminiSessionTracker) {
+      if (tracked.conversationId === convoId)
+        this.geminiSessionTracker.delete(key);
     }
     this.dataRevision++;
     this.emitChange("conversation-deleted", convoId);
@@ -534,6 +577,8 @@ export class Store {
     this.conversations.clear();
     this.diskSessionsWritten.clear();
     this.responseIdToConvo.clear();
+    this.geminiSessionTracker.clear();
+    this.tagsStore.syncTags(new Set());
     this.nextEntryId = 1;
     this.dataRevision++;
     this.emitChange("reset");
@@ -1011,5 +1056,42 @@ export class Store {
         err instanceof Error ? err.message : String(err),
       );
     }
+  }
+
+  // ----- Tags API -----
+
+  getTags(conversationId: string): string[] {
+    return this.tagsStore.getTags(conversationId);
+  }
+
+  setTags(conversationId: string, tags: string[]): void {
+    if (!this.conversations.has(conversationId)) {
+      throw new Error(`Conversation not found: ${conversationId}`);
+    }
+    this.tagsStore.setTags(conversationId, tags);
+    this.dataRevision++;
+    this.emitChange("tags-updated", conversationId);
+  }
+
+  addTag(conversationId: string, tag: string): void {
+    if (!this.conversations.has(conversationId)) {
+      throw new Error(`Conversation not found: ${conversationId}`);
+    }
+    this.tagsStore.addTag(conversationId, tag);
+    this.dataRevision++;
+    this.emitChange("tags-updated", conversationId);
+  }
+
+  removeTag(conversationId: string, tag: string): void {
+    if (!this.conversations.has(conversationId)) {
+      throw new Error(`Conversation not found: ${conversationId}`);
+    }
+    this.tagsStore.removeTag(conversationId, tag);
+    this.dataRevision++;
+    this.emitChange("tags-updated", conversationId);
+  }
+
+  getAllTags(): Map<string, number> {
+    return this.tagsStore.getAllTags();
   }
 }

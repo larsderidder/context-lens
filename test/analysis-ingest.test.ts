@@ -33,6 +33,7 @@ function makeCaptureData(overrides?: Partial<CaptureData>): CaptureData {
     responseIsStreaming: false,
     responseBytes: 150,
     timings: { send_ms: 5, wait_ms: 100, receive_ms: 20, total_ms: 125 },
+    sessionId: null,
     ...overrides,
   };
 }

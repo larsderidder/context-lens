@@ -30,6 +30,7 @@ function makeCaptureJson(overrides?: Partial<CaptureData>): string {
     responseIsStreaming: false,
     responseBytes: 50,
     timings: { send_ms: 1, wait_ms: 2, receive_ms: 3, total_ms: 6 },
+    sessionId: null,
     ...overrides,
   };
   return JSON.stringify(data);

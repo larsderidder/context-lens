@@ -1,3 +1,4 @@
+import type { JsonValue } from "@contextio/core";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import * as v from "valibot";
@@ -83,6 +84,7 @@ function buildFullConversation(
   id: string,
   entries: CapturedEntry[],
   conversations: Map<string, any>,
+  store: Store,
 ): ConversationGroup {
   // Sort newest-first (by timestamp descending) for consistent API output.
   // The UI and scrubber expect entries[0] to be the latest turn.
@@ -96,6 +98,10 @@ function buildFullConversation(
     workingDirectory: null,
     firstSeen: sorted[sorted.length - 1].timestamp,
   };
+
+  // Get tags for this conversation
+  const tags = store.getTags(id);
+
   const agentMap = new Map<string, CapturedEntry[]>();
   for (const e of sorted) {
     const ak = e.agentKey || "_default";
@@ -118,6 +124,7 @@ function buildFullConversation(
   );
   return {
     ...meta,
+    tags,
     agents,
     entries: sorted.map(projectEntryForApi),
   };
@@ -145,7 +152,7 @@ export function createApiApp(store: Store): Hono {
       ingestCapture(store, {
         ...data,
         source: data.source ?? "unknown",
-        requestBody: data.requestBody ?? null,
+        requestBody: (data.requestBody ?? null) as JsonValue | null,
       });
       console.log(
         `  📥 Ingested (capture): [${data.provider}] from ${data.source ?? "unknown"}`,
@@ -202,7 +209,9 @@ export function createApiApp(store: Store): Hono {
       return c.json({ error: "Conversation not found" }, 404);
     }
 
-    return c.json(buildFullConversation(convoId, entries, conversations));
+    return c.json(
+      buildFullConversation(convoId, entries, conversations, store),
+    );
   });
 
   // --- Reset ---
@@ -210,6 +219,65 @@ export function createApiApp(store: Store): Hono {
   app.post("/api/reset", (c) => {
     store.resetAll();
     return c.json({ ok: true });
+  });
+
+  // --- Tags ---
+
+  app.get("/api/tags", (c) => {
+    const allTags = store.getAllTags();
+    const tags = [...allTags.entries()].map(([name, count]) => ({
+      name,
+      count,
+    }));
+    tags.sort((a, b) => a.name.localeCompare(b.name));
+    return c.json({ tags });
+  });
+
+  app.patch("/api/sessions/:id/tags", async (c) => {
+    const convoId = decodeURIComponent(c.req.param("id"));
+    const body = await c.req.json();
+
+    if (!Array.isArray(body.tags)) {
+      return c.json({ error: "tags must be an array" }, 400);
+    }
+
+    try {
+      store.setTags(convoId, body.tags);
+      return c.json({ ok: true, tags: store.getTags(convoId) });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      return c.json({ error: message }, 404);
+    }
+  });
+
+  app.post("/api/sessions/:id/tags", async (c) => {
+    const convoId = decodeURIComponent(c.req.param("id"));
+    const body = await c.req.json();
+
+    if (typeof body.tag !== "string" || !body.tag.trim()) {
+      return c.json({ error: "tag must be a non-empty string" }, 400);
+    }
+
+    try {
+      store.addTag(convoId, body.tag);
+      return c.json({ ok: true, tags: store.getTags(convoId) });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      return c.json({ error: message }, 404);
+    }
+  });
+
+  app.delete("/api/sessions/:id/tags/:tag", (c) => {
+    const convoId = decodeURIComponent(c.req.param("id"));
+    const tag = decodeURIComponent(c.req.param("tag"));
+
+    try {
+      store.removeTag(convoId, tag);
+      return c.json({ ok: true, tags: store.getTags(convoId) });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      return c.json({ error: message }, 404);
+    }
   });
 
   // --- Requests (summary + full) ---
@@ -258,6 +326,9 @@ export function createApiApp(store: Store): Hono {
           }
         }
 
+        // Get tags for this conversation
+        const tags = store.getTags(id);
+
         summaries.push({
           ...meta,
           entryCount: entries.length,
@@ -268,6 +339,7 @@ export function createApiApp(store: Store): Hono {
           totalCost,
           healthScore: latest.healthScore,
           tokenHistory,
+          tags,
         });
       }
       summaries.sort(
@@ -285,7 +357,7 @@ export function createApiApp(store: Store): Hono {
     // Full response
     const convos: ConversationGroup[] = [];
     for (const [id, entries] of grouped) {
-      convos.push(buildFullConversation(id, entries, conversations));
+      convos.push(buildFullConversation(id, entries, conversations, store));
     }
     convos.sort(
       (a, b) =>

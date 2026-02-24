@@ -15,7 +15,12 @@ import {
   fetchEntryDetail,
   deleteConversation as apiDeleteConversation,
   resetAll as apiResetAll,
+  fetchTags,
+  setSessionTags,
+  addSessionTag,
+  removeSessionTag,
 } from '@/api'
+import type { TagInfo } from '@/api-types'
 import { classifyEntries } from '@/utils/messages'
 
 export type ViewMode = 'inspector' | 'dashboard' | 'compare'
@@ -35,6 +40,11 @@ export const useSessionStore = defineStore('session', () => {
   const loadingSession = ref<string | null>(null)
   const error = ref<string | null>(null)
   const connected = ref(false)
+
+  // --- Tags ---
+  const allTags = ref<TagInfo[]>([])
+  const tagFilter = ref<string>('') // '' = all tags
+  const loadingTags = ref(false)
 
   // --- UI state ---
   const view = ref<ViewMode>('dashboard')
@@ -130,8 +140,15 @@ export const useSessionStore = defineStore('session', () => {
   })
 
   const filteredSummaries = computed(() => {
-    if (!sourceFilter.value) return summaries.value
-    return summaries.value.filter(s => s.source === sourceFilter.value)
+    let filtered = summaries.value
+    if (sourceFilter.value) {
+      filtered = filtered.filter(s => s.source === sourceFilter.value)
+    }
+    if (tagFilter.value) {
+      const tag = tagFilter.value.toLowerCase()
+      filtered = filtered.filter(s => s.tags?.includes(tag))
+    }
+    return filtered
   })
 
   const sources = computed(() => {
@@ -257,6 +274,11 @@ export const useSessionStore = defineStore('session', () => {
 
     // For all mutation events, re-fetch summaries
     load()
+
+    // Refresh tag counts when tags change (e.g. from another tab)
+    if (event.type === 'tags-updated') {
+      loadTags()
+    }
 
     // If the event is for the currently selected session, also refresh its entries
     if (event.conversationId && selectedSessionId.value === event.conversationId) {
@@ -467,6 +489,91 @@ export const useSessionStore = defineStore('session', () => {
     applyDensityToDom(mode)
   }
 
+  // --- Tags ---
+
+  async function loadTags() {
+    loadingTags.value = true
+    try {
+      const data = await fetchTags()
+      allTags.value = data.tags
+    } catch (e) {
+      console.warn('Failed to load tags:', e)
+    } finally {
+      loadingTags.value = false
+    }
+  }
+
+  function setTagFilter(tag: string) {
+    tagFilter.value = tag
+  }
+
+  function clearTagFilter() {
+    tagFilter.value = ''
+  }
+
+  async function updateSessionTags(conversationId: string, tags: string[]) {
+    try {
+      const updatedTags = await setSessionTags(conversationId, tags)
+      // Update local state
+      const summary = summaries.value.find(s => s.id === conversationId)
+      if (summary) {
+        summary.tags = updatedTags
+      }
+      const loaded = loadedConversations.value.get(conversationId)
+      if (loaded) {
+        loaded.tags = updatedTags
+      }
+      // Refresh all tags list
+      await loadTags()
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : String(e)
+    }
+  }
+
+  async function addTagToSession(conversationId: string, tag: string) {
+    try {
+      const updatedTags = await addSessionTag(conversationId, tag)
+      // Update local state
+      const summary = summaries.value.find(s => s.id === conversationId)
+      if (summary) {
+        summary.tags = updatedTags
+      }
+      const loaded = loadedConversations.value.get(conversationId)
+      if (loaded) {
+        loaded.tags = updatedTags
+      }
+      // Refresh all tags list
+      await loadTags()
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : String(e)
+    }
+  }
+
+  async function removeTagFromSession(conversationId: string, tag: string) {
+    try {
+      const updatedTags = await removeSessionTag(conversationId, tag)
+      // Update local state
+      const summary = summaries.value.find(s => s.id === conversationId)
+      if (summary) {
+        summary.tags = updatedTags
+      }
+      const loaded = loadedConversations.value.get(conversationId)
+      if (loaded) {
+        loaded.tags = updatedTags
+      }
+      // Refresh all tags list
+      await loadTags()
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : String(e)
+    }
+  }
+
+  // Return a CSS color class for a tag based on its position in the list.
+  // Positional coloring guarantees no two adjacent tags share a color.
+  function getTagColorClass(index: number): string {
+    return `tag-color-${index % 8}`
+  }
+
   return {
     // State
     revision,
@@ -501,6 +608,11 @@ export const useSessionStore = defineStore('session', () => {
     recentlyUpdated,
     compareSessionIds,
     compareMode,
+
+    // Tags
+    allTags,
+    tagFilter,
+    loadingTags,
 
     // Computed
     filteredConversations,
@@ -539,5 +651,14 @@ export const useSessionStore = defineStore('session', () => {
     setDensity,
     deleteSession,
     reset,
+
+    // Tags
+    loadTags,
+    setTagFilter,
+    clearTagFilter,
+    updateSessionTags,
+    addTagToSession,
+    removeTagFromSession,
+    getTagColorClass,
   }
 })

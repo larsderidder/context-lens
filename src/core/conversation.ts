@@ -43,6 +43,7 @@ export function extractReadableText(
  * Supports:
  * - Claude Code: "Primary working directory: `/path`"
  * - Codex: "<cwd>/path</cwd>"
+ * - Gemini CLI: "I'm currently working in the directory: /path"
  * - Generic: "working directory is /path" or "cwd: /path"
  */
 export function extractWorkingDirectory(
@@ -61,6 +62,16 @@ export function extractWorkingDirectory(
   );
   if (match) return match[1];
   match = allText.match(/<cwd>([^<]+)<\/cwd>/);
+  if (match) return match[1];
+  // Gemini CLI: "I'm currently working in the directory: /path"
+  match = allText.match(
+    /working in the director(?:y|ies)[:\s]+([/~][^\s\n]+)/i,
+  );
+  if (match) return match[1];
+  // Gemini CLI multi-dir: "working in the following directories:\n  - /path"
+  match = allText.match(
+    /working in the following director(?:y|ies)[^\n]*\n\s+-\s+([/~][^\s\n]+)/i,
+  );
   if (match) return match[1];
   // Generic: "working directory is /path" or "working directory = /path"
   match = allText.match(/working directory (?:is |= ?)[`"]?([/~][^\s`"'\n]+)/i);

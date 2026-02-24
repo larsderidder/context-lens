@@ -20,7 +20,8 @@ function tileTooltip(s: ConversationSummary): string {
   const cost = fmtCost(s.totalCost)
   const health = s.healthScore ? `\nHealth ${s.healthScore.overall}/100 (${s.healthScore.rating})` : ''
   const dir = s.workingDirectory ? `\n${s.workingDirectory}` : ''
-  return `${s.source} · ${model}\n${turns} · ${cost}${health}${dir}`
+  const tags = s.tags?.length ? `\nTags: ${s.tags.join(', ')}` : ''
+  return `${s.source} · ${model}\n${turns} · ${cost}${health}${dir}${tags}`
 }
 
 function utilizationPct(s: ConversationSummary): number {
@@ -52,7 +53,7 @@ const tipOpts = { delay: { show: 50, hide: 0 }, placement: 'right' as const }
 
     <div class="rail-scroll">
       <button
-        v-for="s in store.summaries"
+        v-for="s in store.filteredSummaries"
         :key="s.id"
         class="rail-tile"
         :class="{
@@ -67,6 +68,17 @@ const tipOpts = { delay: { show: 50, hide: 0 }, placement: 'right' as const }
         </span>
         <span class="tile-meta">{{ s.entryCount }}t</span>
         <span class="tile-util" :class="utilizationClass(s)">{{ utilizationPct(s) }}%</span>
+        <!-- Tag indicator -->
+        <span v-if="s.tags?.length" class="tile-tags">
+          <span
+            v-for="(tag, i) in s.tags.slice(0, 3)"
+            :key="tag"
+            class="tile-tag-dot"
+            :class="store.getTagColorClass(i)"
+            :title="tag"
+          />
+          <span v-if="s.tags.length > 3" class="tile-tag-more">+</span>
+        </span>
       </button>
     </div>
   </nav>
@@ -232,7 +244,42 @@ const tipOpts = { delay: { show: 50, hide: 0 }, placement: 'right' as const }
 .badge-aider { color: var(--accent-blue); }
 .badge-kimi { color: var(--accent-purple); }
 .badge-pi { color: var(--accent-purple); }
+.badge-gemini { color: #4a90e2; }
 .badge-unknown { color: var(--text-dim); }
+
+// ── Tag indicators ──
+.tile-tags {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  flex-wrap: wrap;
+  max-width: 54px;
+  margin-top: 2px;
+}
+
+.tile-tag-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+
+  // Position-based tag colors
+  &.tag-color-0 { background: var(--accent-blue); }
+  &.tag-color-1 { background: var(--accent-green); }
+  &.tag-color-2 { background: var(--accent-amber); }
+  &.tag-color-3 { background: var(--accent-purple); }
+  &.tag-color-4 { background: var(--accent-red); }
+  &.tag-color-5 { background: #06b6d4; }
+  &.tag-color-6 { background: #ec4899; }
+  &.tag-color-7 { background: #84cc16; }
+}
+
+.tile-tag-more {
+  font-size: 7px;
+  color: var(--text-muted);
+  line-height: 1;
+}
 
 // ── Accessibility: respect reduced motion ──
 @media (prefers-reduced-motion: reduce) {

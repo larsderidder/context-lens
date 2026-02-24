@@ -1,7 +1,7 @@
 /**
  * Capture writer for the proxy.
  *
- * Two modes (zero external dependencies in both):
+ * Two modes:
  *   - File mode (default): atomic JSON writes to a capture directory.
  *   - Ingest mode: POST captures to a remote ingest URL over HTTP.
  */
@@ -12,30 +12,9 @@ import https from "node:https";
 import { join } from "node:path";
 import { URL } from "node:url";
 
-export interface CaptureData {
-  timestamp: string;
-  method: string;
-  path: string;
-  source: string | null;
-  provider: string;
-  apiFormat: string;
-  targetUrl: string;
-  requestHeaders: Record<string, string>;
-  requestBody: Record<string, any> | null;
-  requestBytes: number;
-  responseStatus: number;
-  responseHeaders: Record<string, string>;
-  responseBody: string;
-  responseIsStreaming: boolean;
-  responseBytes: number;
-  sessionId?: string | null;
-  timings: {
-    send_ms: number;
-    wait_ms: number;
-    receive_ms: number;
-    total_ms: number;
-  };
-}
+import type { CaptureData } from "@contextio/core";
+
+export type { CaptureData } from "@contextio/core";
 
 /**
  * Create a capture writer for a given directory.
@@ -75,7 +54,6 @@ export function createCaptureWriter(captureDir: string) {
         "Capture write error:",
         err instanceof Error ? err.message : String(err),
       );
-      // Clean up temp file if rename failed
       try {
         fs.unlinkSync(tmpPath);
       } catch {
@@ -113,7 +91,6 @@ export function createCaptureIngestor(ingestUrl: string) {
         },
       },
       (res) => {
-        // Drain the response so the socket is released
         res.resume();
         if (res.statusCode && res.statusCode >= 400) {
           console.error(`Ingest HTTP error: ${res.statusCode} ${ingestUrl}`);

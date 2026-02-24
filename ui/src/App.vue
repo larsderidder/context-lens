@@ -247,9 +247,11 @@ onUnmounted(() => {
         <div class="loading-spinner"></div>
       </div>
       <template v-else>
-      <!-- Session rail: transitions in/out with inspector view -->
+      <!-- Session rail: width collapses to 0 so main-content fills the space smoothly -->
       <Transition name="rail-slide">
-        <SessionRail v-if="store.view === 'inspector'" />
+        <div v-if="store.view === 'inspector'" class="rail-wrapper">
+          <SessionRail />
+        </div>
       </Transition>
       
       <!-- Main content area with transitions -->
@@ -369,25 +371,34 @@ onUnmounted(() => {
   transition: none;
 }
 
-// ── SessionRail slide transition ──
+// ── SessionRail wrapper ──
+// The wrapper collapses its width to 0 so the dashboard slides into the freed
+// space without a jump. The rail content slides left inside the wrapper
+// simultaneously so it doesn't linger as a squished strip.
+.rail-wrapper {
+  width: 78px;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
 .rail-slide-enter-active {
-  transition: transform 0.28s cubic-bezier(0.25, 0.46, 0.45, 0.94),
-              opacity 0.22s ease;
+  transition: width 0.28s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  :deep(.session-rail) { transition: transform 0.28s cubic-bezier(0.25, 0.46, 0.45, 0.94); }
 }
 
 .rail-slide-leave-active {
-  transition: transform 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94),
-              opacity 0.2s ease;
+  transition: width 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  :deep(.session-rail) { transition: transform 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94); }
 }
 
 .rail-slide-enter-from {
-  transform: translateX(-100%);
-  opacity: 0;
+  width: 0;
+  :deep(.session-rail) { transform: translateX(-78px); }
 }
 
 .rail-slide-leave-to {
-  transform: translateX(-100%);
-  opacity: 0;
+  width: 0;
+  :deep(.session-rail) { transform: translateX(-78px); }
 }
 
 // Respect reduced motion preference
@@ -399,6 +410,7 @@ onUnmounted(() => {
   .rail-slide-enter-active,
   .rail-slide-leave-active {
     transition-duration: 0.01ms !important;
+    :deep(.session-rail) { transition-duration: 0.01ms !important; }
   }
 }
 </style>

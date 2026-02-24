@@ -264,6 +264,87 @@ describe("Store", () => {
     cleanup();
   });
 
+  it("groups gemini turns within the TTL into one session", () => {
+    const { store, cleanup } = makeStore();
+
+    const makeBody = () => ({
+      contents: [{ role: "user", parts: [{ text: "hello gemini" }] }],
+      systemInstruction: { parts: [{ text: "You are helpful" }] },
+    });
+    const geminiResp = {
+      usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5 },
+    } as any;
+
+    const realNow = Date.now;
+    try {
+      Date.now = () => 2_000_000;
+      const b1 = makeBody();
+      const e1 = store.storeRequest(
+        parseContextInfo("gemini", b1, "gemini"),
+        geminiResp,
+        "gemini",
+        b1,
+      );
+
+      Date.now = () => 2_000_000 + 60_000; // 1 minute later, within TTL
+      const b2 = makeBody();
+      const e2 = store.storeRequest(
+        parseContextInfo("gemini", b2, "gemini"),
+        geminiResp,
+        "gemini",
+        b2,
+      );
+
+      assert.ok(e1.conversationId);
+      assert.equal(e2.conversationId, e1.conversationId);
+    } finally {
+      Date.now = realNow;
+    }
+
+    cleanup();
+  });
+
+  it("splits gemini sessions after idle window", () => {
+    const { store, cleanup } = makeStore();
+
+    const makeBody = () => ({
+      contents: [{ role: "user", parts: [{ text: "hello gemini" }] }],
+      systemInstruction: { parts: [{ text: "You are helpful" }] },
+    });
+    const geminiResp = {
+      usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5 },
+    } as any;
+
+    const realNow = Date.now;
+    try {
+      Date.now = () => 3_000_000;
+      const b1 = makeBody();
+      const e1 = store.storeRequest(
+        parseContextInfo("gemini", b1, "gemini"),
+        geminiResp,
+        "gemini",
+        b1,
+      );
+
+      Date.now = () => 3_000_000 + 5 * 60 * 1000 + 1; // just past the 5-minute TTL
+      const b2 = makeBody();
+      const e2 = store.storeRequest(
+        parseContextInfo("gemini", b2, "gemini"),
+        geminiResp,
+        "gemini",
+        b2,
+      );
+
+      assert.ok(e1.conversationId);
+      assert.ok(e2.conversationId);
+      assert.notEqual(e2.conversationId, e1.conversationId);
+    } finally {
+      Date.now = realNow;
+    }
+
+    cleanup();
+  });
+
   it("uses API usage as authoritative total tokens and computes cache-aware cost", () => {
     const { store, cleanup } = makeStore();
 

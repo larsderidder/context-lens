@@ -96,6 +96,34 @@ describe("extractWorkingDirectory", () => {
     assert.equal(extractWorkingDirectory(info), "/home/user/codex-project");
   });
 
+  it("extracts from Gemini CLI single-directory message", () => {
+    const info = {
+      systemPrompts: [],
+      messages: [
+        {
+          role: "user",
+          content:
+            "I'm currently working in the directory: /home/user/gemini-project\nHere is the folder structure...",
+        },
+      ],
+    } as any;
+    assert.equal(extractWorkingDirectory(info), "/home/user/gemini-project");
+  });
+
+  it("extracts first path from Gemini CLI multi-directory message", () => {
+    const info = {
+      systemPrompts: [],
+      messages: [
+        {
+          role: "user",
+          content:
+            "I'm currently working in the following directories:\n  - /home/user/project-a\n  - /home/user/project-b",
+        },
+      ],
+    } as any;
+    assert.equal(extractWorkingDirectory(info), "/home/user/project-a");
+  });
+
   it('extracts from "working directory is" pattern', () => {
     const info = {
       systemPrompts: [{ content: "The working directory is /tmp/build" }],

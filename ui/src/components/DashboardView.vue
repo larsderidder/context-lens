@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import SearchInput from '@/components/SearchInput.vue'
+import TagFilter from '@/components/TagFilter.vue'
 import { useSessionStore } from '@/stores/session'
 import { fmtTokens, fmtCost, shortModel, sourceBadgeClass, healthColor } from '@/utils/format'
 import { computeSessionPriority } from '@/utils/priority'
@@ -111,6 +112,10 @@ const filteredSummaries = computed(() => {
       ].join('\0').toLowerCase()
       return haystack.includes(q)
     })
+  }
+  if (store.tagFilter) {
+    const tag = store.tagFilter.toLowerCase()
+    list = list.filter(s => s.tags?.includes(tag))
   }
   return list
 })
@@ -411,6 +416,9 @@ function onKeydown(e: KeyboardEvent) {
           </div>
         </div>
 
+        <!-- Tag filter -->
+        <TagFilter />
+
         <!-- Sort toggles -->
         <div class="sort-group">
           <button class="sort-btn" :class="{ active: sortMode === 'recent' }" @click="sortMode = 'recent'">Recent</button>
@@ -461,6 +469,16 @@ function onKeydown(e: KeyboardEvent) {
               </td>
               <td class="col-source">
                 <span class="source-badge" :class="sourceBadgeClass(s.source)">{{ s.source || '?' }}</span>
+                <span v-if="s.tags?.length" class="row-tags">
+                  <span
+                    v-for="(tag, i) in s.tags.slice(0, 2)"
+                    :key="tag"
+                    class="row-tag"
+                    :class="store.getTagColorClass(i)"
+                    :title="tag"
+                  >{{ tag }}</span>
+                  <span v-if="s.tags.length > 2" class="row-tag-more">+{{ s.tags.length - 2 }}</span>
+                </span>
               </td>
               <td class="col-model">
                 <span class="model-text">{{ shortModel(s.latestModel) }}</span>
@@ -830,12 +848,52 @@ function onKeydown(e: KeyboardEvent) {
   line-height: 1.4;
 }
 
+.row-tags {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+.row-tag {
+  @include mono-text;
+  font-size: 9px;
+  padding: 1px 4px;
+  border-radius: 2px;
+  text-transform: lowercase;
+  max-width: 50px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  // Default background (will be overridden by color classes)
+  background: var(--bg-raised);
+  color: var(--text-secondary);
+
+  // Position-based tag colors
+  &.tag-color-0 { background: var(--accent-blue-dim);          color: var(--accent-blue); }
+  &.tag-color-1 { background: rgba(16,  185, 129, 0.15);       color: var(--accent-green); }
+  &.tag-color-2 { background: var(--accent-amber-dim);         color: var(--accent-amber); }
+  &.tag-color-3 { background: rgba(139,  92, 246, 0.15);       color: var(--accent-purple); }
+  &.tag-color-4 { background: var(--accent-red-dim);           color: var(--accent-red); }
+  &.tag-color-5 { background: rgba(  6, 182, 212, 0.15);       color: #06b6d4; }
+  &.tag-color-6 { background: rgba(236,  72, 153, 0.15);       color: #ec4899; }
+  &.tag-color-7 { background: rgba(132, 204,  22, 0.15);       color: #84cc16; }
+}
+
+.row-tag-more {
+  font-size: 9px;
+  color: var(--text-muted);
+}
+
 // Badge colors
 .badge-claude { background: rgba(251, 146, 60, 0.15); color: #fb923c; }
 .badge-codex { background: rgba(52, 211, 153, 0.15); color: #34d399; }
 .badge-aider { background: rgba(14, 165, 233, 0.15); color: var(--accent-blue); }
 .badge-kimi { background: rgba(167, 139, 250, 0.15); color: var(--accent-purple); }
 .badge-pi { background: rgba(167, 139, 250, 0.15); color: var(--accent-purple); }
+.badge-gemini { background: rgba(74, 144, 226, 0.15); color: #4a90e2; }
 .badge-unknown { background: var(--bg-raised); color: var(--text-dim); }
 
 .model-text {

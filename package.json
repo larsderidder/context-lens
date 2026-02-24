@@ -7,8 +7,7 @@
   "bin": {
     "context-lens": "./dist/cli.js",
     "context-lens-proxy": "./dist/proxy/server.js",
-    "context-lens-analysis": "./dist/analysis/server.js",
-    "picl": "./dist/cli.js"
+    "context-lens-analysis": "./dist/analysis/server.js"
   },
   "scripts": {
     "generate:types": "json2ts schema/lhar.schema.json src/lhar-types.generated.ts --unreachableDefinitions",
@@ -66,6 +65,8 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
+    "@contextio/core": "^0.2.1",
+    "@contextio/proxy": "^0.2.2",
     "@hono/node-server": "^1.19.9",
     "hono": "^4.11.9",
     "valibot": "^1.2.0"

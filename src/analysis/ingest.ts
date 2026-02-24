@@ -18,8 +18,12 @@ export function ingestCapture(store: Store, capture: CaptureData): void {
 
   // Build contextInfo from the request body
   let contextInfo: ContextInfo;
-  if (requestBody) {
-    const body = { ...requestBody };
+  if (
+    requestBody &&
+    typeof requestBody === "object" &&
+    !Array.isArray(requestBody)
+  ) {
+    const body = { ...(requestBody as Record<string, unknown>) };
     // Gemini: model is in the URL path, not in the body
     if (apiFormat === "gemini" && !body.model) {
       const modelMatch = capture.path.match(/\/models\/([^/:]+)/);
@@ -79,7 +83,11 @@ export function ingestCapture(store: Store, capture: CaptureData): void {
     contextInfo,
     responseData,
     capture.source,
-    requestBody ?? undefined,
+    requestBody &&
+      typeof requestBody === "object" &&
+      !Array.isArray(requestBody)
+      ? (requestBody as Record<string, any>)
+      : undefined,
     meta,
     capture.requestHeaders,
     capture.sessionId ?? null,

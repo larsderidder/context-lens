@@ -133,6 +133,7 @@ export interface Upstreams {
 export interface ResolveTargetResult {
   targetUrl: string;
   provider: Provider;
+  apiFormat: ApiFormat;
 }
 
 // --- Server-side types ---
@@ -144,6 +145,7 @@ export interface Conversation {
   workingDirectory: string | null;
   firstSeen: string;
   sessionId?: string | null;
+  tags?: string[];
 }
 
 // --- Security scanning ---

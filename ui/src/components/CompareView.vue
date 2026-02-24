@@ -778,6 +778,7 @@ const metricDeltas = computed(() => {
 .badge-aider { background: rgba(14, 165, 233, 0.15); color: var(--accent-blue); }
 .badge-kimi { background: rgba(167, 139, 250, 0.15); color: var(--accent-purple); }
 .badge-pi { background: rgba(167, 139, 250, 0.15); color: var(--accent-purple); }
+.badge-gemini { background: rgba(74, 144, 226, 0.15); color: #4a90e2; }
 .badge-unknown { background: var(--bg-raised); color: var(--text-dim); }
 
 .lane-model {

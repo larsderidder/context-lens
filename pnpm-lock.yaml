@@ -8,6 +8,12 @@ importers:
 
   .:
     dependencies:
+      '@contextio/core':
+        specifier: ^0.2.1
+        version: 0.2.1
+      '@contextio/proxy':
+        specifier: ^0.2.2
+        version: 0.2.2
       '@hono/node-server':
         specifier: ^1.19.9
         version: 1.19.9(hono@4.11.9)
@@ -89,6 +95,13 @@ packages:
     engines: {node: '>=14.21.3'}
     cpu: [x64]
     os: [win32]
+
+  '@contextio/core@0.2.1':
+    resolution: {integrity: sha512-tFiWWgyOCE4w2CjqUX2oidqOlfE4o1vlh6jbrfr/oEbpVi5N9DSf2Yb3p+syRWmjGcqgoThosFXpNKBjE/c8rw==}
+
+  '@contextio/proxy@0.2.2':
+    resolution: {integrity: sha512-LJKcEiEubxJwgvnqv9MMOV0JN7rwVe32Aq35WWiTCzA60XEdm5IW2Ie73ooiaPnJoeB25qnr1iOXgzUV4b01ag==}
+    hasBin: true
 
   '@hono/node-server@1.19.9':
     resolution: {integrity: sha512-vHL6w3ecZsky+8P5MD+eFfaGTyCeOHUIFYMGpQGbrBTSmNNoxv0if69rEZ5giu36weC5saFuznL411gRX7bJDw==}
@@ -218,6 +231,12 @@ snapshots:
 
   '@biomejs/cli-win32-x64@2.3.14':
     optional: true
+
+  '@contextio/core@0.2.1': {}
+
+  '@contextio/proxy@0.2.2':
+    dependencies:
+      '@contextio/core': 0.2.1
 
   '@hono/node-server@1.19.9(hono@4.11.9)':
     dependencies:
