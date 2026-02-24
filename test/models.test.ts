@@ -5,14 +5,14 @@ import { estimateCost, getContextLimit } from "../src/core.js";
 
 describe("getContextLimit", () => {
   it("returns correct limit for exact model names", () => {
-    assert.equal(getContextLimit("claude-sonnet-4-20250514"), 200000);
+    assert.equal(getContextLimit("claude-sonnet-4-20250514"), 1000000);
     assert.equal(getContextLimit("gpt-4o-mini"), 128000);
     assert.equal(getContextLimit("gpt-4"), 8192);
     assert.equal(getContextLimit("gpt-3.5-turbo"), 16385);
   });
 
   it("matches by substring", () => {
-    assert.equal(getContextLimit("claude-sonnet-4-latest"), 200000);
+    assert.equal(getContextLimit("claude-sonnet-4-latest"), 1000000);
     assert.equal(getContextLimit("gpt-4o-mini-2024-07-18"), 128000);
   });
 
@@ -62,7 +62,7 @@ describe("estimateCost", () => {
     const miniCost = estimateCost("o3-mini-2025-01-31", 1_000_000, 0);
     const fullCost = estimateCost("o3-2025-04-16", 1_000_000, 0);
     assert.equal(miniCost, 1.1); // $1.10/M
-    assert.equal(fullCost, 10); // $10/M
+    assert.equal(fullCost, 2); // $2/M (current OpenAI API pricing)
   });
 
   it("calculates cache read cost at 10% for Claude models", () => {
