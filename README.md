@@ -177,12 +177,27 @@ If you prefer to configure it manually, set `baseUrl` in `~/.pi/agent/models.jso
 }
 ```
 
-### OpenAI-Compatible Endpoints
+### OpenCode
 
-Many providers expose OpenAI-compatible APIs (OpenRouter, Together, Groq, Fireworks, Ollama, vLLM, OpenCode Zen, etc.). Override the upstream URL to point at your provider:
+OpenCode connects to multiple providers simultaneously over HTTPS. Use `context-lens opencode` — it routes all traffic through mitmproxy so every provider call is captured regardless of which model is active:
+
+```bash
+pipx install mitmproxy
+context-lens opencode
+```
+
+If you only use OpenCode with a single OpenAI-compatible endpoint (e.g. OpenCode Zen), you can also use the base URL override approach instead:
 
 ```bash
 UPSTREAM_OPENAI_URL=https://opencode.ai/zen/v1 context-lens -- opencode "prompt"
+```
+
+### OpenAI-Compatible Endpoints
+
+Many providers expose OpenAI-compatible APIs (OpenRouter, Together, Groq, Fireworks, Ollama, vLLM, etc.). Override the upstream URL to point at your provider:
+
+```bash
+UPSTREAM_OPENAI_URL=https://my-provider.com/v1 context-lens -- my-tool "prompt"
 ```
 
 `UPSTREAM_OPENAI_URL` is global: all OpenAI-format requests go to that upstream. Use separate proxy instances if you need to hit multiple endpoints simultaneously.

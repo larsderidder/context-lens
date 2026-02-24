@@ -17,6 +17,7 @@ const COMMAND_ALIASES: Record<string, string> = {
   cc: "claude",
   cx: "codex",
   gm: "gemini",
+  oc: "opencode",
 };
 const KNOWN_PRIVACY_LEVELS = ["minimal", "standard", "full"] as const;
 type PrivacyLevel = (typeof KNOWN_PRIVACY_LEVELS)[number];
@@ -70,6 +71,19 @@ const TOOL_CONFIG: Record<string, ToolConfig> = {
     serverEnv: {},
     needsMitm: false,
   },
+  opencode: {
+    // OpenCode connects directly to each provider's official API over HTTPS
+    // and cannot be redirected via base URL env vars alone when using multiple
+    // providers simultaneously. We use mitmproxy as a forward HTTPS proxy so
+    // all provider traffic is captured regardless of which model is active.
+    childEnv: {
+      https_proxy: MITM_PROXY_URL,
+      SSL_CERT_FILE: "", // filled in by cli.ts with mitmproxy CA cert path
+    },
+    extraArgs: [],
+    serverEnv: {},
+    needsMitm: true,
+  },
   gemini: {
     childEnv: {
       GOOGLE_GEMINI_BASE_URL: `${PROXY_URL}/gemini/`, // API-key auth path
@@ -93,12 +107,15 @@ const TOOL_CONFIG: Record<string, ToolConfig> = {
   bryti: {
     // Bryti reads base_url from its config.yml, not env vars. We point it at
     // a temporary data dir where cli.ts writes a proxy-aware config.yml copy.
+    // run.sh handles dev mode (tsx) vs prod (node dist/cli.js) automatically
+    // and restarts on crash, matching normal bryti dev workflow.
     childEnv: {
       BRYTI_DATA_DIR: BRYTI_DATA_DIR_PREFIX,
     },
     extraArgs: [],
     serverEnv: {},
     needsMitm: false,
+    executable: "./run.sh",
   },
 };
 
@@ -261,6 +278,7 @@ export function formatHelpText(): string {
     "Examples:",
     "  context-lens claude",
     "  context-lens codex",
+    "  context-lens opencode",
     "  context-lens gm",
     "  context-lens bryti",
     "  context-lens --privacy=minimal aider --model claude-sonnet-4",
@@ -285,6 +303,7 @@ export function formatHelpText(): string {
     "  cc -> claude",
     "  cx -> codex",
     "  gm -> gemini",
+    "  oc -> opencode",
     "",
     "Shell alias (add to ~/.zshrc or ~/.bashrc):",
     "  alias cpi='context-lens pi'",
@@ -296,7 +315,7 @@ export function formatHelpText(): string {
     "",
     "Notes:",
     "  - No command starts standalone mode (proxy + analysis/web UI by default).",
-    "  - 'codex' uses mitmproxy for HTTPS interception (requires mitmproxy; install: pipx install mitmproxy).",
+    "  - 'codex' and 'opencode' use mitmproxy for HTTPS interception (requires mitmproxy; install: pipx install mitmproxy).",
     "  - 'pi --mitm' uses mitmproxy for full interception, useful for subscription-based models (openai-codex provider).",
     "  - 'doctor' is a local diagnostics command.",
     "  - 'background' manages detached proxy/web-ui processes.",
