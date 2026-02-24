@@ -9,11 +9,11 @@ importers:
   .:
     dependencies:
       '@contextio/core':
-        specifier: file:../contextio/packages/core
-        version: file:../contextio/packages/core
+        specifier: ^0.2.1
+        version: 0.2.1
       '@contextio/proxy':
-        specifier: file:../contextio/packages/proxy
-        version: file:../contextio/packages/proxy
+        specifier: ^0.2.2
+        version: 0.2.2
       '@hono/node-server':
         specifier: ^1.19.9
         version: 1.19.9(hono@4.11.9)
@@ -96,14 +96,11 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@contextio/core@0.1.1':
-    resolution: {integrity: sha512-J8R8iQ+9piD5zf+6pKsfJMQKD3rVrFKyAlmHC3U8VEumtse1SUWnuqiHlSnidDiqJbs/b7P9QbSrVsUVrrrKpg==}
+  '@contextio/core@0.2.1':
+    resolution: {integrity: sha512-tFiWWgyOCE4w2CjqUX2oidqOlfE4o1vlh6jbrfr/oEbpVi5N9DSf2Yb3p+syRWmjGcqgoThosFXpNKBjE/c8rw==}
 
-  '@contextio/core@file:../contextio/packages/core':
-    resolution: {directory: ../contextio/packages/core, type: directory}
-
-  '@contextio/proxy@file:../contextio/packages/proxy':
-    resolution: {directory: ../contextio/packages/proxy, type: directory}
+  '@contextio/proxy@0.2.2':
+    resolution: {integrity: sha512-LJKcEiEubxJwgvnqv9MMOV0JN7rwVe32Aq35WWiTCzA60XEdm5IW2Ie73ooiaPnJoeB25qnr1iOXgzUV4b01ag==}
     hasBin: true
 
   '@hono/node-server@1.19.9':
@@ -113,7 +110,7 @@ packages:
       hono: ^4
 
   '@jsdevtools/ono@7.1.3':
-    resolution: {integrity: sha512-4JQNk+3mVzK3xh2rqd6RB4J46qUR19azEHBneZyTZM+c456qOrbbM/5xcR8huNCCcbVt7+UmizG6GuUvPvKUYg==}
+    resolution: {integrity: sha512-4JQNk+3mVzK3xh2rqd6RB4J46qUR19azEHBneZyTZM+c456qORbbM/5xcR8huNCCcbVt7+UmizG6GuUvPvKUYg==}
 
   '@types/json-schema@7.0.15':
     resolution: {integrity: sha512-5+fP8P8MFNC+AyZCDxrB2pkZFPGzqQWUzpSeuuVLvm8VMcorNYavBqoFcxK8bQz4Qsbn4oUEEem4wDLfcysGHA==}
@@ -235,13 +232,11 @@ snapshots:
   '@biomejs/cli-win32-x64@2.3.14':
     optional: true
 
-  '@contextio/core@0.1.1': {}
+  '@contextio/core@0.2.1': {}
 
-  '@contextio/core@file:../contextio/packages/core': {}
-
-  '@contextio/proxy@file:../contextio/packages/proxy':
+  '@contextio/proxy@0.2.2':
     dependencies:
-      '@contextio/core': 0.1.1
+      '@contextio/core': 0.2.1
 
   '@hono/node-server@1.19.9(hono@4.11.9)':
     dependencies:
