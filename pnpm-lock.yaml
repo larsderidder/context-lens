@@ -9,36 +9,27 @@ importers:
   .:
     dependencies:
       '@contextio/core':
-        specifier: ^0.2.3
-        version: 0.2.3
+        specifier: ^0.2.1
+        version: 0.2.1
       '@contextio/proxy':
         specifier: ^0.2.2
         version: 0.2.2
-      '@contextio/redact':
-        specifier: ^0.2.0
-        version: 0.2.0
       '@hono/node-server':
         specifier: ^1.19.9
-        version: 1.19.9(hono@4.12.3)
+        version: 1.19.9(hono@4.11.9)
       hono:
         specifier: ^4.11.9
-        version: 4.12.3
-      js-tiktoken:
-        specifier: ^1.0.21
-        version: 1.0.21
-      smol-toml:
-        specifier: ^1.6.0
-        version: 1.6.0
+        version: 4.11.9
       valibot:
         specifier: ^1.2.0
         version: 1.2.0(typescript@5.9.3)
     devDependencies:
       '@biomejs/biome':
-        specifier: ^2.3.14
+        specifier: ^2.4.4
         version: 2.4.4
       '@types/node':
         specifier: ^25.2.2
-        version: 25.3.1
+        version: 25.2.3
       json-schema-to-typescript:
         specifier: ^15.0.4
         version: 15.0.4
@@ -105,21 +96,12 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@contextio/core@0.2.0':
-    resolution: {integrity: sha512-GgzRnzANAlV8gmofZFsnbPhYnKI53NUNObWpbNg7mgYVwZojsm0sFpaZpHx2q+wKCe/WL9OrGOHN1PpnqvJSRw==}
-
   '@contextio/core@0.2.1':
     resolution: {integrity: sha512-tFiWWgyOCE4w2CjqUX2oidqOlfE4o1vlh6jbrfr/oEbpVi5N9DSf2Yb3p+syRWmjGcqgoThosFXpNKBjE/c8rw==}
-
-  '@contextio/core@0.2.3':
-    resolution: {integrity: sha512-z+pHPyVtS4rjvPliglpjEDebsGqIVf+hQ2YzINZnLY6mtQ8MCJPJq7WgiDHXKei71Ig7l1GXLdJFepGR1POQBw==}
 
   '@contextio/proxy@0.2.2':
     resolution: {integrity: sha512-LJKcEiEubxJwgvnqv9MMOV0JN7rwVe32Aq35WWiTCzA60XEdm5IW2Ie73ooiaPnJoeB25qnr1iOXgzUV4b01ag==}
     hasBin: true
-
-  '@contextio/redact@0.2.0':
-    resolution: {integrity: sha512-nAsrgU4n/Yr6ZZTWqiFJVrwoFX0/JwHs8cZmwheyxEqcRV0i2PKEL4jLNRa3p5K1Sy+S9QFRJr8KhnCzmRMKaw==}
 
   '@hono/node-server@1.19.9':
     resolution: {integrity: sha512-vHL6w3ecZsky+8P5MD+eFfaGTyCeOHUIFYMGpQGbrBTSmNNoxv0if69rEZ5giu36weC5saFuznL411gRX7bJDw==}
@@ -133,17 +115,14 @@ packages:
   '@types/json-schema@7.0.15':
     resolution: {integrity: sha512-5+fP8P8MFNC+AyZCDxrB2pkZFPGzqQWUzpSeuuVLvm8VMcorNYavBqoFcxK8bQz4Qsbn4oUEEem4wDLfcysGHA==}
 
-  '@types/lodash@4.17.24':
-    resolution: {integrity: sha512-gIW7lQLZbue7lRSWEFql49QJJWThrTFFeIMJdp3eH4tKoxm1OvEPg02rm4wCCSHS0cL3/Fizimb35b7k8atwsQ==}
+  '@types/lodash@4.17.23':
+    resolution: {integrity: sha512-RDvF6wTulMPjrNdCoYRC8gNR880JNGT8uB+REUpC2Ns4pRqQJhGz90wh7rgdXDPpCczF3VGktDuFGVnz8zP7HA==}
 
-  '@types/node@25.3.1':
-    resolution: {integrity: sha512-hj9YIJimBCipHVfHKRMnvmHg+wfhKc0o4mTtXh9pKBjC8TLJzz0nzGmLi5UJsYAUgSvXFHgb0V2oY10DUFtImw==}
+  '@types/node@25.2.3':
+    resolution: {integrity: sha512-m0jEgYlYz+mDJZ2+F4v8D1AyQb+QzsNqRuI7xg1VQX/KlKS0qT9r1Mo16yo5F/MtifXFgaofIFsdFMox2SxIbQ==}
 
   argparse@2.0.1:
     resolution: {integrity: sha512-8+9WqebbFzpX9OR+Wa6O29asIogeRMzcGtAINdpMHHyAg10f05aSFVBbcEqGf/PXw1EjAZ+q2/bEBg3DvurK3Q==}
-
-  base64-js@1.5.1:
-    resolution: {integrity: sha512-AKpaYlHn8t4SVbOHCy+b5+KKgvR4vrsD8vbvrbiQJps7fKDTkjkDry6ji0rUJjC0kzbNePLwzxq8iypo41qeWA==}
 
   fdir@6.5.0:
     resolution: {integrity: sha512-tIbYtZbucOs0BRGqPJkshJUYdL+SDH7dVM8gjy+ERp3WAUjLEFJE+02kanyHtwjWOnwrKYBiwAmM0p4kLJAnXg==}
@@ -154,8 +133,8 @@ packages:
       picomatch:
         optional: true
 
-  hono@4.12.3:
-    resolution: {integrity: sha512-SFsVSjp8sj5UumXOOFlkZOG6XS9SJDKw0TbwFeV+AJ8xlST8kxK5Z/5EYa111UY8732lK2S/xB653ceuaoGwpg==}
+  hono@4.11.9:
+    resolution: {integrity: sha512-Eaw2YTGM6WOxA6CXbckaEvslr2Ne4NFsKrvc0v97JD5awbmeBLO5w9Ho9L9kmKonrwF9RJlW6BxT1PVv/agBHQ==}
     engines: {node: '>=16.9.0'}
 
   is-extglob@2.1.1:
@@ -165,9 +144,6 @@ packages:
   is-glob@4.0.3:
     resolution: {integrity: sha512-xelSayHH36ZgE7ZWhli7pW34hNbNl8Ojv5KVmkJD4hBdD3th8Tfk9vYasLM+mXWOZhFkgZfxhLSnrwRr4elSSg==}
     engines: {node: '>=0.10.0'}
-
-  js-tiktoken@1.0.21:
-    resolution: {integrity: sha512-biOj/6M5qdgx5TKjDnFT1ymSpM5tbd3ylwDtrQvFQSu0Z7bBYko2dF+W/aUkXUPuk6IVpRxk/3Q2sHOzGlS36g==}
 
   js-yaml@4.1.1:
     resolution: {integrity: sha512-qQKT4zQxXl8lLwBtHMWwaTcGfFOZviOJet3Oy/xmGk2gZH677CJM9EvtfdSkgWcATZhj/55JZ0rmy3myCT5lsA==}
@@ -193,10 +169,6 @@ packages:
     engines: {node: '>=14'}
     hasBin: true
 
-  smol-toml@1.6.0:
-    resolution: {integrity: sha512-4zemZi0HvTnYwLfrpk/CF9LOd9Lt87kAt50GnqhMpyF9U3poDAP2+iukq2bZsO/ufegbYehBkqINbsWxj4l4cw==}
-    engines: {node: '>= 18'}
-
   tinyglobby@0.2.15:
     resolution: {integrity: sha512-j2Zq4NyQYG5XMST4cbs02Ak8iJUdxRM0XI5QyxXuZOzKOINmWurp3smXu3y5wDcJrptwpSjgXHzIQxR0omXljQ==}
     engines: {node: '>=12.0.0'}
@@ -206,8 +178,8 @@ packages:
     engines: {node: '>=14.17'}
     hasBin: true
 
-  undici-types@7.18.2:
-    resolution: {integrity: sha512-AsuCzffGHJybSaRrmr5eHr81mwJU3kjw6M+uprWvCXiNeN9SOGwQ3Jn8jb8m3Z6izVgknn1R0FTCEAP2QrLY/w==}
+  undici-types@7.16.0:
+    resolution: {integrity: sha512-Zz+aZWSj8LE6zoxD+xrjh4VfkIG8Ya6LvYkZqtUQGJPZjYl53ypCaUwWqo7eI0x66KBGeRo+mlBEkMSeSZ38Nw==}
 
   valibot@1.2.0:
     resolution: {integrity: sha512-mm1rxUsmOxzrwnX5arGS+U4T25RdvpPjPN4yR0u9pUBov9+zGVtO84tif1eY4r6zWxVxu3KzIyknJy3rxfRZZg==}
@@ -260,53 +232,39 @@ snapshots:
   '@biomejs/cli-win32-x64@2.4.4':
     optional: true
 
-  '@contextio/core@0.2.0': {}
-
   '@contextio/core@0.2.1': {}
-
-  '@contextio/core@0.2.3': {}
 
   '@contextio/proxy@0.2.2':
     dependencies:
       '@contextio/core': 0.2.1
 
-  '@contextio/redact@0.2.0':
+  '@hono/node-server@1.19.9(hono@4.11.9)':
     dependencies:
-      '@contextio/core': 0.2.0
-
-  '@hono/node-server@1.19.9(hono@4.12.3)':
-    dependencies:
-      hono: 4.12.3
+      hono: 4.11.9
 
   '@jsdevtools/ono@7.1.3': {}
 
   '@types/json-schema@7.0.15': {}
 
-  '@types/lodash@4.17.24': {}
+  '@types/lodash@4.17.23': {}
 
-  '@types/node@25.3.1':
+  '@types/node@25.2.3':
     dependencies:
-      undici-types: 7.18.2
+      undici-types: 7.16.0
 
   argparse@2.0.1: {}
-
-  base64-js@1.5.1: {}
 
   fdir@6.5.0(picomatch@4.0.3):
     optionalDependencies:
       picomatch: 4.0.3
 
-  hono@4.12.3: {}
+  hono@4.11.9: {}
 
   is-extglob@2.1.1: {}
 
   is-glob@4.0.3:
     dependencies:
       is-extglob: 2.1.1
-
-  js-tiktoken@1.0.21:
-    dependencies:
-      base64-js: 1.5.1
 
   js-yaml@4.1.1:
     dependencies:
@@ -316,7 +274,7 @@ snapshots:
     dependencies:
       '@apidevtools/json-schema-ref-parser': 11.9.3
       '@types/json-schema': 7.0.15
-      '@types/lodash': 4.17.24
+      '@types/lodash': 4.17.23
       is-glob: 4.0.3
       js-yaml: 4.1.1
       lodash: 4.17.23
@@ -332,8 +290,6 @@ snapshots:
 
   prettier@3.8.1: {}
 
-  smol-toml@1.6.0: {}
-
   tinyglobby@0.2.15:
     dependencies:
       fdir: 6.5.0(picomatch@4.0.3)
@@ -341,7 +297,7 @@ snapshots:
 
   typescript@5.9.3: {}
 
-  undici-types@7.18.2: {}
+  undici-types@7.16.0: {}
 
   valibot@1.2.0(typescript@5.9.3):
     optionalDependencies:

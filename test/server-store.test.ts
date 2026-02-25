@@ -377,48 +377,8 @@ describe("Store", () => {
 
     // Authoritative context total is input + cache read + cache write.
     assert.equal(entry.contextInfo.totalTokens, 1400);
-    // 100*$3/M + 200*$15/M + 900*$0.3/M + 400*$3.75/M = $0.00507
-    assert.equal(entry.costUsd, 0.00507);
-
-    cleanup();
-  });
-
-  it("assigns zero cost for error responses (429, 500)", () => {
-    const { store, cleanup } = makeStore();
-
-    const body = {
-      model: "claude-sonnet-4-20250514",
-      messages: [{ role: "user", content: "hello" }],
-    };
-    const ci = parseContextInfo("anthropic", body, "anthropic-messages");
-
-    // 429 rate-limited response: no usage, should not be billed
-    const entry429 = store.storeRequest(
-      ci,
-      // biome-ignore lint/suspicious/noExplicitAny: test fixture passes error shape not in response union
-      {
-        type: "error",
-        error: { type: "rate_limit_error", message: "Too many requests" },
-      } as any,
-      "claude",
-      body,
-      { httpStatus: 429 },
-    );
-    assert.equal(entry429.costUsd, 0);
-
-    // 500 server error: should also not be billed
-    const entry500 = store.storeRequest(
-      ci,
-      // biome-ignore lint/suspicious/noExplicitAny: test fixture passes error shape not in response union
-      {
-        type: "error",
-        error: { type: "server_error", message: "Internal error" },
-      } as any,
-      "claude",
-      body,
-      { httpStatus: 500 },
-    );
-    assert.equal(entry500.costUsd, 0);
+    // 100*$3/M + 200*$15/M + 900*$0.3/M + 400*$0.75/M = $0.00387
+    assert.equal(entry.costUsd, 0.00387);
 
     cleanup();
   });
@@ -696,14 +656,11 @@ describe("Store", () => {
     // appended by appendToState for the new entry.
     // Since appendToState re-appends the surviving conversation,
     // loadState handles duplicates, so total conversation lines = 2.
+    const convoLines = lines.filter((l) => JSON.parse(l).type === "conversation");
     const entryLines = lines.filter((l) => JSON.parse(l).type === "entry");
 
     // The evicted conversation's entries must NOT be in the state file
-    assert.equal(
-      entryLines.length,
-      1,
-      "only the surviving entry should be in state file",
-    );
+    assert.equal(entryLines.length, 1, "only the surviving entry should be in state file");
 
     // Reload into a fresh store and verify
     const store2 = new Store({
@@ -826,7 +783,7 @@ describe("Store", () => {
       body2,
     );
     // Delete the second conversation to trigger saveState
-    const secondConvoId = store2.getCapturedRequests()[0].conversationId ?? "";
+    const secondConvoId = store2.getCapturedRequests()[0].conversationId!;
     store2.deleteConversation(secondConvoId);
 
     // Load again from the rewritten file
