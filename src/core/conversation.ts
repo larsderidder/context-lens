@@ -312,7 +312,9 @@ export function computeFingerprint(
     promptText = extractUserPrompt(userMsgs) || "";
   } else {
     const firstUser = userMsgs[0];
-    promptText = firstUser ? firstUser.content : "";
+    promptText = firstUser
+      ? (extractReadableText(firstUser.content) ?? firstUser.content)
+      : "";
   }
 
   const systemText = (contextInfo.systemPrompts || [])

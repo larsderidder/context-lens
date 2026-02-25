@@ -422,7 +422,8 @@ if (parsedArgs.commandName === "analyze") {
   function startChild(): void {
     // Inject extra args (e.g. codex -c chatgpt_base_url=...) before user args
     const allArgs = [...toolConfig.extraArgs, ...commandArguments];
-    console.log(`\n🚀 Launching: ${commandName} ${allArgs.join(" ")}\n`);
+    const displayTarget = toolConfig.executable ? `${commandName} (${toolConfig.executable})` : commandName;
+    console.log(`\n🚀 Launching: ${displayTarget} ${allArgs.join(" ")}\n`);
 
     const childEnv = {
       ...process.env,
@@ -483,14 +484,15 @@ if (parsedArgs.commandName === "analyze") {
 
     // Spawn the child process with inherited stdio (interactive)
     // No shell: true. Avoids intermediate process that breaks signal delivery
-    childProcess = spawn(commandName, allArgs, {
+    const spawnTarget = toolConfig.executable ?? commandName;
+    childProcess = spawn(spawnTarget, allArgs, {
       stdio: "inherit",
       env: childEnv,
     });
 
     childProcess.on("error", (err) => {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-        console.error(`\nFailed to start '${commandName}': command not found.`);
+        console.error(`\nFailed to start '${spawnTarget}': command not found.`);
         console.error(
           "Try a known tool (claude, codex, gemini, aider, pi) or use:",
         );

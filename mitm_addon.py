@@ -113,6 +113,7 @@ def response(flow: http.HTTPFlow):
     try:
         response_text = flow.response.get_text()
         content_type = flow.response.headers.get("content-type", "")
+
         if "text/event-stream" in content_type or response_text.startswith("event:"):
             response_body = response_text
             response_is_streaming = True
