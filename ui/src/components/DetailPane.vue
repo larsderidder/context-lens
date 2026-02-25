@@ -1,8 +1,16 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from 'vue'
+import MarkdownIt from 'markdown-it'
 import type { ParsedMessage, ProjectedEntry } from '@/api-types'
 import { fmtTokens } from '@/utils/format'
 import { classifyMessageRole, CATEGORY_META, buildToolNameMap, extractFullText, msgToRawObject } from '@/utils/messages'
+
+const md = new MarkdownIt({
+  html: false,       // never pass raw HTML through (XSS prevention)
+  linkify: true,     // auto-link URLs
+  typographer: false,
+  breaks: true,      // single newlines become <br> (common in chat/agent text)
+})
 
 const props = defineProps<{
   entry: ProjectedEntry
@@ -250,6 +258,14 @@ function contentKind(text: string, forceJson = false): ContentKind {
   return 'text'
 }
 
+function isMarkdownRenderable(blockType: string): boolean {
+  return blockType === 'text' || blockType === 'input_text' || blockType === 'thinking'
+}
+
+function renderMarkdown(text: string): string {
+  return md.render(text)
+}
+
 function highlightTextFallback(text: string, forceJson = false): string {
   const kind = contentKind(text, forceJson)
   if (kind === 'json') return highlightJson(text)
@@ -459,6 +475,12 @@ const metaPairs = computed((): [string, string][] => {
           <hr v-if="i > 0" class="block-sep" />
           <div v-if="block.label" class="block-label" :class="block.labelClass">{{ block.label }}</div>
           <div
+            v-if="isMarkdownRenderable(block.type)"
+            class="block-content md-rendered"
+            v-html="renderMarkdown(truncate(block.content).text)"
+          ></div>
+          <div
+            v-else
             class="block-content syntax rich-html"
             :class="`kind-${contentKind(truncate(block.content).text, block.isJson)}`"
             v-html="highlightText(truncate(block.content).text, block.isJson)"
@@ -705,6 +727,112 @@ const metaPairs = computed((): [string, string][] => {
     font-family: inherit !important;
     font-size: inherit !important;
     line-height: inherit !important;
+  }
+}
+
+// ── Rendered markdown ──
+.md-rendered {
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: 1.7;
+  color: var(--text-secondary);
+  word-break: break-word;
+
+  :deep(p) {
+    margin: 0 0 0.75em;
+    &:last-child { margin-bottom: 0; }
+  }
+
+  :deep(h1), :deep(h2), :deep(h3), :deep(h4), :deep(h5), :deep(h6) {
+    font-weight: 600;
+    line-height: 1.3;
+    margin: 1.1em 0 0.4em;
+    color: var(--text-primary);
+    &:first-child { margin-top: 0; }
+  }
+  :deep(h1) { font-size: 1.25em; border-bottom: 1px solid var(--border-dim); padding-bottom: 0.25em; }
+  :deep(h2) { font-size: 1.1em; }
+  :deep(h3) { font-size: 1em; color: var(--accent-amber); }
+  :deep(h4), :deep(h5), :deep(h6) { font-size: 0.95em; color: var(--text-dim); }
+
+  :deep(ul), :deep(ol) {
+    margin: 0.5em 0;
+    padding-left: 1.5em;
+    li { margin: 0.15em 0; }
+    ul, ol { margin: 0; }
+  }
+  :deep(ul) { list-style: disc; }
+  :deep(ol) { list-style: decimal; }
+
+  :deep(blockquote) {
+    margin: 0.6em 0;
+    padding: 0.4em 0.75em;
+    border-left: 3px solid var(--accent-purple);
+    background: rgba(167, 139, 250, 0.06);
+    color: var(--text-dim);
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    p { margin-bottom: 0; }
+  }
+
+  :deep(code) {
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+    background: var(--bg-raised);
+    border: 1px solid var(--border-dim);
+    border-radius: 3px;
+    padding: 0.1em 0.35em;
+    color: var(--accent-cyan);
+  }
+
+  :deep(pre) {
+    margin: 0.6em 0;
+    padding: 0.75em 1em;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-dim);
+    border-radius: var(--radius-sm);
+    overflow-x: auto;
+    code {
+      background: none;
+      border: none;
+      padding: 0;
+      font-size: var(--text-sm);
+      color: var(--text-secondary);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+  }
+
+  :deep(a) {
+    color: var(--accent-blue);
+    text-decoration: none;
+    &:hover { text-decoration: underline; }
+  }
+
+  :deep(strong) { font-weight: 600; color: var(--text-primary); }
+  :deep(em) { font-style: italic; color: var(--text-secondary); }
+  :deep(del) { text-decoration: line-through; color: var(--text-muted); }
+
+  :deep(hr) {
+    border: none;
+    border-top: 1px solid var(--border-dim);
+    margin: 0.8em 0;
+  }
+
+  :deep(table) {
+    border-collapse: collapse;
+    font-size: var(--text-sm);
+    margin: 0.6em 0;
+    th, td {
+      padding: 4px 10px;
+      border: 1px solid var(--border-mid);
+      text-align: left;
+    }
+    th {
+      background: var(--bg-raised);
+      color: var(--text-primary);
+      font-weight: 600;
+    }
+    tr:nth-child(even) td { background: var(--bg-surface); }
   }
 }
 
