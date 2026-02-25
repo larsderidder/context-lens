@@ -422,7 +422,9 @@ if (parsedArgs.commandName === "analyze") {
   function startChild(): void {
     // Inject extra args (e.g. codex -c chatgpt_base_url=...) before user args
     const allArgs = [...toolConfig.extraArgs, ...commandArguments];
-    const displayTarget = toolConfig.executable ? `${commandName} (${toolConfig.executable})` : commandName;
+    const displayTarget = toolConfig.executable
+      ? `${commandName} (${toolConfig.executable})`
+      : commandName;
     console.log(`\n🚀 Launching: ${displayTarget} ${allArgs.join(" ")}\n`);
 
     const childEnv = {

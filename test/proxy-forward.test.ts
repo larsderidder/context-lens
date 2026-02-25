@@ -3,7 +3,7 @@ import http from "node:http";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import zlib from "node:zlib";
 import type { Upstreams } from "@contextio/core";
-import { createProxyHandler, type ForwardOptions } from "@contextio/proxy";
+import { createProxyHandler } from "@contextio/proxy";
 import type { CaptureData } from "../src/proxy/capture.js";
 
 // --- Test infrastructure ---
