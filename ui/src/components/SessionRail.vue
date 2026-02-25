@@ -242,6 +242,7 @@ const tipOpts = { delay: { show: 50, hide: 0 }, placement: 'right' as const }
 .badge-claude { color: #fb923c; }
 .badge-codex { color: #34d399; }
 .badge-aider { color: var(--accent-blue); }
+.badge-opencode { color: #8b5cf6; }
 .badge-kimi { color: var(--accent-purple); }
 .badge-pi { color: var(--accent-purple); }
 .badge-gemini { color: #4a90e2; }

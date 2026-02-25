@@ -891,6 +891,7 @@ function onKeydown(e: KeyboardEvent) {
 .badge-claude { background: rgba(251, 146, 60, 0.15); color: #fb923c; }
 .badge-codex { background: rgba(52, 211, 153, 0.15); color: #34d399; }
 .badge-aider { background: rgba(14, 165, 233, 0.15); color: var(--accent-blue); }
+.badge-opencode { background: rgba(139, 92, 246, 0.15); color: #8b5cf6; }
 .badge-kimi { background: rgba(167, 139, 250, 0.15); color: var(--accent-purple); }
 .badge-pi { background: rgba(167, 139, 250, 0.15); color: var(--accent-purple); }
 .badge-gemini { background: rgba(74, 144, 226, 0.15); color: #4a90e2; }

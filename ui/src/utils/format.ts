@@ -76,6 +76,7 @@ export function sourceBadgeClass(source: string): string {
   if (s.includes('codex')) return 'badge-codex'
   if (s.includes('gemini') || s === 'gm') return 'badge-gemini'
   if (s.includes('aider')) return 'badge-aider'
+  if (s.includes('opencode') || s === 'oc') return 'badge-opencode'
   if (s.includes('kimi')) return 'badge-kimi'
   if (s === 'pi' || s.startsWith('pi-')) return 'badge-pi'
   return 'badge-unknown'
