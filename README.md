@@ -131,6 +131,8 @@ UPSTREAM_OPENAI_URL=http://host.docker.internal:11434/v1
 | `CONTEXT_LENS_INGEST_URL` | _(file-based)_ | POST captures to a remote URL instead of writing to disk |
 | `CONTEXT_LENS_PRIVACY` | `standard` | Privacy level: `minimal`, `standard`, or `full` |
 | `CONTEXT_LENS_NO_UPDATE_CHECK` | `0` | Set to `1` to skip the npm update check |
+| `CONTEXT_LENS_MAX_SESSIONS` | `200` | Maximum number of conversations to keep in memory |
+| `CONTEXT_LENS_MAX_COMPACT_MESSAGES` | `60` | Maximum messages per entry when compacting for storage |
 
 ### Split-container setup
 
