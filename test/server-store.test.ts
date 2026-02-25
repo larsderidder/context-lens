@@ -656,11 +656,17 @@ describe("Store", () => {
     // appended by appendToState for the new entry.
     // Since appendToState re-appends the surviving conversation,
     // loadState handles duplicates, so total conversation lines = 2.
-    const convoLines = lines.filter((l) => JSON.parse(l).type === "conversation");
+    const convoLines = lines.filter(
+      (l) => JSON.parse(l).type === "conversation",
+    );
     const entryLines = lines.filter((l) => JSON.parse(l).type === "entry");
 
     // The evicted conversation's entries must NOT be in the state file
-    assert.equal(entryLines.length, 1, "only the surviving entry should be in state file");
+    assert.equal(
+      entryLines.length,
+      1,
+      "only the surviving entry should be in state file",
+    );
 
     // Reload into a fresh store and verify
     const store2 = new Store({
