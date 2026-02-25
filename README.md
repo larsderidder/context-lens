@@ -41,9 +41,10 @@ context-lens doctor                     # check ports, certs, background state
 context-lens background start           # start detached proxy + UI
 context-lens background status
 context-lens background stop
+context-lens stop                       # shorthand for background stop
 ```
 
-Aliases: `cc` → `claude`, `cx` → `codex`, `cpi` → `pi`, `gm` → `gemini`.
+Aliases: `cc` → `claude`, `cx` → `codex`, `gm` → `gemini`. For `pi`, add `alias cpi='context-lens pi'` to your shell rc.
 
 ## Docker
 
@@ -128,6 +129,7 @@ services:
 - **Context diff:** turn-to-turn delta showing what grew, shrank, or appeared
 - **Findings:** flags large tool results, unused tool definitions, context overflow risk, compaction events
 - **Auto-detection:** recognizes Claude Code, Codex, aider, Pi, and others by source tag or system prompt
+- **Session tagging:** label sessions with custom tags, filter the session list by tag
 - **LHAR export:** download session data as LHAR (LLM HTTP Archive) format ([doc](docs/LHAR.md))
 - **State persistence:** data survives restarts; delete individual sessions or reset all from the UI
 - **Streaming support:** passes through SSE chunks in real-time
@@ -175,12 +177,27 @@ If you prefer to configure it manually, set `baseUrl` in `~/.pi/agent/models.jso
 }
 ```
 
-### OpenAI-Compatible Endpoints
+### OpenCode
 
-Many providers expose OpenAI-compatible APIs (OpenRouter, Together, Groq, Fireworks, Ollama, vLLM, OpenCode Zen, etc.). Override the upstream URL to point at your provider:
+OpenCode connects to multiple providers simultaneously over HTTPS. Use `context-lens opencode` — it routes all traffic through mitmproxy so every provider call is captured regardless of which model is active:
+
+```bash
+pipx install mitmproxy
+context-lens opencode
+```
+
+If you only use OpenCode with a single OpenAI-compatible endpoint (e.g. OpenCode Zen), you can also use the base URL override approach instead:
 
 ```bash
 UPSTREAM_OPENAI_URL=https://opencode.ai/zen/v1 context-lens -- opencode "prompt"
+```
+
+### OpenAI-Compatible Endpoints
+
+Many providers expose OpenAI-compatible APIs (OpenRouter, Together, Groq, Fireworks, Ollama, vLLM, etc.). Override the upstream URL to point at your provider:
+
+```bash
+UPSTREAM_OPENAI_URL=https://my-provider.com/v1 context-lens -- my-tool "prompt"
 ```
 
 `UPSTREAM_OPENAI_URL` is global: all OpenAI-format requests go to that upstream. Use separate proxy instances if you need to hit multiple endpoints simultaneously.
@@ -196,6 +213,17 @@ context-lens codex
 
 If Codex fails with certificate trust errors, install/trust the mitmproxy CA certificate (`~/.mitmproxy/mitmproxy-ca-cert.pem`) for your environment.
 
+### Pi with ChatGPT Subscription Models
+
+Pi's `openai-codex` provider (e.g. `gpt-5.2-codex`) connects directly to `chatgpt.com` and cannot be redirected via base URL overrides. Use the `--mitm` flag to route through mitmproxy instead:
+
+```bash
+pipx install mitmproxy
+context-lens pi --mitm
+```
+
+Standard OpenAI API models in Pi work fine without `--mitm`.
+
 ## How It Works
 
 Context Lens sits between your coding tool and the LLM API, capturing requests in transit. It has two parts: a **proxy** and an **analysis server**.
@@ -208,7 +236,7 @@ Tool  ─HTTP─▶  Proxy (:4040)  ─HTTPS─▶  api.anthropic.com / api.open
             Analysis Server (:4041)  →  Web UI
 ```
 
-The **proxy** forwards requests to the LLM API and writes each request/response pair to disk. It has **zero external dependencies** (only Node.js built-ins), so you can read the entire proxy source and verify it does nothing unexpected with your API keys.
+The **proxy** forwards requests to the LLM API and writes each request/response pair to disk. It is built on [`@contextio/proxy`](https://github.com/larsderidder/contextio), a minimal package with no external dependencies, so you can read the entire proxy source and verify it does nothing unexpected with your API keys.
 
 The **analysis server** picks up those captures, parses request bodies, estimates tokens, groups requests into conversations, computes composition breakdowns, calculates costs, and scores context health. It serves the web UI and API.
 

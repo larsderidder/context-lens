@@ -5,7 +5,7 @@
  */
 
 import type { CompositionEntry, LharRecord } from "../lhar-types.generated.js";
-import type { AgentPathStep, SessionAnalysis } from "./session-analysis.js";
+import type { SessionAnalysis } from "./session-analysis.js";
 
 // ---------------------------------------------------------------------------
 // Formatting helpers

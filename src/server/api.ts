@@ -9,7 +9,6 @@ import { toLharJson, toLharJsonl } from "../lhar.js";
 import {
   IngestCapturePayloadSchema,
   IngestLegacyPayloadSchema,
-  IngestPayloadSchema,
 } from "../schemas.js";
 import type {
   AgentGroup,
