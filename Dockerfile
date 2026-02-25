@@ -20,6 +20,7 @@ RUN corepack enable
 
 ENV NODE_ENV=production
 ENV CONTEXT_LENS_NO_UPDATE_CHECK=1
+ENV NODE_OPTIONS="--max-old-space-size=512"
 
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile --prod

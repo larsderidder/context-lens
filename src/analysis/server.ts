@@ -57,8 +57,14 @@ function resolveDataDir(): string {
 
 const dataDir = resolveDataDir();
 
-const maxSessions = 200;
-const maxCompactMessages = 60;
+const maxSessions = parseInt(
+  process.env.CONTEXT_LENS_MAX_SESSIONS || "200",
+  10,
+);
+const maxCompactMessages = parseInt(
+  process.env.CONTEXT_LENS_MAX_COMPACT_MESSAGES || "60",
+  10,
+);
 
 // --- Setup ---
 
