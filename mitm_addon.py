@@ -32,15 +32,16 @@ CONTEXT_LENS_SESSION_ID = os.environ.get("CONTEXT_LENS_SESSION_ID", "").strip()
 # Patterns to capture: (host_substring, path_substring) -> (provider, source)
 # More specific patterns must come before generic ones.
 CAPTURE_PATTERNS = [
-    # Codex subscription
+    # Codex subscription (specific tool identity, keep as-is)
     ("chatgpt.com", "/backend-api/codex/responses", "chatgpt", "codex"),
-    # OpenAI API
-    ("api.openai.com", "/v1/responses", "openai", "openai"),
-    ("api.openai.com", "/v1/chat/completions", "openai", "openai"),
-    # Anthropic API
-    ("api.anthropic.com", "/v1/messages", "anthropic", "anthropic"),
+    # OpenAI API — source left as None so detectSource can identify the tool
+    # from headers/system prompts (opencode, aider, etc.)
+    ("api.openai.com", "/v1/responses", "openai", None),
+    ("api.openai.com", "/v1/chat/completions", "openai", None),
+    # Anthropic API — same: leave source unset for tool detection
+    ("api.anthropic.com", "/v1/messages", "anthropic", None),
     # Gemini API
-    ("generativelanguage.googleapis.com", "/v1", "gemini", "gemini"),
+    ("generativelanguage.googleapis.com", "/v1", "gemini", None),
 ]
 
 # Catch-all path patterns: match any host with these path substrings.
