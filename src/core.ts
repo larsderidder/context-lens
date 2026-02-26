@@ -54,6 +54,6 @@ export {
   formatSessionAnalysis,
   shortModel,
 } from "./core/session-format.js";
-export { detectSource } from "./core/source.js";
+export { detectSource, PROVIDER_NAMES } from "./core/source.js";
 export { initTokenizer, isTokenizerReady } from "./core/tokenizer.js";
 export { estimateTokens, rescaleContextTokens } from "./core/tokens.js";

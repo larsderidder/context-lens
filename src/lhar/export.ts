@@ -37,7 +37,7 @@ export function toLharJsonl(
         lines.push(
           JSON.stringify(
             buildSessionLine(
-              entry.conversationId!,
+              entry.conversationId ?? "",
               convo,
               record.gen_ai.request.model,
             ),

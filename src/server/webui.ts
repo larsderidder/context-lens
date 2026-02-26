@@ -52,7 +52,7 @@ export function createApp(
     app.use("/*", serveStatic({ root: uiDir, rewriteRequestPath: (p) => p }));
     // SPA fallback: serve index.html for unmatched routes
     app.get("*", (c) => {
-      const indexPath = path.join(uiDir!, "index.html");
+      const indexPath = path.join(uiDir ?? "", "index.html");
       try {
         const content = fs.readFileSync(indexPath, "utf8");
         return c.html(content);

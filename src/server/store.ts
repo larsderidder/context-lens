@@ -14,6 +14,7 @@ import {
   extractToolsUsed,
   extractWorkingDirectory,
   getContextLimit,
+  PROVIDER_NAMES,
   rescaleContextTokens,
   scanSecurity,
 } from "../core.js";
@@ -354,18 +355,25 @@ export class Store {
         sessionId: rawSessionId,
       });
     } else if (conversationId) {
-      const convo = this.conversations.get(conversationId)!;
-      // Backfill source if first request couldn't detect it
-      if (
-        convo.source === "unknown" &&
-        resolvedSource &&
-        resolvedSource !== "unknown"
-      ) {
-        convo.source = resolvedSource;
-      }
-      // Backfill working directory if first request didn't have it
-      if (!convo.workingDirectory && workingDirectory) {
-        convo.workingDirectory = workingDirectory;
+      const convo = this.conversations.get(conversationId);
+      if (convo) {
+        // Backfill source if first request couldn't detect it, or if the
+        // stored source is a bare provider name (e.g. "anthropic") that has
+        // now been resolved to an actual tool name.
+        const storedSourceIsWeak =
+          convo.source === "unknown" || PROVIDER_NAMES.has(convo.source);
+        if (
+          storedSourceIsWeak &&
+          resolvedSource &&
+          resolvedSource !== "unknown" &&
+          !PROVIDER_NAMES.has(resolvedSource)
+        ) {
+          convo.source = resolvedSource;
+        }
+        // Backfill working directory if first request didn't have it
+        if (!convo.workingDirectory && workingDirectory) {
+          convo.workingDirectory = workingDirectory;
+        }
       }
     }
 

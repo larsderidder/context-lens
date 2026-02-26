@@ -37,7 +37,12 @@ export const SOURCE_SIGNATURES: SourceSignature[] = [
  */
 // Provider names used as bare source tags are not tool identifiers.
 // When we see one, fall through to header/system-prompt detection.
-const PROVIDER_NAMES = new Set(["anthropic", "openai", "gemini", "chatgpt"]);
+export const PROVIDER_NAMES = new Set([
+  "anthropic",
+  "openai",
+  "gemini",
+  "chatgpt",
+]);
 
 export function detectSource(
   contextInfo: ContextInfo,
