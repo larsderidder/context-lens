@@ -422,10 +422,7 @@ if (parsedArgs.commandName === "analyze") {
   function startChild(): void {
     // Inject extra args (e.g. codex -c chatgpt_base_url=...) before user args
     const allArgs = [...toolConfig.extraArgs, ...commandArguments];
-    const displayTarget = toolConfig.executable
-      ? `${commandName} (${toolConfig.executable})`
-      : commandName;
-    console.log(`\n🚀 Launching: ${displayTarget} ${allArgs.join(" ")}\n`);
+    console.log(`\n🚀 Launching: ${commandName} ${allArgs.join(" ")}\n`);
 
     const childEnv = {
       ...process.env,
@@ -446,6 +443,15 @@ if (parsedArgs.commandName === "analyze") {
     // Tools without built-in session IDs (Gemini, Aider, custom) rely on this.
     if (!toolConfig.needsMitm) {
       const sessionTag = randomBytes(4).toString("hex"); // 8 hex chars
+      // For bryti, the proxy URL is baked into config.yml (not an env var),
+      // so the session tag loop below won't reach it. Pass it to prepareBrytiDataDir
+      // so it can embed the tag directly into the patched config.yml base_url.
+      if (commandName === "bryti") {
+        childEnv.BRYTI_DATA_DIR = prepareBrytiDataDir(
+          childEnv.BRYTI_DATA_DIR,
+          sessionTag,
+        );
+      }
       for (const key of Object.keys(childEnv)) {
         const val = childEnv[key];
         if (typeof val !== "string") continue;
@@ -480,21 +486,28 @@ if (parsedArgs.commandName === "analyze") {
       );
     }
 
-    if (commandName === "bryti") {
-      childEnv.BRYTI_DATA_DIR = prepareBrytiDataDir(childEnv.BRYTI_DATA_DIR);
+    // For bryti: if dist/cli.js exists in cwd, use it directly (dev mode).
+    // Otherwise fall back to the globally installed bryti binary.
+    let spawnCommand = commandName;
+    let spawnArgs = allArgs;
+    if (
+      commandName === "bryti" &&
+      fs.existsSync(resolve(process.cwd(), "dist", "cli.js"))
+    ) {
+      spawnCommand = process.execPath; // node
+      spawnArgs = [resolve(process.cwd(), "dist", "cli.js"), ...allArgs];
     }
 
     // Spawn the child process with inherited stdio (interactive)
     // No shell: true. Avoids intermediate process that breaks signal delivery
-    const spawnTarget = toolConfig.executable ?? commandName;
-    childProcess = spawn(spawnTarget, allArgs, {
+    childProcess = spawn(spawnCommand, spawnArgs, {
       stdio: "inherit",
       env: childEnv,
     });
 
     childProcess.on("error", (err) => {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-        console.error(`\nFailed to start '${spawnTarget}': command not found.`);
+        console.error(`\nFailed to start '${commandName}': command not found.`);
         console.error(
           "Try a known tool (claude, codex, gemini, aider, pi) or use:",
         );
@@ -710,14 +723,26 @@ if (parsedArgs.commandName === "analyze") {
    *
    * The original config is never modified. The temp dir is cleaned up on exit.
    *
-   * Bryti also writes runtime state (history, memory, pi agent dir, etc.) into
-   * BRYTI_DATA_DIR. Those paths all live under the temp dir for this session,
-   * which is intentional: captures are ephemeral, not merged back.
+   * State dirs (users, history, logs, etc.) are symlinked into the temp dir so
+   * bryti's runtime writes go back to the real data dir.
+   *
+   * The .pi dir is NOT symlinked: bryti regenerates .pi/settings.json on every
+   * startup (via ensureDataDirs/writeExtensionSettings), which would append the
+   * temp extensions path to the real settings.json and cause duplicate tool
+   * registrations on the next run. Instead we copy .pi into the temp dir so
+   * bryti reads existing auth/models from there but writes only to temp.
+   *
+   * files/ is NOT symlinked for the same reason: bryti's writeExtensionSettings
+   * would register both the real and temp extensions paths, loading each
+   * extension twice and causing tool conflict errors.
    *
    * If no config.yml is found in the source data dir, we warn and fall back to
    * the temp dir without a config patch (bryti will error on its own).
    */
-  function prepareBrytiDataDir(targetDirEnv: string | undefined): string {
+  function prepareBrytiDataDir(
+    targetDirEnv: string | undefined,
+    sessionTag: string,
+  ): string {
     const dirPrefix =
       targetDirEnv && targetDirEnv.length > 0
         ? targetDirEnv
@@ -750,7 +775,9 @@ if (parsedArgs.commandName === "analyze") {
       // We do a targeted line-level rewrite rather than full YAML parse+emit to
       // avoid disturbing formatting, comments, or env-var substitution markers
       // (${VAR}) that would fail a raw parse before substitution.
-      const proxyBase = `${CLI_CONSTANTS.PROXY_URL}/bryti`;
+      // Include the session tag in the proxy URL so all requests from this
+      // bryti invocation share a stable conversation ID in context-lens.
+      const proxyBase = `${CLI_CONSTANTS.PROXY_URL}/bryti/${sessionTag}`;
       const patched = raw
         .split("\n")
         .map((line) => {
@@ -766,22 +793,52 @@ if (parsedArgs.commandName === "analyze") {
       const targetConfigPath = join(targetDir, "config.yml");
       fs.writeFileSync(targetConfigPath, patched, "utf-8");
 
-      // Symlink everything else from the real data dir (history, memory,
-      // extension files, etc.) so bryti picks up existing state.
-      // Skip config.yml (already written above) and the .pi subdir (bryti
-      // regenerates it from config, and mixing temp + real paths would be
-      // confusing).
-      if (fs.existsSync(realDataDir)) {
-        for (const entry of fs.readdirSync(realDataDir, {
+      // Symlink state dirs that should persist back to the real data dir.
+      // Exclude config.yml (patched above), .pi (copied below), and files/
+      // (both contain paths that bryti writes into settings.json on startup,
+      // which would corrupt the real settings with temp dir paths).
+      const SYMLINK_ENTRIES = [
+        "users",
+        "history",
+        "logs",
+        "pending",
+        "skills",
+        "usage",
+        "whatsapp-auth",
+        "core-memory.md",
+        "sessions",
+        "extensions",
+      ];
+      for (const name of SYMLINK_ENTRIES) {
+        const src = join(realDataDir, name);
+        if (!fs.existsSync(src)) continue;
+        const dst = join(targetDir, name);
+        try {
+          fs.symlinkSync(src, dst);
+        } catch {
+          // Non-fatal
+        }
+      }
+
+      // Copy .pi into the temp dir so bryti reads existing auth/models.json
+      // but all writes (including settings.json rewrites) stay in temp.
+      const realPiDir = join(realDataDir, ".pi");
+      const tempPiDir = join(targetDir, ".pi");
+      if (fs.existsSync(realPiDir)) {
+        fs.mkdirSync(tempPiDir, { recursive: true });
+        for (const entry of fs.readdirSync(realPiDir, {
           withFileTypes: true,
         })) {
-          if (entry.name === "config.yml" || entry.name === ".pi") continue;
-          const src = join(realDataDir, entry.name);
-          const dst = join(targetDir, entry.name);
+          const src = join(realPiDir, entry.name);
+          const dst = join(tempPiDir, entry.name);
           try {
-            fs.symlinkSync(src, dst);
+            if (entry.isDirectory()) {
+              fs.symlinkSync(src, dst);
+            } else {
+              fs.copyFileSync(src, dst);
+            }
           } catch {
-            // Non-fatal: if symlink fails, bryti will recreate the dir/file
+            // Non-fatal
           }
         }
       }
