@@ -381,6 +381,7 @@ if (parsedArgs.commandName === "analyze") {
       ],
       {
         stdio: ["ignore", "pipe", "pipe"],
+        env: { ...process.env, CONTEXT_LENS_SOURCE: commandName },
       },
     );
 
