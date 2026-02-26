@@ -14,6 +14,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
 
+import { initTokenizer } from "../core.js";
 import { Store } from "../server/store.js";
 import { createApp, loadHtmlUI } from "../server/webui.js";
 import type { PrivacyLevel } from "../types.js";
@@ -71,6 +72,11 @@ const store = new Store({
 });
 
 store.loadState();
+
+// --- Initialize tokenizer ---
+// Preload tiktoken encodings before processing captures.
+// Non-blocking: falls back to estimation if loading fails.
+await initTokenizer();
 
 // --- Capture watcher ---
 

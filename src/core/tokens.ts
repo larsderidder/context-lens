@@ -1,3 +1,5 @@
+import { countTokens } from "./tokenizer.js";
+
 /**
  * Approximate token cost for a single image.
  *
@@ -61,20 +63,26 @@ function stripImageData(val: unknown): unknown {
 }
 
 /**
- * Lightweight token estimator used throughout Context Lens.
+ * Token estimator used throughout Context Lens.
  *
- * Approximates tokens as `ceil(chars / 4)`. For image content blocks,
- * uses a fixed per-image estimate instead of stringifying base64 data.
+ * When the tiktoken-based tokenizer is initialized (analysis server),
+ * uses accurate BPE tokenization for the given model. Falls back to
+ * `ceil(chars / 4)` when the tokenizer hasn't loaded yet or for
+ * unknown models.
+ *
+ * For image content blocks, uses a fixed per-image estimate instead
+ * of stringifying base64 data.
  *
  * @param text - Value to estimate tokens for. Objects are stringified as JSON.
- * @returns Estimated token count (>= 0).
+ * @param model - Optional model name for encoding selection.
+ * @returns Token count (>= 0).
  */
-export function estimateTokens(text: unknown): number {
+export function estimateTokens(text: unknown, model?: string): number {
   if (!text) return 0;
 
   // Fast path: plain strings never contain image data
   if (typeof text === "string") {
-    return Math.ceil(text.length / 4);
+    return countTokens(text, model);
   }
 
   // Single image block
@@ -85,7 +93,7 @@ export function estimateTokens(text: unknown): number {
   // Object/array: strip image data, then stringify the rest
   const cleaned = stripImageData(text);
   const s = JSON.stringify(cleaned);
-  const baseTokens = Math.ceil(s.length / 4);
+  const baseTokens = countTokens(s, model);
 
   // Count image blocks and add fixed estimate for each
   const imageCount = countImages(text);

@@ -749,7 +749,7 @@ export class Store {
           continue;
         }
         // Recalculate from compacted contentBlocks (no base64 data)
-        const newTokens = estimateTokens(msg.contentBlocks);
+        const newTokens = estimateTokens(msg.contentBlocks, ci.model);
         if (newTokens < msg.tokens) {
           msg.tokens = newTokens;
           changed = true;
