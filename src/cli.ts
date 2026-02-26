@@ -381,7 +381,11 @@ if (parsedArgs.commandName === "analyze") {
       ],
       {
         stdio: ["ignore", "pipe", "pipe"],
-        env: { ...process.env, CONTEXT_LENS_SOURCE: commandName },
+        env: {
+          ...process.env,
+          CONTEXT_LENS_SOURCE: commandName,
+          CONTEXT_LENS_SESSION_ID: randomBytes(4).toString("hex"),
+        },
       },
     );
 
