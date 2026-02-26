@@ -416,6 +416,7 @@ function onSessionIdKeydown(e: KeyboardEvent) {
 .badge-opencode { background: rgba(139, 92, 246, 0.15); color: #8b5cf6; }
 .badge-kimi { background: rgba(167, 139, 250, 0.15); color: var(--accent-purple); }
 .badge-pi { background: rgba(167, 139, 250, 0.15); color: var(--accent-purple); }
+.badge-bryti { background: rgba(251, 191, 36, 0.15); color: #fbbf24; }
 .badge-gemini { background: rgba(74, 144, 226, 0.15); color: #4a90e2; }
 .badge-unknown { background: var(--bg-raised); color: var(--text-dim); }
 

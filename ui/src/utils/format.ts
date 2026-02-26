@@ -79,6 +79,7 @@ export function sourceBadgeClass(source: string): string {
   if (s.includes('opencode') || s === 'oc') return 'badge-opencode'
   if (s.includes('kimi')) return 'badge-kimi'
   if (s === 'pi' || s.startsWith('pi-')) return 'badge-pi'
+  if (s.includes('bryti')) return 'badge-bryti'
   return 'badge-unknown'
 }
 

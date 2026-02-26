@@ -245,6 +245,7 @@ const tipOpts = { delay: { show: 50, hide: 0 }, placement: 'right' as const }
 .badge-opencode { color: #8b5cf6; }
 .badge-kimi { color: var(--accent-purple); }
 .badge-pi { color: var(--accent-purple); }
+.badge-bryti { color: #fbbf24; }
 .badge-gemini { color: #4a90e2; }
 .badge-unknown { color: var(--text-dim); }
 

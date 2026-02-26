@@ -382,15 +382,40 @@ function maybePrimeShiki(): void {
   }
 }
 
-function getRenderedBlocks(): { type: string; label: string; labelClass: string; content: string; isJson: boolean }[] {
+/**
+ * Return flat key-value pairs for a tool_use input when all values are
+ * primitives or short strings (<=120 chars). Returns null for deeply nested
+ * or array-heavy inputs that are better shown as JSON.
+ */
+function flattenToolInput(input: Record<string, unknown>): [string, string][] | null {
+  const entries = Object.entries(input)
+  if (entries.length === 0) return null
+  const pairs: [string, string][] = []
+  for (const [k, v] of entries) {
+    if (v === null || v === undefined) { pairs.push([k, 'null']); continue }
+    if (typeof v === 'boolean' || typeof v === 'number') { pairs.push([k, String(v)]); continue }
+    if (typeof v === 'string') {
+      if (v.length > 120 || v.includes('\n')) return null
+      pairs.push([k, v])
+      continue
+    }
+    // Array or object: fall back to JSON
+    return null
+  }
+  return pairs
+}
+
+function getRenderedBlocks(): { type: string; label: string; labelClass: string; content: string; isJson: boolean; toolParams?: [string, string][] | null }[] {
   const m = msg.value
   if (!m) return []
   const blocks = m.contentBlocks
   if (blocks && blocks.length > 0) {
     return blocks.map(b => {
       if (b.type === 'tool_use') {
-        const params = b.input ? JSON.stringify(b.input, null, 2) : '{}'
-        return { type: 'tool_use', label: `tool_use: ${b.name || '?'}`, labelClass: 'lbl-tool-use', content: params, isJson: true }
+        const input = b.input && typeof b.input === 'object' && !Array.isArray(b.input) ? b.input as Record<string, unknown> : null
+        const toolParams = input ? flattenToolInput(input) : null
+        const params = input ? JSON.stringify(input, null, 2) : '{}'
+        return { type: 'tool_use', label: `tool_use: ${b.name || '?'}`, labelClass: 'lbl-tool-use', content: params, isJson: true, toolParams }
       }
       if (b.type === 'tool_result') {
         const tn = b.tool_use_id ? toolNameMap.value[b.tool_use_id] : null
@@ -474,8 +499,24 @@ const metaPairs = computed((): [string, string][] => {
         <template v-for="(block, i) in getRenderedBlocks()" :key="i">
           <hr v-if="i > 0" class="block-sep" />
           <div v-if="block.label" class="block-label" :class="block.labelClass">{{ block.label }}</div>
+          <!-- tool_use: compact params table when input is flat, JSON fallback otherwise -->
+          <template v-if="block.type === 'tool_use'">
+            <table v-if="block.toolParams" class="params-table">
+              <tbody>
+                <tr v-for="([key, val]) in block.toolParams" :key="key">
+                  <td class="params-key">{{ key }}</td>
+                  <td class="params-val">{{ val }}</td>
+                </tr>
+              </tbody>
+            </table>
+            <div
+              v-else
+              class="block-content syntax rich-html kind-json"
+              v-html="highlightText(truncate(block.content).text, true)"
+            ></div>
+          </template>
           <div
-            v-if="isMarkdownRenderable(block.type)"
+            v-else-if="isMarkdownRenderable(block.type)"
             class="block-content md-rendered"
             v-html="renderMarkdown(truncate(block.content).text)"
           ></div>
@@ -728,6 +769,39 @@ const metaPairs = computed((): [string, string][] => {
     font-size: inherit !important;
     line-height: inherit !important;
   }
+}
+
+// ── Tool params table ──
+.params-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+  margin: 4px 0;
+
+  tr {
+    border-bottom: 1px solid var(--border-dim);
+    &:last-child { border-bottom: none; }
+  }
+
+  td {
+    padding: 4px 8px;
+    vertical-align: top;
+    line-height: 1.5;
+  }
+}
+
+.params-key {
+  @include mono-text;
+  color: var(--text-muted);
+  white-space: nowrap;
+  width: 1%;
+  padding-right: 16px !important;
+}
+
+.params-val {
+  @include mono-text;
+  color: var(--text-primary);
+  word-break: break-word;
 }
 
 // ── Rendered markdown ──
