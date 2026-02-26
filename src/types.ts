@@ -309,6 +309,5 @@ export interface ToolConfig {
   extraArgs: string[];
   serverEnv: Record<string, string>;
   needsMitm: boolean;
-  /** Override the spawned executable. When omitted, the command name is used. */
   executable?: string;
 }

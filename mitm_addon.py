@@ -29,18 +29,23 @@ from mitmproxy import http
 INGEST_URL = os.environ.get("CONTEXT_LENS_INGEST_URL", "http://localhost:4041/api/ingest")
 CONTEXT_LENS_SESSION_ID = os.environ.get("CONTEXT_LENS_SESSION_ID", "").strip()
 
+# When set, all captures are attributed to this tool regardless of which
+# API endpoint they hit. Set by the CLI when launching a specific tool.
+CONTEXT_LENS_SOURCE = os.environ.get("CONTEXT_LENS_SOURCE", "").strip() or None
+
 # Patterns to capture: (host_substring, path_substring) -> (provider, source)
 # More specific patterns must come before generic ones.
 CAPTURE_PATTERNS = [
-    # Codex subscription
+    # Codex subscription (specific tool identity, keep as-is)
     ("chatgpt.com", "/backend-api/codex/responses", "chatgpt", "codex"),
-    # OpenAI API
-    ("api.openai.com", "/v1/responses", "openai", "openai"),
-    ("api.openai.com", "/v1/chat/completions", "openai", "openai"),
-    # Anthropic API
-    ("api.anthropic.com", "/v1/messages", "anthropic", "anthropic"),
+    # OpenAI API — source left as None so detectSource can identify the tool
+    # from headers/system prompts (opencode, aider, etc.)
+    ("api.openai.com", "/v1/responses", "openai", None),
+    ("api.openai.com", "/v1/chat/completions", "openai", None),
+    # Anthropic API — same: leave source unset for tool detection
+    ("api.anthropic.com", "/v1/messages", "anthropic", None),
     # Gemini API
-    ("generativelanguage.googleapis.com", "/v1", "gemini", "gemini"),
+    ("generativelanguage.googleapis.com", "/v1", "gemini", None),
 ]
 
 # Catch-all path patterns: match any host with these path substrings.
@@ -58,12 +63,13 @@ def match_request(flow: http.HTTPFlow):
     path = flow.request.path
     for host_pat, path_pat, provider, source in CAPTURE_PATTERNS:
         if host_pat in host and path_pat in path:
-            return provider, source
+            # CLI-provided tool name overrides per-pattern source so all
+            # traffic in this mitmproxy session is attributed to the same tool.
+            return provider, CONTEXT_LENS_SOURCE or source
     # Fall back to catch-all path matching for OpenAI-compatible providers
     for path_pat, provider in CATCHALL_PATH_PATTERNS:
         if path_pat in path:
-            # Use the host as the source tag so sessions are labelled by provider
-            source = host.split(".")[0] if "." in host else host
+            source = CONTEXT_LENS_SOURCE or (host.split(".")[0] if "." in host else host)
             return provider, source
     return None, None
 

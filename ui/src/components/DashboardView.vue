@@ -152,22 +152,33 @@ const sortedSummaries = computed(() => {
 })
 
 // ── KPI Calculations ──
-const totalSessions = computed(() => filteredSummaries.value.length)
+// KPIs show today's activity by default (scoped to current calendar day).
+const kpiScope = ref<'today' | 'all'>('today')
+
+const todaySummaries = computed(() => {
+  if (kpiScope.value === 'all') return filteredSummaries.value
+  const todayStart = new Date()
+  todayStart.setHours(0, 0, 0, 0)
+  const cutoff = todayStart.getTime()
+  return filteredSummaries.value.filter(s => new Date(s.latestTimestamp).getTime() >= cutoff)
+})
+
+const totalSessions = computed(() => todaySummaries.value.length)
 
 const totalRequests = computed(() => {
-  return filteredSummaries.value.reduce((sum, s) => sum + s.entryCount, 0)
+  return todaySummaries.value.reduce((sum, s) => sum + s.entryCount, 0)
 })
 
 const totalTokens = computed(() => {
-  return filteredSummaries.value.reduce((sum, s) => sum + s.latestTotalTokens, 0)
+  return todaySummaries.value.reduce((sum, s) => sum + s.latestTotalTokens, 0)
 })
 
 const totalCost = computed(() => {
-  return filteredSummaries.value.reduce((sum, s) => sum + s.totalCost, 0)
+  return todaySummaries.value.reduce((sum, s) => sum + s.totalCost, 0)
 })
 
 const avgHealth = computed(() => {
-  const withHealth = filteredSummaries.value.filter(s => s.healthScore?.overall != null)
+  const withHealth = todaySummaries.value.filter(s => s.healthScore?.overall != null)
   if (withHealth.length === 0) return 0
   const sum = withHealth.reduce((acc, s) => acc + (s.healthScore?.overall ?? 0), 0)
   return Math.round(sum / withHealth.length)
@@ -360,15 +371,19 @@ function onKeydown(e: KeyboardEvent) {
       </div>
       <div class="kpi-card">
         <div class="kpi-value">{{ fmtTokens(totalTokens) }}</div>
-        <div class="kpi-label">Total Tokens</div>
+        <div class="kpi-label">Tokens</div>
       </div>
       <div class="kpi-card">
         <div class="kpi-value accent-green">{{ fmtCost(totalCost) }}</div>
-        <div class="kpi-label">Total Cost</div>
+        <div class="kpi-label">Cost</div>
       </div>
       <div class="kpi-card">
         <div class="kpi-value accent-amber">{{ avgHealth }}</div>
         <div class="kpi-label">Avg Health</div>
+      </div>
+      <div class="kpi-scope">
+        <button :class="{ active: kpiScope === 'today' }" @click="kpiScope = 'today'">Today</button>
+        <button :class="{ active: kpiScope === 'all' }" @click="kpiScope = 'all'">All</button>
       </div>
     </div>
 
@@ -894,6 +909,7 @@ function onKeydown(e: KeyboardEvent) {
 .badge-opencode { background: rgba(139, 92, 246, 0.15); color: #8b5cf6; }
 .badge-kimi { background: rgba(167, 139, 250, 0.15); color: var(--accent-purple); }
 .badge-pi { background: rgba(167, 139, 250, 0.15); color: var(--accent-purple); }
+.badge-bryti { background: rgba(251, 191, 36, 0.15); color: #fbbf24; }
 .badge-gemini { background: rgba(74, 144, 226, 0.15); color: #4a90e2; }
 .badge-unknown { background: var(--bg-raised); color: var(--text-dim); }
 
@@ -1243,9 +1259,10 @@ function onKeydown(e: KeyboardEvent) {
 // ── KPI Cards ──
 .kpi-row {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(5, 1fr) auto;
   gap: var(--space-3);
   margin-bottom: var(--space-4);
+  align-items: stretch;
 }
 
 .kpi-card {
@@ -1279,6 +1296,28 @@ function onKeydown(e: KeyboardEvent) {
   color: var(--text-dim);
   margin-top: 4px;
   letter-spacing: 0.02em;
+}
+
+.kpi-scope {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  padding: var(--space-3);
+
+  button {
+    font-size: var(--text-xs);
+    padding: 2px 8px;
+    background: none;
+    border: 1px solid var(--border-dim);
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: border-color 0.1s, color 0.1s, background 0.1s;
+
+    &:hover { color: var(--text-secondary); border-color: var(--border-mid); }
+    &.active { background: var(--accent-blue-dim); border-color: var(--accent-blue); color: var(--accent-blue); }
+  }
 }
 
 // ── Empty state ──

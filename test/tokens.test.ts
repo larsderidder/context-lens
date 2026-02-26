@@ -24,10 +24,15 @@ function makeContextInfo(overrides: Partial<ContextInfo> = {}): ContextInfo {
 }
 
 describe("estimateTokens", () => {
-  it("estimates string tokens as chars/4", () => {
-    assert.equal(estimateTokens("abcd"), 1);
-    assert.equal(estimateTokens("abcde"), 2); // ceil(5/4)
-    assert.equal(estimateTokens("hello world!"), 3); // ceil(12/4)
+  it("estimates string tokens (tiktoken when loaded, chars/4 otherwise)", () => {
+    // When tiktoken is loaded, exact values differ from chars/4.
+    // Just verify positive results and reasonable range.
+    assert.ok(estimateTokens("abcd") >= 1);
+    assert.ok(estimateTokens("abcde") >= 1);
+    assert.ok(
+      estimateTokens("hello world!") >= 2 &&
+        estimateTokens("hello world!") <= 5,
+    );
   });
 
   it("returns 0 for null/undefined/empty", () => {
@@ -38,8 +43,15 @@ describe("estimateTokens", () => {
 
   it("stringifies objects before counting", () => {
     const obj = { key: "value" };
-    const expected = Math.ceil(JSON.stringify(obj).length / 4);
-    assert.equal(estimateTokens(obj), expected);
+    const tokens = estimateTokens(obj);
+    // When tiktoken is loaded, the result may differ from chars/4.
+    // Just verify it's a positive number in a reasonable range.
+    const json = JSON.stringify(obj);
+    assert.ok(tokens > 0, `Expected positive token count, got ${tokens}`);
+    assert.ok(
+      tokens <= json.length,
+      `Token count ${tokens} exceeds character count ${json.length}`,
+    );
   });
 
   it("uses fixed estimate for Anthropic image blocks", () => {

@@ -8,6 +8,8 @@ See what's actually filling your context window. Context Lens is a local proxy t
 
 Works with Claude Code, Codex, Gemini CLI, Aider, Pi, and anything else that talks to OpenAI/Anthropic/Google APIs. No code changes needed.
 
+**Using AI coding tools across a team?** Token costs compound fast when every developer runs agents all day. Context Lens gives you per-session visibility into where the budget goes — which tools, which patterns, which sessions are outliers. Export sessions as [LHAR](docs/LHAR.md) to share and compare. Team dashboards are on the roadmap; if that's relevant for you, [open an issue](https://github.com/larsderidder/context-lens/issues) or watch this repo.
+
 ![Context Lens UI](screenshot-overview.png)
 
 ## Installation
@@ -259,9 +261,9 @@ Tools like [Langfuse](https://langfuse.com/) and [Braintrust](https://braintrust
 | **Context composition breakdown** | Yes (treemap, per-category) | Token totals only |
 | **Runs locally** | Yes, entirely | Cloud or self-hosted server |
 | **Prompt management & evals** | No | Yes |
-| **Team/production use** | No (single-user, local) | Yes |
+| **Team/production use** | Individual today, team features planned | Yes |
 
-Context Lens is for developers who want to understand and optimize their coding agent sessions. If you need production monitoring, prompt versioning, or team dashboards, use Langfuse.
+Context Lens is for developers who want to understand and optimize their coding agent sessions. If you need production monitoring, prompt versioning, or evals, use Langfuse.
 
 ## Data
 

@@ -32,21 +32,22 @@ export function ingestCapture(store: Store, capture: CaptureData): void {
     contextInfo = parseContextInfo(provider, body, apiFormat);
   } else {
     // Non-JSON request: create a raw contextInfo
+    const rawTokens = estimateTokens(responseBody);
     contextInfo = {
       provider,
       apiFormat: "raw",
       model: "unknown",
       systemTokens: 0,
       toolsTokens: 0,
-      messagesTokens: estimateTokens(responseBody),
-      totalTokens: estimateTokens(responseBody),
+      messagesTokens: rawTokens,
+      totalTokens: rawTokens,
       systemPrompts: [],
       tools: [],
       messages: [
         {
           role: "raw",
           content: responseBody.substring(0, 2000),
-          tokens: estimateTokens(responseBody),
+          tokens: rawTokens,
         },
       ],
     };

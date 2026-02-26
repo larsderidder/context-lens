@@ -107,15 +107,14 @@ const TOOL_CONFIG: Record<string, ToolConfig> = {
   bryti: {
     // Bryti reads base_url from its config.yml, not env vars. We point it at
     // a temporary data dir where cli.ts writes a proxy-aware config.yml copy.
-    // run.sh handles dev mode (tsx) vs prod (node dist/cli.js) automatically
-    // and restarts on crash, matching normal bryti dev workflow.
+    // Everything else in the temp dir is symlinked back to the real data dir
+    // so all runtime writes (history, memory DB, etc.) go to the right place.
     childEnv: {
       BRYTI_DATA_DIR: BRYTI_DATA_DIR_PREFIX,
     },
     extraArgs: [],
     serverEnv: {},
     needsMitm: false,
-    executable: "./run.sh",
   },
 };
 

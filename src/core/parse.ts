@@ -7,7 +7,10 @@ import { estimateTokens } from "./tokens.js";
  * Maps typed items (function_call, function_call_output, reasoning, output_text, etc.)
  * to a normalized `ParsedMessage` with a stable `role` and optional `contentBlocks`.
  */
-function parseResponsesItem(item: any): {
+function parseResponsesItem(
+  item: any,
+  model?: string,
+): {
   message: ParsedMessage;
   tokens: number;
   isSystem: boolean;
@@ -28,7 +31,7 @@ function parseResponsesItem(item: any): {
     } else {
       content = JSON.stringify(item.content || item);
     }
-    const tokens = estimateTokens(item.content ?? content);
+    const tokens = estimateTokens(item.content ?? content, model);
     return {
       message: { role: item.role, content, contentBlocks, tokens },
       tokens,
@@ -48,7 +51,7 @@ function parseResponsesItem(item: any): {
         ? args.slice(0, 200)
         : JSON.stringify(args).slice(0, 200)) +
       ")";
-    const tokens = estimateTokens(item);
+    const tokens = estimateTokens(item, model);
     // Parse stringified arguments (OpenAI Responses API sends JSON strings)
     let parsedInput: Record<string, any> = {};
     if (typeof args === "string" && args.length > 0) {
@@ -83,7 +86,7 @@ function parseResponsesItem(item: any): {
       typeof item.output === "string"
         ? item.output
         : JSON.stringify(item.output || "");
-    const tokens = estimateTokens(output);
+    const tokens = estimateTokens(output, model);
     const block: ContentBlock = {
       type: "tool_result",
       tool_use_id: item.call_id || "",
@@ -108,7 +111,7 @@ function parseResponsesItem(item: any): {
       ? item.summary.map((s: any) => s.text || "").join("\n")
       : "";
     const content = summary || "[reasoning]";
-    const tokens = estimateTokens(item);
+    const tokens = estimateTokens(item, model);
     return {
       message: {
         role: "assistant",
@@ -125,7 +128,7 @@ function parseResponsesItem(item: any): {
   // output_text → assistant text
   if (type === "output_text") {
     const text = item.text || "";
-    const tokens = estimateTokens(text);
+    const tokens = estimateTokens(text, model);
     return {
       message: {
         role: "assistant",
@@ -142,7 +145,7 @@ function parseResponsesItem(item: any): {
   // input_text → user text
   if (type === "input_text") {
     const text = item.text || "";
-    const tokens = estimateTokens(text);
+    const tokens = estimateTokens(text, model);
     return {
       message: {
         role: "user",
@@ -158,7 +161,7 @@ function parseResponsesItem(item: any): {
 
   // Fallback: serialize the whole item
   const content = JSON.stringify(item);
-  const tokens = estimateTokens(content);
+  const tokens = estimateTokens(content, model);
   return {
     message: { role: item.role || "user", content, tokens },
     tokens,
@@ -199,6 +202,8 @@ export function parseContextInfo(
     messages: [],
   };
 
+  const model = info.model;
+
   if (provider === "anthropic") {
     if (body.system) {
       const systemText =
@@ -208,12 +213,12 @@ export function parseContextInfo(
             ? body.system.map((b: any) => b.text || "").join("\n")
             : JSON.stringify(body.system);
       info.systemPrompts.push({ content: systemText });
-      info.systemTokens = estimateTokens(systemText);
+      info.systemTokens = estimateTokens(systemText, model);
     }
 
     if (body.tools && Array.isArray(body.tools)) {
       info.tools = body.tools;
-      info.toolsTokens = estimateTokens(JSON.stringify(body.tools));
+      info.toolsTokens = estimateTokens(JSON.stringify(body.tools), model);
     }
 
     if (body.messages && Array.isArray(body.messages)) {
@@ -226,7 +231,7 @@ export function parseContextInfo(
               ? msg.content
               : JSON.stringify(msg.content),
           contentBlocks,
-          tokens: estimateTokens(msg.content),
+          tokens: estimateTokens(msg.content, model),
         };
       });
       info.messagesTokens = info.messages.reduce((sum, m) => sum + m.tokens, 0);
@@ -234,7 +239,7 @@ export function parseContextInfo(
   } else if (apiFormat === "responses" || provider === "chatgpt") {
     if (body.instructions) {
       info.systemPrompts.push({ content: body.instructions });
-      info.systemTokens = estimateTokens(body.instructions);
+      info.systemTokens = estimateTokens(body.instructions, model);
     }
     if (body.system) {
       const systemText =
@@ -244,7 +249,7 @@ export function parseContextInfo(
             ? body.system.map((b: any) => b.text || "").join("\n")
             : JSON.stringify(body.system);
       info.systemPrompts.push({ content: systemText });
-      info.systemTokens += estimateTokens(systemText);
+      info.systemTokens += estimateTokens(systemText, model);
     }
 
     const msgs = body.input || body.messages;
@@ -253,12 +258,12 @@ export function parseContextInfo(
         info.messages.push({
           role: "user",
           content: msgs,
-          tokens: estimateTokens(msgs),
+          tokens: estimateTokens(msgs, model),
         });
-        info.messagesTokens = estimateTokens(msgs);
+        info.messagesTokens = estimateTokens(msgs, model);
       } else if (Array.isArray(msgs)) {
         msgs.forEach((item: any) => {
-          const parsed = parseResponsesItem(item);
+          const parsed = parseResponsesItem(item, model);
           if (parsed.isSystem) {
             info.systemPrompts.push({ content: parsed.content });
             info.systemTokens += parsed.tokens;
@@ -272,7 +277,7 @@ export function parseContextInfo(
 
     if (body.tools && Array.isArray(body.tools)) {
       info.tools = body.tools;
-      info.toolsTokens = estimateTokens(JSON.stringify(body.tools));
+      info.toolsTokens = estimateTokens(JSON.stringify(body.tools), model);
     }
   } else if (
     provider === "gemini" ||
@@ -286,14 +291,17 @@ export function parseContextInfo(
       const parts = geminiBody.systemInstruction.parts || [];
       const systemText = parts.map((p: any) => p.text || "").join("\n");
       info.systemPrompts.push({ content: systemText });
-      info.systemTokens = estimateTokens(systemText);
+      info.systemTokens = estimateTokens(systemText, model);
     }
     if (geminiBody.tools && Array.isArray(geminiBody.tools)) {
       const allDecls = geminiBody.tools.flatMap(
         (t: any) => t.functionDeclarations || [],
       );
       info.tools = allDecls;
-      info.toolsTokens = estimateTokens(JSON.stringify(geminiBody.tools));
+      info.toolsTokens = estimateTokens(
+        JSON.stringify(geminiBody.tools),
+        model,
+      );
     }
     if (geminiBody.contents && Array.isArray(geminiBody.contents)) {
       info.messages = geminiBody.contents.map((turn: any): ParsedMessage => {
@@ -343,7 +351,7 @@ export function parseContextInfo(
           }
         }
         const content = textParts.join("\n") || JSON.stringify(parts);
-        const tokens = estimateTokens(turn);
+        const tokens = estimateTokens(turn, model);
         return {
           role: role === "model" ? "assistant" : role,
           content,
@@ -358,7 +366,7 @@ export function parseContextInfo(
       body.messages.forEach((msg: any) => {
         if (msg.role === "system" || msg.role === "developer") {
           info.systemPrompts.push({ content: msg.content });
-          info.systemTokens += estimateTokens(msg.content);
+          info.systemTokens += estimateTokens(msg.content, model);
         } else {
           info.messages.push({
             role: msg.role,
@@ -366,19 +374,19 @@ export function parseContextInfo(
               typeof msg.content === "string"
                 ? msg.content
                 : JSON.stringify(msg.content),
-            tokens: estimateTokens(msg.content),
+            tokens: estimateTokens(msg.content, model),
           });
-          info.messagesTokens += estimateTokens(msg.content);
+          info.messagesTokens += estimateTokens(msg.content, model);
         }
       });
     }
 
     if (body.tools && Array.isArray(body.tools)) {
       info.tools = body.tools;
-      info.toolsTokens = estimateTokens(JSON.stringify(body.tools));
+      info.toolsTokens = estimateTokens(JSON.stringify(body.tools), model);
     } else if (body.functions && Array.isArray(body.functions)) {
       info.tools = body.functions;
-      info.toolsTokens = estimateTokens(JSON.stringify(body.functions));
+      info.toolsTokens = estimateTokens(JSON.stringify(body.functions), model);
     }
   }
 

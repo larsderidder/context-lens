@@ -35,12 +35,22 @@ export const SOURCE_SIGNATURES: SourceSignature[] = [
  * 3. system prompt signatures
  * 4. fallback to `"unknown"`
  */
+// Provider names used as bare source tags are not tool identifiers.
+// When we see one, fall through to header/system-prompt detection.
+export const PROVIDER_NAMES = new Set([
+  "anthropic",
+  "openai",
+  "gemini",
+  "chatgpt",
+]);
+
 export function detectSource(
   contextInfo: ContextInfo,
   source: string | null,
   headers?: Record<string, string>,
 ): string {
-  if (source && source !== "unknown") return source;
+  if (source && source !== "unknown" && !PROVIDER_NAMES.has(source))
+    return source;
 
   // Primary: check request headers
   if (headers) {

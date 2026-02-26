@@ -119,7 +119,7 @@ describe("analysis/ingest", () => {
 
     const requests = store.getCapturedRequests();
     assert.ok(requests[0].healthScore);
-    assert.ok(requests[0].healthScore!.overall >= 0);
+    assert.ok((requests[0].healthScore?.overall ?? 0) >= 0);
     assert.ok(Array.isArray(requests[0].securityAlerts));
   });
 
