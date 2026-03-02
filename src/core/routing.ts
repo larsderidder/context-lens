@@ -187,7 +187,14 @@ export function resolveTargetUrl(
         targetUrl = upstreams.vertex + parsedUrl.pathname + search;
       }
     } else {
-      targetUrl = upstreams.openai + parsedUrl.pathname + search;
+      // Codex Enterprise sets OPENAI_BASE_URL without a /v1 suffix and
+      // appends paths like /responses directly. Normalize /responses to
+      // /v1/responses so it reaches the correct endpoint on api.openai.com.
+      const openaiPath =
+        parsedUrl.pathname === "/responses"
+          ? "/v1/responses"
+          : parsedUrl.pathname;
+      targetUrl = upstreams.openai + openaiPath + search;
     }
   } else if (!targetUrl.startsWith("http")) {
     targetUrl = targetUrl + parsedUrl.pathname + search;

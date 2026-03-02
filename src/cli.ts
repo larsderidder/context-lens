@@ -289,7 +289,11 @@ if (parsedArgs.commandName === "analyze") {
       proxyProcess.stdout?.on("data", (data: Buffer) => {
         const output = data.toString();
         if (!proxyReady) process.stderr.write(output);
-        if (output.includes("Context Lens Proxy running") && !proxyReady) {
+        if (
+          (output.includes("Context Lens Proxy running") ||
+            output.includes("@contextio/proxy running")) &&
+          !proxyReady
+        ) {
           proxyReady = true;
           checkBothReady();
         }

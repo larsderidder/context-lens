@@ -200,7 +200,7 @@ describe("extractSource", () => {
 
 describe("resolveTargetUrl", () => {
   const upstreams = {
-    openai: "https://api.openai.com/v1",
+    openai: "https://api.openai.com",
     anthropic: "https://api.anthropic.com",
     chatgpt: "https://chatgpt.com",
     gemini: "https://generativelanguage.googleapis.com",
@@ -220,6 +220,22 @@ describe("resolveTargetUrl", () => {
 
   it("routes openai paths to openai upstream", () => {
     const result = resolveTargetUrl({ pathname: "/responses" }, {}, upstreams);
+    assert.equal(result.targetUrl, "https://api.openai.com/v1/responses");
+    assert.equal(result.provider, "openai");
+  });
+
+  it("normalizes bare /responses to /v1/responses (Codex Enterprise OPENAI_BASE_URL without /v1)", () => {
+    const result = resolveTargetUrl({ pathname: "/responses" }, {}, upstreams);
+    assert.equal(result.targetUrl, "https://api.openai.com/v1/responses");
+    assert.equal(result.provider, "openai");
+  });
+
+  it("does not double-prefix /v1/responses when path already includes /v1", () => {
+    const result = resolveTargetUrl(
+      { pathname: "/v1/responses" },
+      {},
+      upstreams,
+    );
     assert.equal(result.targetUrl, "https://api.openai.com/v1/responses");
     assert.equal(result.provider, "openai");
   });
