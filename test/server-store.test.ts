@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
@@ -371,8 +377,40 @@ describe("Store", () => {
 
     // Authoritative context total is input + cache read + cache write.
     assert.equal(entry.contextInfo.totalTokens, 1400);
-    // 100*$3/M + 200*$15/M + 900*$0.3/M + 400*$0.75/M = $0.00387
-    assert.equal(entry.costUsd, 0.00387);
+    // 100*$3/M + 200*$15/M + 900*$0.3/M + 400*$3.75/M = $0.00507
+    assert.equal(entry.costUsd, 0.00507);
+
+    cleanup();
+  });
+
+  it("assigns zero cost for error responses (429, 500)", () => {
+    const { store, cleanup } = makeStore();
+
+    const body = {
+      model: "claude-sonnet-4-20250514",
+      messages: [{ role: "user", content: "hello" }],
+    };
+    const ci = parseContextInfo("anthropic", body, "anthropic-messages");
+
+    // 429 rate-limited response: no usage, should not be billed
+    const entry429 = store.storeRequest(
+      ci,
+      { type: "error", error: { type: "rate_limit_error", message: "Too many requests" } } as any,
+      "claude",
+      body,
+      { httpStatus: 429 },
+    );
+    assert.equal(entry429.costUsd, 0);
+
+    // 500 server error: should also not be billed
+    const entry500 = store.storeRequest(
+      ci,
+      { type: "error", error: { type: "server_error", message: "Internal error" } } as any,
+      "claude",
+      body,
+      { httpStatus: 500 },
+    );
+    assert.equal(entry500.costUsd, 0);
 
     cleanup();
   });
@@ -597,6 +635,75 @@ describe("Store", () => {
     assert.equal(store.getConversations().size, 1);
     const onlyConvoId = [...store.getConversations().keys()][0];
     assert.ok(onlyConvoId);
+
+    cleanup();
+  });
+
+  it("compacts state file after eviction so evicted data is not reloaded", async () => {
+    const { store, dir, cleanup } = makeStore({ maxSessions: 1 });
+
+    const body1 = {
+      model: "claude-sonnet-4",
+      metadata: { user_id: "session_11111111-1111-1111-1111-111111111111" },
+      messages: [{ role: "user", content: "one" }],
+    };
+    const ci1 = parseContextInfo("anthropic", body1, "anthropic-messages");
+    store.storeRequest(
+      ci1,
+      {
+        model: "claude-sonnet-4",
+        stop_reason: "end_turn",
+        usage: { input_tokens: 1, output_tokens: 1 },
+      } as any,
+      "claude",
+      body1,
+    );
+
+    await new Promise((r) => setTimeout(r, 5));
+
+    const body2 = {
+      model: "claude-sonnet-4",
+      metadata: { user_id: "session_22222222-2222-2222-2222-222222222222" },
+      messages: [{ role: "user", content: "two" }],
+    };
+    const ci2 = parseContextInfo("anthropic", body2, "anthropic-messages");
+    store.storeRequest(
+      ci2,
+      {
+        model: "claude-sonnet-4",
+        stop_reason: "end_turn",
+        usage: { input_tokens: 1, output_tokens: 1 },
+      } as any,
+      "claude",
+      body2,
+    );
+
+    // State file should only contain the surviving conversation
+    const stateFile = path.join(dir, "data", "state.jsonl");
+    const stateContent = readFileSync(stateFile, "utf8");
+    const lines = stateContent.split("\n").filter((l) => l.length > 0);
+
+    // Should have exactly 1 conversation line + 1 entry line
+    // (from the saveState rewrite) plus 1 conversation + 1 entry
+    // appended by appendToState for the new entry.
+    // Since appendToState re-appends the surviving conversation,
+    // loadState handles duplicates, so total conversation lines = 2.
+    const convoLines = lines.filter((l) => JSON.parse(l).type === "conversation");
+    const entryLines = lines.filter((l) => JSON.parse(l).type === "entry");
+
+    // The evicted conversation's entries must NOT be in the state file
+    assert.equal(entryLines.length, 1, "only the surviving entry should be in state file");
+
+    // Reload into a fresh store and verify
+    const store2 = new Store({
+      dataDir: path.join(dir, "data"),
+      stateFile,
+      maxSessions: 10,
+      maxCompactMessages: 60,
+    });
+    store2.loadState();
+    assert.equal(store2.getConversations().size, 1);
+    assert.equal(store2.getCapturedRequests().length, 1);
 
     cleanup();
   });

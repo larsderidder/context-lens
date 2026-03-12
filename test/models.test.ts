@@ -80,11 +80,11 @@ describe("estimateCost", () => {
     assert.equal(cost, 0.57);
   });
 
-  it("calculates cache write cost at 25% for Claude models", () => {
+  it("calculates cache write cost at 125% for Claude models", () => {
     // Claude Sonnet 4: base input = $3/M
     // 100K regular input @ $3/M = $0.30
-    // 400K cache write @ $0.75/M (25% of $3) = $0.30
-    // Total = $0.60
+    // 400K cache write @ $3.75/M (125% of $3) = $1.50
+    // Total = $1.80
     const cost = estimateCost(
       "claude-sonnet-4-20250514",
       100_000,
@@ -92,16 +92,16 @@ describe("estimateCost", () => {
       0,
       400_000,
     );
-    assert.equal(cost, 0.6);
+    assert.equal(cost, 1.8);
   });
 
   it("combines all token types correctly for Claude", () => {
     // Claude Opus 4: input = $15/M, output = $75/M
     // 50K regular input @ $15/M = $0.75
     // 100K cache read @ $1.50/M (10%) = $0.15
-    // 50K cache write @ $3.75/M (25%) = $0.1875
+    // 50K cache write @ $18.75/M (125%) = $0.9375
     // 10K output @ $75/M = $0.75
-    // Total = $1.8375
+    // Total = $2.5875
     const cost = estimateCost(
       "claude-opus-4-20250514",
       50_000,
@@ -109,7 +109,7 @@ describe("estimateCost", () => {
       100_000,
       50_000,
     );
-    assert.equal(cost, 1.8375);
+    assert.equal(cost, 2.5875);
   });
 
   it("ignores cache tokens for non-Claude models", () => {

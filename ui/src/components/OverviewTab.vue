@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useSessionStore } from '@/stores/session'
 import { fmtTokens, fmtCost, fmtPct, fmtDuration, healthColor } from '@/utils/format'
 import { classifyEntries, SIMPLE_GROUPS, SIMPLE_META, groupMessagesByCategory, getCategoryLabel, getCategoryColor } from '@/utils/messages'
@@ -11,6 +11,15 @@ import type { ProjectedEntry } from '@/api-types'
 import CompositionTreemap from './CompositionTreemap.vue'
 import ContextDiffPanel from './ContextDiffPanel.vue'
 import HealthFindings from './HealthFindings.vue'
+import ExplainPanel from './ExplainPanel.vue'
+
+const explainOpen = ref(false)
+const explainSection = ref<'health' | 'composition' | null>(null)
+
+function openExplain(section: 'health' | 'composition') {
+  explainSection.value = section
+  explainOpen.value = true
+}
 
 const store = useSessionStore()
 
@@ -316,7 +325,7 @@ function handleTreemapFileClick(filePath: string) {
             </text>
           </svg>
         </div>
-        <div class="stat-label">Health</div>
+        <div class="stat-label">Health <button class="info-btn" @click="openExplain('health')"><i class="i-carbon-information" /></button></div>
       </div>
       <div class="stat-card" v-else>
         <div class="stat-readout dim">—</div>
@@ -344,6 +353,7 @@ function handleTreemapFileClick(filePath: string) {
       @category-click="(cat) => jumpToMessagesCategory(cat, false)"
       @tool-click="jumpToMessagesTool"
       @file-click="handleTreemapFileClick"
+      @explain="openExplain('composition')"
     />
 
     <!-- ═══ Findings ═══ -->
@@ -427,6 +437,8 @@ function handleTreemapFileClick(filePath: string) {
         </div>
       </div>
     </section>
+
+    <ExplainPanel :open="explainOpen" :section="explainSection" @close="explainOpen = false" />
   </div>
 </template>
 

@@ -19,6 +19,7 @@ const emit = defineEmits<{
   categoryClick: [category: string]
   toolClick: [toolName: string]
   fileClick: [filePath: string]
+  explain: []
 }>()
 
 const treemapMode = ref<'detailed' | 'simple' | 'files'>('detailed')
@@ -249,7 +250,7 @@ watch(
 <template>
   <section class="panel panel--hero" v-if="entry.composition.length > 0">
     <div class="panel-head">
-      <span class="panel-title">Composition</span>
+      <span class="panel-title">Composition <button class="info-btn" @click="emit('explain')"><i class="i-carbon-information" /></button></span>
       <span class="panel-sub">Turn {{ turnNum }} · {{ fmtTokens(entry.composition.reduce((s, c) => s + c.tokens, 0)) }}</span>
       <button
         v-if="treemapMode === 'detailed' && treemapDrillKey"

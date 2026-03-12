@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@contextio/core':
-        specifier: ^0.2.2
-        version: 0.2.2
+        specifier: ^0.2.3
+        version: 0.2.3
       '@contextio/proxy':
         specifier: ^0.2.2
         version: 0.2.2
@@ -111,8 +111,8 @@ packages:
   '@contextio/core@0.2.1':
     resolution: {integrity: sha512-tFiWWgyOCE4w2CjqUX2oidqOlfE4o1vlh6jbrfr/oEbpVi5N9DSf2Yb3p+syRWmjGcqgoThosFXpNKBjE/c8rw==}
 
-  '@contextio/core@0.2.2':
-    resolution: {integrity: sha512-jmtZnRK26LKAT50BkGY6Bit3sygrDFb0Vaj3B8MWOBYghu6pbkZNfJF0AkeNsGfe0BsJnoaAUS/Js64d83s1kw==}
+  '@contextio/core@0.2.3':
+    resolution: {integrity: sha512-z+pHPyVtS4rjvPliglpjEDebsGqIVf+hQ2YzINZnLY6mtQ8MCJPJq7WgiDHXKei71Ig7l1GXLdJFepGR1POQBw==}
 
   '@contextio/proxy@0.2.2':
     resolution: {integrity: sha512-LJKcEiEubxJwgvnqv9MMOV0JN7rwVe32Aq35WWiTCzA60XEdm5IW2Ie73ooiaPnJoeB25qnr1iOXgzUV4b01ag==}
@@ -264,7 +264,7 @@ snapshots:
 
   '@contextio/core@0.2.1': {}
 
-  '@contextio/core@0.2.2': {}
+  '@contextio/core@0.2.3': {}
 
   '@contextio/proxy@0.2.2':
     dependencies:

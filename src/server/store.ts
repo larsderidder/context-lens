@@ -417,16 +417,22 @@ export class Store {
     // This must happen after the totalTokens override so both systems agree.
     normalizeComposition(composition, contextInfo.totalTokens);
 
-    // Calculate cost with proper cache token pricing
+    // Calculate cost with proper cache token pricing.
+    // Skip cost estimation for error responses (429 rate limits, 5xx errors)
+    // since those requests are not billed by the API.
+    const httpStatus = meta?.httpStatus ?? null;
+    const isSuccessResponse = httpStatus === null || (httpStatus >= 200 && httpStatus < 300);
     const inputTok = usage.inputTokens || contextInfo.totalTokens;
     const outputTok = usage.outputTokens;
-    const costUsd = estimateCost(
-      contextInfo.model,
-      inputTok,
-      outputTok,
-      usage.cacheReadTokens,
-      usage.cacheWriteTokens,
-    );
+    const costUsd = isSuccessResponse
+      ? estimateCost(
+          contextInfo.model,
+          inputTok,
+          outputTok,
+          usage.cacheReadTokens,
+          usage.cacheWriteTokens,
+        )
+      : 0;
 
     const entry: CapturedEntry = {
       id: this.nextEntryId++,
@@ -510,6 +516,7 @@ export class Store {
     this.capturedRequests.unshift(entry);
 
     // Evict oldest sessions when we exceed the session limit
+    let evicted = false;
     if (this.conversations.size > this.maxSessions) {
       // Find the oldest session by its most recent entry timestamp
       const sessionLatest = new Map<string, number>();
@@ -549,11 +556,17 @@ export class Store {
         for (const [rid, rcid] of this.responseIdToConvo) {
           if (rcid === cid) this.responseIdToConvo.delete(rid);
         }
+        for (const [key, tracked] of this.codexSessionTracker) {
+          if (tracked.conversationId === cid)
+            this.codexSessionTracker.delete(key);
+        }
         for (const [key, tracked] of this.geminiSessionTracker) {
           if (tracked.conversationId === cid)
             this.geminiSessionTracker.delete(key);
         }
       }
+      this.saveState();
+      evicted = true;
     }
 
     this.dataRevision++;
@@ -561,7 +574,11 @@ export class Store {
     this.logToDisk(entry);
     this.saveEntryDetail(entry);
     this.compactEntry(entry);
-    this.appendToState(entry, conversationId);
+    // saveState() already wrote the full state including this entry,
+    // so skip the append to avoid duplicating it in the file.
+    if (!evicted) {
+      this.appendToState(entry, conversationId);
+    }
     return entry;
   }
 

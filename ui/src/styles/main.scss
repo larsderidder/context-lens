@@ -149,6 +149,23 @@ a {
   }
 }
 
+// Info button (small "?" icon inline with labels)
+.info-btn {
+  display: inline-flex;
+  align-items: center;
+  background: none;
+  border: none;
+  color: var(--text-ghost);
+  cursor: pointer;
+  padding: 0;
+  margin-left: 2px;
+  vertical-align: middle;
+  transition: color 0.12s;
+
+  i { font-size: 12px; }
+  &:hover { color: var(--accent-blue); }
+}
+
 // System-native sans (Inter) + monospace (system mono stack).
 // We don't load external fonts; use the system stack for speed and
 // to avoid FOUT. Inter is widely installed; if not, system sans is fine.
