@@ -4,7 +4,7 @@ import { useSessionStore } from '@/stores/session'
 import { fmtTokens, fmtCost, fmtPct, fmtDuration, healthColor } from '@/utils/format'
 import { classifyEntries, SIMPLE_GROUPS, SIMPLE_META, groupMessagesByCategory, getCategoryLabel, getCategoryColor } from '@/utils/messages'
 import { computeRecommendations } from '@/utils/recommendations'
-import { calculateContextDiff, projectTurnsRemaining } from '@/utils/timeline'
+import { calculateContextDiff } from '@/utils/timeline'
 import { buildHealthNarrative } from '@/utils/overview'
 import { extractSessionFileAttributions, fileColor, shortFileName, fileDirectory } from '@/utils/files'
 import { computeTurnWaste } from '@/utils/waste'
@@ -99,9 +99,6 @@ const classified = computed(() => {
   return classifyEntries(chronologicalEntries.value)
 })
 
-const projection = computed(() => {
-  return projectTurnsRemaining(classified.value)
-})
 
 const turnNum = computed(() => {
   const e = entry.value
@@ -317,12 +314,11 @@ function handleTreemapFileClick(filePath: string) {
         </div>
         <div class="stat-label">Context</div>
         <div class="stat-detail">{{ fmtTokens(entry.contextInfo.totalTokens) }} / {{ fmtTokens(entry.contextLimit) }}</div>
-        <div v-if="projection.turnsRemaining !== null && projection.turnsRemaining > 0" class="stat-projection" v-tooltip="`Growing ~${fmtTokens(Math.round(projection.growthPerTurn))}/turn over ${projection.sinceCompaction} turns`">
-          ~{{ projection.turnsRemaining }} turns left
-        </div>
-        <div v-else-if="projection.turnsRemaining === 0" class="stat-projection stat-projection--warn" v-tooltip="'Context window is at or near the limit'">
-          At limit
-        </div>
+        <div v-if="turnWaste && turnWaste.wasteRatio > 0.05"
+          class="stat-projection"
+          :class="{ 'stat-projection--warn': turnWaste.wasteRatio >= 0.5 }"
+          v-tooltip="'Structural overhead this turn: ' + turnWaste.categories.map(c => `${c.label} ${Math.round(c.pct * 100)}%`).join(', ')"
+        >{{ Math.round(turnWaste.wasteRatio * 100) }}% overhead</div>
         <!-- Composition tape -->
         <div v-if="compositionTape" class="stat-tape">
           <div
