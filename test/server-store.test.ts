@@ -383,7 +383,6 @@ describe("Store", () => {
     cleanup();
   });
 
-
   it("maintains token sub-total invariant after API usage override", () => {
     const { store, cleanup } = makeStore();
 

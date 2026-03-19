@@ -139,7 +139,10 @@ describe("computeWasteAnalysis", () => {
     it("reports zero waste when all tools are called", () => {
       const entries = [
         makeEntry({
-          composition: comp([["tool_definitions", 1000], ["user_text", 500]]),
+          composition: comp([
+            ["tool_definitions", 1000],
+            ["user_text", 500],
+          ]),
           tools: [{ name: "Read" }],
           calledTools: ["Read"],
         }),
@@ -166,7 +169,10 @@ describe("computeWasteAnalysis", () => {
     it("counts tokens above the 8K threshold", () => {
       const entries = [
         makeEntry({
-          composition: comp([["tool_results", 20_000], ["user_text", 1000]]),
+          composition: comp([
+            ["tool_results", 20_000],
+            ["user_text", 1000],
+          ]),
         }),
       ];
       const result = computeWasteAnalysis(entries);
@@ -179,12 +185,18 @@ describe("computeWasteAnalysis", () => {
     it("does not flag results below the threshold", () => {
       const entries = [
         makeEntry({
-          composition: comp([["tool_results", 3_000], ["user_text", 1000]]),
+          composition: comp([
+            ["tool_results", 3_000],
+            ["user_text", 1000],
+          ]),
         }),
       ];
       const result = computeWasteAnalysis(entries);
       const cat = result.categories.find((c) => c.id === "oversized_results");
-      assert.ok(!cat || cat.tokens === 0, "should have no oversized result waste");
+      assert.ok(
+        !cat || cat.tokens === 0,
+        "should have no oversized result waste",
+      );
     });
   });
 
@@ -192,13 +204,22 @@ describe("computeWasteAnalysis", () => {
     it("counts system prompt tokens on every turn after the first", () => {
       const entries = [
         makeEntry({
-          composition: comp([["system_prompt", 5000], ["user_text", 500]]),
+          composition: comp([
+            ["system_prompt", 5000],
+            ["user_text", 500],
+          ]),
         }),
         makeEntry({
-          composition: comp([["system_prompt", 5000], ["user_text", 600]]),
+          composition: comp([
+            ["system_prompt", 5000],
+            ["user_text", 600],
+          ]),
         }),
         makeEntry({
-          composition: comp([["system_prompt", 5000], ["user_text", 700]]),
+          composition: comp([
+            ["system_prompt", 5000],
+            ["user_text", 700],
+          ]),
         }),
       ];
       const result = computeWasteAnalysis(entries);
@@ -295,9 +316,24 @@ describe("computeWasteAnalysis", () => {
     it("computes wasteRatio correctly", () => {
       // 3 turns, system prompt repeated on turns 1 and 2 only
       const entries = [
-        makeEntry({ composition: comp([["system_prompt", 4000], ["user_text", 1000]]) }),
-        makeEntry({ composition: comp([["system_prompt", 4000], ["user_text", 1000]]) }),
-        makeEntry({ composition: comp([["system_prompt", 4000], ["user_text", 1000]]) }),
+        makeEntry({
+          composition: comp([
+            ["system_prompt", 4000],
+            ["user_text", 1000],
+          ]),
+        }),
+        makeEntry({
+          composition: comp([
+            ["system_prompt", 4000],
+            ["user_text", 1000],
+          ]),
+        }),
+        makeEntry({
+          composition: comp([
+            ["system_prompt", 4000],
+            ["user_text", 1000],
+          ]),
+        }),
       ];
       const result = computeWasteAnalysis(entries);
       // Total input = 3 * 5000 = 15000
@@ -323,7 +359,9 @@ describe("computeWasteAnalysis", () => {
       const result = computeWasteAnalysis(entries);
       // Oversized: 7000, Unused tools: 1/2 * 3000 = 1500
       // Repeated system: 0 (first turn)
-      const oversized = result.categories.find((c) => c.id === "oversized_results");
+      const oversized = result.categories.find(
+        (c) => c.id === "oversized_results",
+      );
       const unused = result.categories.find((c) => c.id === "unused_tools");
       assert.equal(oversized?.tokens, 7_000);
       assert.equal(unused?.tokens, 1_500);

@@ -1,3 +1,5 @@
+import { CREDENTIAL_PATTERNS } from "@contextio/core";
+
 import type {
   AlertSeverity,
   ContextInfo,
@@ -251,6 +253,29 @@ function scanMessage(
       offset: unicodeMatch.index,
       length: 1,
     });
+  }
+
+  // --- Tier 3: Credential detection ---
+  // Scans all non-system messages (including user messages), so secrets
+  // typed directly in chat are caught, not just tool results.
+  // The match text is replaced with a redacted placeholder so the actual
+  // key value is never stored in state or shown in the UI.
+  for (const rule of CREDENTIAL_PATTERNS) {
+    rule.pattern.lastIndex = 0;
+    const m = rule.pattern.exec(content);
+    if (m) {
+      const redactedMatch = `[${rule.label} detected — value redacted]`;
+      alerts.push({
+        messageIndex,
+        role: msg.role,
+        toolName,
+        severity: "high",
+        pattern: rule.id,
+        match: redactedMatch,
+        offset: m.index,
+        length: m[0].length,
+      });
+    }
   }
 
   return alerts;

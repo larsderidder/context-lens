@@ -38,7 +38,11 @@ import { estimateCost } from "./models.js";
 
 export interface WasteCategory {
   /** Machine key */
-  id: "unused_tools" | "oversized_results" | "repeated_system" | "thinking_spill";
+  id:
+    | "unused_tools"
+    | "oversized_results"
+    | "repeated_system"
+    | "thinking_spill";
   /** Human label */
   label: string;
   /** Total wasted tokens across all turns */
@@ -253,7 +257,8 @@ function analyseThinkingSpill(
     if (total === 0) return [i, 0] as [number, number];
     const thinkTokens = categoryTokens(e.composition, "thinking");
     const thinkFraction = thinkTokens / total;
-    if (thinkFraction <= THINKING_SPILL_THRESHOLD) return [i, 0] as [number, number];
+    if (thinkFraction <= THINKING_SPILL_THRESHOLD)
+      return [i, 0] as [number, number];
     const spill = Math.round(thinkTokens - total * THINKING_SPILL_THRESHOLD);
     return [i, spill] as [number, number];
   });
@@ -269,9 +274,7 @@ function analyseThinkingSpill(
  * Only successful (non-error) entries are included. Entries are assumed to be
  * ordered chronologically.
  */
-export function computeWasteAnalysis(
-  entries: ProjectedEntry[],
-): WasteAnalysis {
+export function computeWasteAnalysis(entries: ProjectedEntry[]): WasteAnalysis {
   const good = entries.filter(isSuccessEntry);
 
   if (good.length === 0) {

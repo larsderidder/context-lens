@@ -394,4 +394,135 @@ describe("scanSecurity", () => {
       );
     });
   });
+
+  // -----------------------------------------------------------------------
+  // Tier 3: Credential detection
+  // -----------------------------------------------------------------------
+
+  describe("Tier 3: credential detection", () => {
+    it("detects Anthropic API key in user message", () => {
+      const key = "sk-ant-api03-" + "A".repeat(80);
+      const ci = makeContextInfo([
+        msg("user", `My key is ${key}, can you help?`),
+      ]);
+      const result = scanSecurity(ci);
+      const credAlert = result.alerts.find(
+        (a) => a.pattern === "credential_anthropic",
+      );
+      assert.ok(credAlert, "should detect Anthropic key");
+      assert.equal(credAlert?.severity, "high");
+      // Match text must not contain the actual key value
+      assert.ok(
+        !credAlert?.match.includes("sk-ant"),
+        "match should not expose the key",
+      );
+      assert.ok(
+        credAlert?.match.includes("redacted"),
+        "match should say redacted",
+      );
+    });
+
+    it("detects OpenAI API key in user message", () => {
+      const key = "sk-proj-" + "B".repeat(50);
+      const ci = makeContextInfo([msg("user", `Here is the key: ${key}`)]);
+      const result = scanSecurity(ci);
+      assert.ok(
+        result.alerts.some((a) => a.pattern === "credential_openai"),
+        "should detect OpenAI key",
+      );
+    });
+
+    it("detects GitHub token in user message", () => {
+      const token = "ghp_" + "C".repeat(40);
+      const ci = makeContextInfo([msg("user", `My GitHub token is ${token}`)]);
+      const result = scanSecurity(ci);
+      assert.ok(
+        result.alerts.some((a) => a.pattern === "credential_github"),
+        "should detect GitHub token",
+      );
+    });
+
+    it("detects AWS access key in user message", () => {
+      const ci = makeContextInfo([
+        msg(
+          "user",
+          "My AWS key is AKIAIOSFODNN7EXAMPLE and it stopped working",
+        ),
+      ]);
+      const result = scanSecurity(ci);
+      assert.ok(
+        result.alerts.some((a) => a.pattern === "credential_aws_key"),
+        "should detect AWS key",
+      );
+    });
+
+    it("detects PEM private key block", () => {
+      const ci = makeContextInfo([
+        msg(
+          "user",
+          "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQ...\n-----END RSA PRIVATE KEY-----",
+        ),
+      ]);
+      const result = scanSecurity(ci);
+      assert.ok(
+        result.alerts.some((a) => a.pattern === "credential_private_key"),
+        "should detect private key block",
+      );
+    });
+
+    it("detects generic secret assignment", () => {
+      const ci = makeContextInfo([
+        msg(
+          "user",
+          "Use api_key=supersecretvalue123456789 when calling the API",
+        ),
+      ]);
+      const result = scanSecurity(ci);
+      assert.ok(
+        result.alerts.some((a) => a.pattern === "credential_generic"),
+        "should detect generic secret assignment",
+      );
+    });
+
+    it("also detects credentials in tool results", () => {
+      const key = "sk-ant-api03-" + "D".repeat(80);
+      const ci = makeContextInfo([
+        toolUseMsg("read_file"),
+        toolResultMsg(`File contents:\nANTHROPIC_API_KEY=${key}`),
+      ]);
+      const result = scanSecurity(ci);
+      assert.ok(
+        result.alerts.some((a) => a.pattern === "credential_anthropic"),
+        "should detect key in tool result",
+      );
+    });
+
+    it("does not fire on short token-like strings without context", () => {
+      const ci = makeContextInfo([
+        msg("user", "The hash is abc123def456 and the id is xyz789"),
+      ]);
+      const result = scanSecurity(ci);
+      // None of the specific patterns should fire (no sk-, gh, AKIA prefix)
+      const credAlerts = result.alerts.filter((a) =>
+        a.pattern.startsWith("credential_"),
+      );
+      assert.equal(
+        credAlerts.length,
+        0,
+        "should not flag short hashes without credential patterns",
+      );
+    });
+
+    it("does not scan system messages for credentials", () => {
+      const key = "sk-ant-api03-" + "E".repeat(80);
+      const ci = makeContextInfo([
+        msg("system", `System config: API_KEY=${key}`),
+      ]);
+      const result = scanSecurity(ci);
+      const credAlerts = result.alerts.filter((a) =>
+        a.pattern.startsWith("credential_"),
+      );
+      assert.equal(credAlerts.length, 0, "should not scan system messages");
+    });
+  });
 });
