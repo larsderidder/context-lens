@@ -916,18 +916,29 @@ if (parsedArgs.commandName === "analyze") {
 
   // Open browser (cross-platform)
   function openBrowser(url: string): void {
-    const cmd =
-      platform() === "darwin"
-        ? "open"
-        : platform() === "win32"
-          ? "start"
-          : "xdg-open";
+    let cmd: string;
+    let args: string[];
 
-    const browserProcess = spawn(cmd, [url], {
+    if (platform() === "darwin") {
+      cmd = "open";
+      args = [url];
+    } else if (platform() === "win32") {
+      // `start` is a cmd.exe built-in, not a standalone executable.
+      // Using `cmd /c start` works in all Windows shells including MSYS2/Git Bash.
+      cmd = "cmd";
+      args = ["/c", "start", url];
+    } else {
+      cmd = "xdg-open";
+      args = [url];
+    }
+
+    const browserProcess = spawn(cmd, args, {
       stdio: "ignore",
       detached: true,
     });
 
+    // Non-fatal: if the browser can't be opened, just continue.
+    browserProcess.on("error", () => {});
     browserProcess.unref(); // Don't wait for browser to close
   }
 
