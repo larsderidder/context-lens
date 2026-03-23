@@ -44,7 +44,7 @@ function handleRecClick(rec: { messageIndex?: number; highlight?: string }) {
         <i class="rec-icon" :class="[`sev-${r.severity}`, r.severity === 'high' ? 'i-carbon-warning-alt' : r.severity === 'med' ? 'i-carbon-information' : 'i-carbon-checkmark']" />
         <div class="rec-content">
           <div class="rec-title">{{ r.title }}</div>
-          <div class="rec-detail">{{ r.detail }}</div>
+          <div class="rec-detail" @click.stop>{{ r.detail }}</div>
         </div>
         <span class="rec-impact" :class="`sev-${r.severity}`">{{ r.impact }}</span>
       </div>
@@ -171,6 +171,8 @@ function handleRecClick(rec: { messageIndex?: number; highlight?: string }) {
   color: var(--text-muted);
   margin-top: 3px;
   line-height: 1.5;
+  user-select: text;
+  cursor: text;
 }
 
 .rec-impact {

@@ -8,6 +8,7 @@ import {
   computeFingerprint,
   computeHealthScore,
   detectSource,
+  detectToolPatterns,
   estimateCost,
   estimateTokens,
   extractConversationLabel,
@@ -490,6 +491,25 @@ export class Store {
       sessionToolsUsed,
       turnCount,
     );
+
+    // Tool pattern detection (redundant calls, re-fetches, stuck-on-error).
+    // Find the most recent prior entry in this conversation that has accumulated
+    // fetched paths, and use those for cross-turn re-fetch detection.
+    const prevEntry = [...sameConvo]
+      .sort(
+        (a, b) =>
+          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+      )
+      .find((e) => e.toolPatternFetchedPaths);
+    const previousContext = prevEntry?.toolPatternFetchedPaths
+      ? { fetchedPaths: prevEntry.toolPatternFetchedPaths }
+      : undefined;
+    const { findings: toolPatternFindings, fetchedPaths } = detectToolPatterns(
+      contextInfo.messages,
+      previousContext,
+    );
+    entry.toolPatterns = toolPatternFindings;
+    entry.toolPatternFetchedPaths = fetchedPaths;
 
     // Security scanning must happen before compaction strips message content
     const securityResult = scanSecurity(contextInfo);

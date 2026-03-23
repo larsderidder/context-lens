@@ -221,6 +221,9 @@ export interface CapturedEntry {
   healthScore: HealthScore | null;
   securityAlerts: SecurityAlert[];
   outputSecurityAlerts?: OutputAlert[];
+  toolPatterns?: import("./core/tool-patterns.js").ToolPatternFinding[];
+  /** Accumulated set of fetched paths up to and including this entry, for cross-turn re-fetch detection */
+  toolPatternFetchedPaths?: Set<string>;
 }
 
 /** A single finding from output (response) scanning. Mirrors @contextio/core's OutputAlert. */
@@ -298,6 +301,7 @@ export interface ProjectedEntry {
   usage: ProjectedUsage | null;
   responseModel: string | null;
   stopReason: string | null;
+  toolPatterns?: import("./core/tool-patterns.js").ToolPatternFinding[];
 }
 
 export interface AgentGroup {

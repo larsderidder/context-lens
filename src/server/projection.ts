@@ -42,6 +42,7 @@ export function projectEntry(
     healthScore: e.healthScore,
     securityAlerts: e.securityAlerts || [],
     outputSecurityAlerts: e.outputSecurityAlerts || [],
+    toolPatterns: e.toolPatterns || [],
     usage: hasUsageData
       ? {
           inputTokens: usage.inputTokens,

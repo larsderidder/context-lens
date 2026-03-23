@@ -21,6 +21,10 @@ export function computeRecommendations(
   entries: ProjectedEntry[],
   classified: { entry: ProjectedEntry; isMain: boolean }[],
 ): Recommendation[] {
+  // 1-based turn number among main entries, for human-readable references
+  const mainEntries = classified.filter(c => c.isMain).map(c => c.entry)
+  const turnIndex = mainEntries.findIndex(e => e.id === entry.id)
+  const turnNumber = turnIndex >= 0 ? turnIndex + 1 : null
   const recs: Recommendation[] = []
   const ci = entry.contextInfo
   const comp = entry.composition || []
@@ -189,6 +193,20 @@ export function computeRecommendations(
       title: `⚠ ${a.pattern.replace(/_/g, ' ')} in response`,
       detail: a.match,
       impact: a.severity,
+    })
+  }
+
+  // Tool pattern findings (redundant calls, re-fetches, stuck-on-error)
+  for (const f of entry.toolPatterns || []) {
+    const sev = f.kind === 'stuck_on_error' ? 'high' : f.kind === 'redundant_call' ? 'med' : 'low'
+    const impact = f.kind === 'stuck_on_error' ? 'Loop risk' : f.kind === 'redundant_call' ? 'Wasted tokens' : 'Redundant fetch'
+    const turnSuffix = turnNumber != null ? ` (turn ${turnNumber})` : ''
+    recs.push({
+      severity: sev,
+      title: f.title + turnSuffix,
+      detail: f.detail,
+      impact,
+      // Don't set messageIndex — it's internal to the entry and not surfaced in the UI
     })
   }
 

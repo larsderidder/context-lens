@@ -187,6 +187,19 @@ export interface ProjectedUsage {
   thinkingTokens: number;
 }
 
+// --- Tool pattern findings ---
+
+export type ToolPatternKind = 'redundant_call' | 'refetch' | 'stuck_on_error'
+
+export interface ToolPatternFinding {
+  kind: ToolPatternKind
+  title: string
+  detail: string
+  toolNames: string[]
+  messageIndex: number
+}
+
+
 export interface ProjectedEntry {
   id: number;
   timestamp: string;
@@ -210,6 +223,7 @@ export interface ProjectedEntry {
   usage: ProjectedUsage | null;
   responseModel: string | null;
   stopReason: string | null;
+  toolPatterns?: ToolPatternFinding[];
 }
 
 export interface Conversation {
