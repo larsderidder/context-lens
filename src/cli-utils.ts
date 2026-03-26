@@ -142,7 +142,7 @@ const TOOL_CONFIG: Record<string, ToolConfig> = {
     extraArgs: [],
     // Allow x-target-url header so providers with non-standard upstreams
     // (e.g. opencode, kilo) can tell the proxy their real destination URL.
-    serverEnv: { CONTEXT_PROXY_ALLOW_TARGET_OVERRIDE: "1" },
+    serverEnv: { CONTEXT_LENS_ALLOW_TARGET_OVERRIDE: "1" },
     needsMitm: false,
   },
   bryti: {
