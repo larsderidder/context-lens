@@ -89,19 +89,71 @@ const hasFutureMessages = computed(() => {
 })
 
 // Combined chrono messages: selected entry's messages + future messages from latest
+// Find a message at a given original index from a previous turn's capture.
+// Walks backwards through session entries until one has enough messages.
+function findPrunedMessage(origIdx: number): ParsedMessage | null {
+  const s = session.value
+  if (!s) return null
+  // entries are newest-first; skip [0] (current turn), search older ones
+  for (let i = 1; i < s.entries.length; i++) {
+    const msgs = s.entries[i].contextInfo.messages
+    if (msgs && msgs.length > origIdx) return msgs[origIdx]
+  }
+  return null
+}
+
 const chronoAllMessages = computed(() => {
-  if (!hasFutureMessages.value) {
-    return messages.value.map((msg, i) => ({ msg, origIdx: i, future: false }))
+  const pruned = prunedMessages.value
+  const currentMsgs = messages.value
+
+  // Build the full list, re-inserting pruned messages at their original indices
+  type ChronoItem = { msg: ParsedMessage; origIdx: number; future: boolean; prunedGhost: boolean }
+  const result: ChronoItem[] = []
+
+  if (pruned.length > 0) {
+    // Parse pruned indices: "user:2" → { index: 2 }, "tool_use:xxx" → no index
+    const prunedIndices = new Map<number, string>() // index → pruneId
+    for (const id of pruned) {
+      const match = id.match(/^(user|assistant|unknown):(\d+)$/)
+      if (match) prunedIndices.set(parseInt(match[2]), id)
+    }
+
+    // Merge: walk through original indices, inserting current messages
+    // and pruned ghosts at the right positions
+    let currentIdx = 0
+    const maxIdx = Math.max(
+      currentMsgs.length + prunedIndices.size,
+      prunedIndices.size > 0 ? Math.max(...prunedIndices.keys()) + 1 : 0,
+    )
+    for (let origIdx = 0; origIdx < maxIdx; origIdx++) {
+      if (prunedIndices.has(origIdx)) {
+        const ghost = findPrunedMessage(origIdx)
+        if (ghost) {
+          result.push({ msg: ghost, origIdx, future: false, prunedGhost: true })
+        }
+      } else if (currentIdx < currentMsgs.length) {
+        result.push({ msg: currentMsgs[currentIdx], origIdx, future: false, prunedGhost: false })
+        currentIdx++
+      }
+    }
+    // Remaining current messages (shouldn't happen, but safe)
+    while (currentIdx < currentMsgs.length) {
+      result.push({ msg: currentMsgs[currentIdx], origIdx: result.length, future: false, prunedGhost: false })
+      currentIdx++
+    }
+  } else {
+    for (let i = 0; i < currentMsgs.length; i++) {
+      result.push({ msg: currentMsgs[i], origIdx: i, future: false, prunedGhost: false })
+    }
   }
-  const result: { msg: ParsedMessage; origIdx: number; future: boolean }[] = []
-  // Current turn's messages (in context)
-  for (let i = 0; i < messages.value.length; i++) {
-    result.push({ msg: messages.value[i], origIdx: i, future: false })
+
+  // Append future messages if applicable
+  if (hasFutureMessages.value) {
+    for (let i = currentMsgs.length; i < latestMessages.value.length; i++) {
+      result.push({ msg: latestMessages.value[i], origIdx: i, future: true, prunedGhost: false })
+    }
   }
-  // Future messages from the latest entry (beyond the selected turn's context)
-  for (let i = messages.value.length; i < latestMessages.value.length; i++) {
-    result.push({ msg: latestMessages.value[i], origIdx: i, future: true })
-  }
+
   return result
 })
 
@@ -990,7 +1042,7 @@ watch(
                     {
                       selected: !item.future && detailOpen && !isSubagentDetail && flatMessages[detailIndex]?.origIdx === item.origIdx,
                       future: item.future,
-                      pruned: !item.future && isMsgPruned(item.msg, item.origIdx),
+                      pruned: item.prunedGhost || (!item.future && isMsgPruned(item.msg, item.origIdx)),
                     },
                   ]"
                   :style="{ '--cat-border': chronoCategoryColor(item.msg) }"
@@ -1007,7 +1059,7 @@ watch(
                   <span class="chrono-preview">{{ extractPreview(item.msg, toolNameMap) || '(empty)' }}</span>
                   <span class="chrono-tok" :class="{ hot: !item.future && (item.msg.tokens || 0) > 2000, oversized: !item.future && isOversizedResult(item.msg) }" v-tooltip="!item.future && isOversizedResult(item.msg) ? 'Tool result exceeds 8K tokens — re-sent every turn, crowding conversation history' : undefined">{{ fmtTokens(item.msg.tokens || 0) }}</span>
                   <button
-                    v-if="!item.future && !isMsgPruned(item.msg, item.origIdx)"
+                    v-if="!item.future && !item.prunedGhost && !isMsgPruned(item.msg, item.origIdx)"
                     class="prune-btn"
                     title="Drop from context permanently"
                     @click.stop="doPrune(item.msg, item.origIdx, $event)"
