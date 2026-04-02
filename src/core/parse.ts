@@ -368,15 +368,64 @@ export function parseContextInfo(
           info.systemPrompts.push({ content: msg.content });
           info.systemTokens += estimateTokens(msg.content, model);
         } else {
+          const contentBlocks: ContentBlock[] = [];
+          let contentStr: string;
+          let tokenTarget: any = msg.content;
+
+          // Handle text content (string, array, or null)
+          if (typeof msg.content === "string") {
+            contentStr = msg.content;
+            contentBlocks.push({ type: "text", text: msg.content });
+          } else if (Array.isArray(msg.content)) {
+            contentStr = msg.content.map((b: any) => b.text || "").join("\n");
+            for (const part of msg.content) {
+              if (part.type === "text")
+                contentBlocks.push({ type: "text", text: part.text || "" });
+            }
+          } else {
+            contentStr = "";
+          }
+
+          // Handle tool_calls on assistant messages
+          if (msg.tool_calls && Array.isArray(msg.tool_calls)) {
+            for (const tc of msg.tool_calls) {
+              const fn = tc.function || {};
+              let parsedArgs: Record<string, any> = {};
+              if (typeof fn.arguments === "string" && fn.arguments.length > 0) {
+                try {
+                  parsedArgs = JSON.parse(fn.arguments);
+                } catch {
+                  /* keep empty */
+                }
+              }
+              contentBlocks.push({
+                type: "tool_use",
+                id: tc.id || "",
+                name: fn.name || "unknown",
+                input: parsedArgs,
+              });
+            }
+            tokenTarget = { content: msg.content, tool_calls: msg.tool_calls };
+          }
+
+          // Handle role="tool" messages
+          if (msg.role === "tool" && msg.tool_call_id) {
+            contentBlocks.length = 0;
+            contentBlocks.push({
+              type: "tool_result",
+              tool_use_id: msg.tool_call_id,
+              content: contentStr,
+            });
+          }
+
+          const tokens = estimateTokens(tokenTarget, model);
           info.messages.push({
             role: msg.role,
-            content:
-              typeof msg.content === "string"
-                ? msg.content
-                : JSON.stringify(msg.content),
-            tokens: estimateTokens(msg.content, model),
+            content: contentStr || JSON.stringify(msg.content),
+            contentBlocks: contentBlocks.length > 0 ? contentBlocks : null,
+            tokens,
           });
-          info.messagesTokens += estimateTokens(msg.content, model);
+          info.messagesTokens += tokens;
         }
       });
     }

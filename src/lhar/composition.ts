@@ -126,6 +126,21 @@ function classifyMessage(
     return;
   }
 
+  // Tool result messages (OpenAI chat-completions role="tool")
+  if (role === "tool") {
+    add("tool_results", estimateTokens(content, model));
+    return;
+  }
+
+  // Assistant messages with tool_calls (OpenAI chat-completions)
+  if (role === "assistant" && msg.tool_calls && Array.isArray(msg.tool_calls)) {
+    add("tool_calls", estimateTokens(msg.tool_calls, model));
+    if (typeof content === "string" && content.length > 0) {
+      add("assistant_text", estimateTokens(content, model));
+    }
+    return;
+  }
+
   // String content
   if (typeof content === "string") {
     if (content.includes("<system-reminder>")) {
