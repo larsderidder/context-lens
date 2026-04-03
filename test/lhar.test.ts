@@ -30,6 +30,9 @@ const anthropicBasic = JSON.parse(
 const claudeSession = JSON.parse(
   readFileSync(join(fixturesDir, "claude-session.json"), "utf-8"),
 );
+const openaiChatToolsFixture = JSON.parse(
+  readFileSync(join(fixturesDir, "openai-chat-tools.json"), "utf-8"),
+);
 
 function makeEntry(overrides: Partial<CapturedEntry> = {}): CapturedEntry {
   const ci = parseContextInfo(
@@ -386,6 +389,47 @@ describe("analyzeComposition", () => {
       totalCompTokens < 200,
       `composition total (${totalCompTokens}) should not be inflated by double-counting`,
     );
+  });
+
+  it("classifies chat-completions tool_calls and tool results", () => {
+    const ci = parseContextInfo(
+      "openai",
+      openaiChatToolsFixture,
+      "chat-completions",
+    );
+    const comp = analyzeComposition(ci, openaiChatToolsFixture);
+    const categories = comp.map((c) => c.category);
+    assert.ok(categories.includes("tool_calls"), "should have tool_calls");
+    assert.ok(categories.includes("tool_results"), "should have tool_results");
+    assert.ok(
+      categories.includes("assistant_text"),
+      "should have assistant_text",
+    );
+    const toolCalls = comp.find((c) => c.category === "tool_calls");
+    assert.ok(toolCalls!.tokens > 0, "tool_calls tokens > 0");
+    const toolResults = comp.find((c) => c.category === "tool_results");
+    assert.ok(toolResults!.tokens > 0, "tool_results tokens > 0");
+    const assistantText = comp.find((c) => c.category === "assistant_text");
+    assert.ok(assistantText!.tokens > 0, "assistant_text tokens > 0");
+  });
+
+  it("role=tool messages are not classified as user_text", () => {
+    const ci = parseContextInfo(
+      "openai",
+      openaiChatToolsFixture,
+      "chat-completions",
+    );
+    const comp = analyzeComposition(ci, openaiChatToolsFixture);
+    const userText = comp.find((c) => c.category === "user_text");
+    const toolResults = comp.find((c) => c.category === "tool_results");
+    assert.ok(toolResults, "should have tool_results category");
+    // user_text should only be the single user message, not the tool results
+    if (userText) {
+      assert.ok(
+        userText.tokens < toolResults!.tokens,
+        `user_text (${userText.tokens}) should be less than tool_results (${toolResults!.tokens}) — tool results must not be lumped into user_text`,
+      );
+    }
   });
 });
 

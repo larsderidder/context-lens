@@ -7,6 +7,7 @@ import {
   claudeSession,
   codexResponses,
   openaiChat,
+  openaiChatTools,
 } from "./helpers/fixtures.js";
 
 describe("parseContextInfo", () => {
@@ -218,6 +219,102 @@ describe("parseContextInfo", () => {
       const info = parseContextInfo("openai", body, "chat-completions");
       assert.equal(info.tools.length, 1);
       assert.equal((info.tools[0] as any).name, "search");
+    });
+
+    it("parses assistant tool_calls into contentBlocks", () => {
+      const info = parseContextInfo(
+        "openai",
+        openaiChatTools,
+        "chat-completions",
+      );
+      // msg[2] in fixture: assistant with content:null + tool_calls
+      const assistantMsg = info.messages.find(
+        (m) =>
+          m.role === "assistant" &&
+          m.contentBlocks?.some((b: any) => b.name === "read_file"),
+      );
+      assert.ok(assistantMsg, "should find assistant message with read_file");
+      assert.ok(assistantMsg!.contentBlocks, "should have contentBlocks");
+      const toolUse = assistantMsg!.contentBlocks![0] as any;
+      assert.equal(toolUse.type, "tool_use");
+      assert.equal(toolUse.id, "call_abc123");
+      assert.equal(toolUse.name, "read_file");
+      assert.deepEqual(toolUse.input, { path: "/src/auth.js" });
+      assert.ok(assistantMsg!.tokens > 0, "tokens should be > 0");
+    });
+
+    it("parses role=tool messages as tool results with contentBlocks", () => {
+      const info = parseContextInfo(
+        "openai",
+        openaiChatTools,
+        "chat-completions",
+      );
+      // msg[3] in fixture: role=tool with tool_call_id
+      const toolMsg = info.messages.find(
+        (m) =>
+          m.role === "tool" &&
+          m.contentBlocks?.some((b: any) => b.tool_use_id === "call_abc123"),
+      );
+      assert.ok(toolMsg, "should find tool result message");
+      assert.ok(toolMsg!.contentBlocks, "should have contentBlocks");
+      const toolResult = toolMsg!.contentBlocks![0] as any;
+      assert.equal(toolResult.type, "tool_result");
+      assert.equal(toolResult.tool_use_id, "call_abc123");
+      assert.ok(
+        toolResult.content.includes("express-auth"),
+        "should contain tool output",
+      );
+      assert.ok(toolMsg!.tokens > 0, "tokens should be > 0");
+    });
+
+    it("handles assistant with both text content and tool_calls", () => {
+      const info = parseContextInfo(
+        "openai",
+        openaiChatTools,
+        "chat-completions",
+      );
+      // msg[4] in fixture: assistant with text + tool_calls
+      const mixedMsg = info.messages.find(
+        (m) =>
+          m.role === "assistant" &&
+          m.contentBlocks?.some((b: any) => b.name === "write_file"),
+      );
+      assert.ok(mixedMsg, "should find assistant message with write_file");
+      const blocks = mixedMsg!.contentBlocks!;
+      assert.ok(blocks.length >= 2, "should have text + tool_use blocks");
+      const textBlock = blocks.find((b: any) => b.type === "text") as any;
+      assert.ok(textBlock, "should have a text block");
+      assert.ok(textBlock.text.includes("I found the issue"));
+      const toolBlock = blocks.find((b: any) => b.type === "tool_use") as any;
+      assert.ok(toolBlock, "should have a tool_use block");
+      assert.equal(toolBlock.name, "write_file");
+      assert.ok(mixedMsg!.tokens > 0, "tokens should be > 0");
+    });
+
+    it("content:null assistant messages have non-zero tokens when tool_calls present", () => {
+      const body = {
+        model: "gpt-4o",
+        messages: [
+          {
+            role: "assistant",
+            content: null,
+            tool_calls: [
+              {
+                id: "call_1",
+                type: "function",
+                function: { name: "test_fn", arguments: '{"key":"value"}' },
+              },
+            ],
+          },
+        ],
+      };
+      const info = parseContextInfo("openai", body, "chat-completions");
+      assert.ok(info.messagesTokens > 0, "messagesTokens should be > 0");
+      assert.equal(
+        info.totalTokens,
+        info.systemTokens + info.toolsTokens + info.messagesTokens,
+        "totalTokens invariant",
+      );
     });
   });
 

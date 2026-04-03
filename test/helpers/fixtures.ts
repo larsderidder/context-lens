@@ -16,3 +16,6 @@ export const claudeSession = JSON.parse(
 export const openaiChat = JSON.parse(
   readFileSync(join(fixturesDir, "openai-chat.json"), "utf-8"),
 );
+export const openaiChatTools = JSON.parse(
+  readFileSync(join(fixturesDir, "openai-chat-tools.json"), "utf-8"),
+);
