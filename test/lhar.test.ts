@@ -30,6 +30,9 @@ const anthropicBasic = JSON.parse(
 const claudeSession = JSON.parse(
   readFileSync(join(fixturesDir, "claude-session.json"), "utf-8"),
 );
+const openaiChatToolsFixture = JSON.parse(
+  readFileSync(join(fixturesDir, "openai-chat-tools.json"), "utf-8"),
+);
 
 function makeEntry(overrides: Partial<CapturedEntry> = {}): CapturedEntry {
   const ci = parseContextInfo(
@@ -389,24 +392,15 @@ describe("analyzeComposition", () => {
   });
 
   it("classifies chat-completions tool_calls and tool results", () => {
-    const openaiChatTools = JSON.parse(
-      readFileSync(join(fixturesDir, "openai-chat-tools.json"), "utf-8"),
-    );
     const ci = parseContextInfo(
       "openai",
-      openaiChatTools,
+      openaiChatToolsFixture,
       "chat-completions",
     );
-    const comp = analyzeComposition(ci, openaiChatTools);
+    const comp = analyzeComposition(ci, openaiChatToolsFixture);
     const categories = comp.map((c) => c.category);
-    assert.ok(
-      categories.includes("tool_calls"),
-      "should have tool_calls",
-    );
-    assert.ok(
-      categories.includes("tool_results"),
-      "should have tool_results",
-    );
+    assert.ok(categories.includes("tool_calls"), "should have tool_calls");
+    assert.ok(categories.includes("tool_results"), "should have tool_results");
     assert.ok(
       categories.includes("assistant_text"),
       "should have assistant_text",
@@ -420,15 +414,12 @@ describe("analyzeComposition", () => {
   });
 
   it("role=tool messages are not classified as user_text", () => {
-    const openaiChatTools = JSON.parse(
-      readFileSync(join(fixturesDir, "openai-chat-tools.json"), "utf-8"),
-    );
     const ci = parseContextInfo(
       "openai",
-      openaiChatTools,
+      openaiChatToolsFixture,
       "chat-completions",
     );
-    const comp = analyzeComposition(ci, openaiChatTools);
+    const comp = analyzeComposition(ci, openaiChatToolsFixture);
     const userText = comp.find((c) => c.category === "user_text");
     const toolResults = comp.find((c) => c.category === "tool_results");
     assert.ok(toolResults, "should have tool_results category");

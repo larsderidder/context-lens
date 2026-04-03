@@ -253,9 +253,7 @@ describe("parseContextInfo", () => {
       const toolMsg = info.messages.find(
         (m) =>
           m.role === "tool" &&
-          m.contentBlocks?.some(
-            (b: any) => b.tool_use_id === "call_abc123",
-          ),
+          m.contentBlocks?.some((b: any) => b.tool_use_id === "call_abc123"),
       );
       assert.ok(toolMsg, "should find tool result message");
       assert.ok(toolMsg!.contentBlocks, "should have contentBlocks");
