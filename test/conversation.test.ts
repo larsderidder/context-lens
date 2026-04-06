@@ -397,6 +397,55 @@ describe("extractSessionId", () => {
     };
     assert.equal(extractSessionId(raw), null);
   });
+
+  it("extracts session ID from x-claude-code-session-id header", () => {
+    const headers = {
+      "x-claude-code-session-id": "48658872-6667-4be1-b20f-1878856c90ae",
+    };
+    assert.equal(
+      extractSessionId({}, headers),
+      "claude_48658872-6667-4be1-b20f-1878856c90ae",
+    );
+  });
+
+  it("extracts session ID from X-Claude-Code-Session-Id header (mixed case)", () => {
+    const headers = {
+      "X-Claude-Code-Session-Id": "abcd1234-5678-90ab-cdef-ghijklmnopqr",
+    };
+    assert.equal(
+      extractSessionId({}, headers),
+      "claude_abcd1234-5678-90ab-cdef-ghijklmnopqr",
+    );
+  });
+
+  it("prefers Claude Code header over metadata.user_id", () => {
+    const raw = {
+      metadata: {
+        user_id: "user_abc_session_550e8400-e29b-41d4-a716-446655440000",
+      },
+    };
+    const headers = {
+      "x-claude-code-session-id": "from-header-uuid",
+    };
+    assert.equal(extractSessionId(raw, headers), "claude_from-header-uuid");
+  });
+
+  it("falls back to metadata.user_id when no header", () => {
+    const raw = {
+      metadata: {
+        user_id: "user_abc_session_550e8400-e29b-41d4-a716-446655440000",
+      },
+    };
+    assert.equal(
+      extractSessionId(raw, null),
+      "session_550e8400-e29b-41d4-a716-446655440000",
+    );
+  });
+
+  it("ignores empty string header values", () => {
+    const headers = { "x-claude-code-session-id": "" } as any;
+    assert.equal(extractSessionId({}, headers), null);
+  });
 });
 
 describe("computeFingerprint", () => {

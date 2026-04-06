@@ -233,12 +233,21 @@ export function extractUserPrompt(messages: ParsedMessage[]): string | null {
  * Extract a stable session identifier when the upstream/tool provides one.
  *
  * Supported:
+ * - Claude Code: `x-claude-code-session-id` request header
  * - Anthropic: `metadata.user_id` contains `session_<uuid>`
  * - Gemini Code Assist: `request.session_id` (uuid)
  */
 export function extractSessionId(
   rawBody: Record<string, any> | null | undefined,
+  requestHeaders?: Record<string, string> | null,
 ): string | null {
+  // Claude Code sends a stable session ID in a request header.
+  const claudeSessionId =
+    requestHeaders?.["x-claude-code-session-id"] ??
+    requestHeaders?.["X-Claude-Code-Session-Id"];
+  if (claudeSessionId && typeof claudeSessionId === "string")
+    return `claude_${claudeSessionId}`;
+
   const userId = rawBody?.metadata?.user_id;
   if (userId) {
     const match = userId.match(/session_([a-f0-9-]+)/);
@@ -289,8 +298,9 @@ export function computeFingerprint(
   responseIdToConvo: Map<string, string>,
   source?: string | null,
   workingDirectory?: string | null,
+  requestHeaders?: Record<string, string> | null,
 ): string | null {
-  const sessionId = extractSessionId(rawBody);
+  const sessionId = extractSessionId(rawBody, requestHeaders);
   if (sessionId) {
     return createHash("sha256").update(sessionId).digest("hex").slice(0, 16);
   }

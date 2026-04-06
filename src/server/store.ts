@@ -271,9 +271,11 @@ export class Store {
       this.responseIdToConvo,
       resolvedSource,
       workingDirectory,
+      requestHeaders,
     );
 
-    const rawSessionId = sessionId ?? extractSessionId(rawBody ?? null);
+    const rawSessionId =
+      sessionId ?? extractSessionId(rawBody ?? null, requestHeaders);
 
     // Register or look up conversation
     let conversationId: string | null = null;
