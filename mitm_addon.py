@@ -17,7 +17,8 @@ View at http://localhost:4041
 
 Environment variables:
   CONTEXT_LENS_INGEST_URL  - ingest endpoint (default: "http://localhost:4041/api/ingest")
-  CONTEXT_LENS_SESSION_ID  - session ID for grouping (default: "")
+  CONTEXT_LENS_SESSION_ID  - explicit session ID override for grouping (default: "")
+                             when unset, falls back to headers is available, ie X-Claude-Code-Session-Id
 """
 
 import json
@@ -38,10 +39,15 @@ CONTEXT_LENS_SOURCE = os.environ.get("CONTEXT_LENS_SOURCE", "").strip() or None
 CAPTURE_PATTERNS = [
     # Codex subscription (specific tool identity, keep as-is)
     ("chatgpt.com", "/backend-api/codex/responses", "chatgpt", "codex"),
+    # z.ai API — OpenAI-compatible chat completions
+    ("api.z.ai", "/api/coding/paas/v4/chat/completions", "openai", "zai"),
+    ("api.z.ai", "/api/paas/v4/chat/completions", "openai", "zai"),
     # Cline OAuth (routes through api.cline.bot, not directly to Anthropic)
     # Uses Anthropic message format with OpenRouter-style model IDs.
     ("api.cline.bot", "/v1/messages", "anthropic", "cline"),
-
+    # GitHub Copilot chat completions (OpenAI-compatible format)
+    ("api.individual.githubcopilot.com", "/chat/completions", "openai", "copilot"),
+    ("api.githubcopilot.com", "/chat/completions", "openai", "copilot"),
     # OpenAI API — source left as None so detectSource can identify the tool
     # from headers/system prompts (opencode, aider, etc.)
     ("api.openai.com", "/v1/responses", "openai", None),
@@ -89,6 +95,14 @@ def _detect_api_format(path: str) -> str:
     if "/v1/messages" in path:
         return "anthropic-messages"
     return "unknown"
+
+
+def _resolve_session_id(flow: http.HTTPFlow):
+    """Resolve grouping session ID with env override precedence."""
+    if CONTEXT_LENS_SESSION_ID:
+        return CONTEXT_LENS_SESSION_ID
+
+    return (flow.request.headers.get("X-Claude-Code-Session-Id") or "").strip() or None
 
 
 def _parse_sse_response(text: str) -> str:
@@ -171,7 +185,7 @@ def response(flow: http.HTTPFlow):
         "responseBody": response_body,
         "responseIsStreaming": response_is_streaming,
         "responseBytes": len(flow.response.raw_content),
-        "sessionId": CONTEXT_LENS_SESSION_ID or None,
+        "sessionId": _resolve_session_id(flow),
         "timings": {
             "send_ms": 0,
             "wait_ms": 0,

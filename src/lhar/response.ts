@@ -78,7 +78,13 @@ export function parseResponseUsage(responseData: any): ParsedResponseUsage {
     result.outputTokens = u.output_tokens || u.completion_tokens || 0;
     result.cacheReadTokens = u.cache_read_input_tokens || 0;
     result.cacheWriteTokens = u.cache_creation_input_tokens || 0;
-    result.thinkingTokens = u.thinking_tokens || 0;
+    result.thinkingTokens = u.thinking_tokens || u.reasoning_tokens || 0;
+    if (u.completion_tokens_details?.reasoning_tokens) {
+      result.thinkingTokens = u.completion_tokens_details.reasoning_tokens;
+    }
+    if (u.prompt_tokens_details?.cached_tokens) {
+      result.cacheReadTokens = u.prompt_tokens_details.cached_tokens;
+    }
   }
 
   // Gemini usageMetadata (direct or inside Code Assist wrapper .response)
@@ -167,6 +173,14 @@ function parseStreamingUsage(
         result.inputTokens = parsed.usage.prompt_tokens || result.inputTokens;
         result.outputTokens =
           parsed.usage.completion_tokens || result.outputTokens;
+        result.thinkingTokens =
+          parsed.usage.reasoning_tokens || result.thinkingTokens;
+        if (parsed.usage.completion_tokens_details?.reasoning_tokens) {
+          result.thinkingTokens = parsed.usage.completion_tokens_details.reasoning_tokens;
+        }
+        if (parsed.usage.prompt_tokens_details?.cached_tokens) {
+          result.cacheReadTokens = parsed.usage.prompt_tokens_details.cached_tokens;
+        }
       }
       if (parsed.choices?.[0]?.finish_reason) {
         result.finishReasons = [parsed.choices[0].finish_reason];
