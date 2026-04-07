@@ -26,6 +26,12 @@ export interface ContextLensConfig {
   privacy: {
     level?: "minimal" | "standard" | "full";
   };
+  mitm: {
+    port: number;
+    extraArgs: string[];
+    lensSource: string;
+    lensSessionId: string;
+  };
 }
 
 const DEFAULTS: ContextLensConfig = {
@@ -40,6 +46,12 @@ const DEFAULTS: ContextLensConfig = {
   },
   privacy: {
     level: undefined,
+  },
+  mitm: {
+    port: 8080,
+    extraArgs: [],
+    lensSource: "commandName",
+    lensSessionId: "random",
   },
 };
 
@@ -84,6 +96,9 @@ type RawSection = {
   rehydrate?: unknown;
   no_open?: unknown;
   level?: unknown;
+  extra_args?: unknown;
+  lens_source?: unknown;
+  lens_session_id?: unknown;
 };
 
 function section(value: unknown): RawSection | null {
@@ -95,7 +110,12 @@ function section(value: unknown): RawSection | null {
 function mergeConfig(raw: unknown): ContextLensConfig {
   const cfg = structuredClone(DEFAULTS);
   if (typeof raw !== "object" || raw === null) return cfg;
-  const r = raw as { proxy?: unknown; ui?: unknown; privacy?: unknown };
+  const r = raw as {
+    proxy?: unknown;
+    ui?: unknown;
+    privacy?: unknown;
+    mitm?: unknown;
+  };
 
   const proxy = section(r.proxy);
   if (proxy) {
@@ -122,6 +142,22 @@ function mergeConfig(raw: unknown): ContextLensConfig {
     }
   }
 
+  const mitm = section(r.mitm);
+  if (mitm) {
+    if (typeof mitm.port === "number") cfg.mitm.port = mitm.port;
+    if (Array.isArray(mitm.extra_args)) {
+      cfg.mitm.extraArgs = mitm.extra_args
+        .filter((v) => v !== null && v !== undefined)
+        .map((v) => String(v));
+    }
+    if (typeof mitm.lens_source === "string") {
+      cfg.mitm.lensSource = mitm.lens_source;
+    }
+    if (typeof mitm.lens_session_id === "string") {
+      cfg.mitm.lensSessionId = mitm.lens_session_id;
+    }
+  }
+
   return cfg;
 }
 
@@ -138,6 +174,12 @@ export function exampleConfig(): string {
     "# port = 4040",
     '# redact = "secrets"   # secrets | pii | strict',
     "# rehydrate = false",
+    "",
+    "[mitm]",
+    "# port = 8080",
+    '# extra_args = ["--set", "connection_strategy=lazy"]',
+    '# lens_source = "commandName"   # commandName | auto | <fixed string>',
+    '# lens_session_id = "random"    # random | none | <fixed string>',
     "",
     "[ui]",
     "# port = 4041",

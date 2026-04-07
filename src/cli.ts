@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import {
   CLI_CONSTANTS,
   formatHelpText,
+  getMitmConfig,
   getToolConfig,
   parseCliArgs,
 } from "./cli-utils.js";
@@ -25,6 +26,17 @@ const __dirname = dirname(__filename);
 // Known tool config: env vars for the child process, extra CLI args, server env vars, and whether mitmproxy is needed
 // Note: actual tool config lives in cli-utils.ts so it can be unit-tested without importing this entrypoint.
 
+function resolveLensSource(setting: string, commandName: string): string {
+  if (setting === "commandName") return commandName;
+  if (setting === "auto") return "";
+  return setting; // fixed string
+}
+
+function resolveLensSessionId(setting: string): string {
+  if (setting === "random") return randomBytes(4).toString("hex");
+  if (setting === "none") return "";
+  return setting; // fixed string
+}
 const LOCKFILE = "/tmp/context-lens.lock";
 
 const rawArgs = process.argv.slice(2);
@@ -44,19 +56,24 @@ if (parsedArgs.showVersion) {
 // Load user config — CLI flags take precedence over config file values
 const userConfig = loadConfig();
 
-const privacyLevel = parsedArgs.privacyLevel ?? userConfig.privacy.level;
-if (privacyLevel !== undefined) {
-  process.env.CONTEXT_LENS_PRIVACY = privacyLevel;
+const envKeyToValue: Record<string, string> = {
+  CONTEXT_LENS_PROXY_PORT: String(CLI_CONSTANTS.PROXY_PORT),
+  CONTEXT_LENS_ANALYSIS_PORT: String(CLI_CONSTANTS.UI_PORT),
+  CONTEXT_LENS_ANALYSIS_URL: CLI_CONSTANTS.UI_URL,
+  CONTEXT_LENS_INGEST_URL: CLI_CONSTANTS.UI_URL + "/api/ingest",
+};
+for (const [key, value] of Object.entries(envKeyToValue)) {
+  if (!process.env[key]) process.env[key] = value;
 }
 
-const redactPreset = parsedArgs.redactPreset ?? userConfig.proxy.redact;
-if (redactPreset !== undefined) {
-  process.env.CONTEXT_LENS_REDACT = redactPreset;
-}
-
-const rehydrate = parsedArgs.rehydrate ?? userConfig.proxy.rehydrate;
-if (rehydrate) {
-  process.env.CONTEXT_LENS_REHYDRATE = "1";
+const envOverrides: Record<string, string | undefined> = {
+  CONTEXT_LENS_PRIVACY: parsedArgs.privacyLevel ?? userConfig.privacy.level,
+  CONTEXT_LENS_REDACT: parsedArgs.redactPreset ?? userConfig.proxy.redact,
+  CONTEXT_LENS_REHYDRATE:
+    (parsedArgs.rehydrate ?? userConfig.proxy.rehydrate) ? "1" : undefined,
+};
+for (const [key, value] of Object.entries(envOverrides)) {
+  if (value !== undefined) process.env[key] = value;
 }
 if (
   !parsedArgs.noUpdateCheck &&
@@ -76,7 +93,7 @@ if (parsedArgs.commandName === "analyze") {
   void runBackgroundCommand(parsedArgs.commandArguments, parsedArgs.noUi).then(
     (exitCode) => process.exit(exitCode),
   );
-} else if (!parsedArgs.commandName) {
+} else if (!parsedArgs.commandName && !parsedArgs.useMitm) {
   // Warn if PI_CODING_AGENT_DIR is set in the environment but no command was
   // given. The user likely expected this to launch pi — point them to the
   // correct invocation before dropping into standalone mode.
@@ -112,7 +129,7 @@ if (parsedArgs.commandName === "analyze") {
       stdio: "inherit",
       env: {
         ...process.env,
-        CONTEXT_LENS_ANALYSIS_URL: "http://localhost:4041",
+        CONTEXT_LENS_ANALYSIS_URL: CLI_CONSTANTS.UI_URL,
       },
     });
     const analysis = spawn("node", [analysisPath], {
@@ -132,27 +149,35 @@ if (parsedArgs.commandName === "analyze") {
     process.stdin.resume();
   }
 } else {
-  const commandName = parsedArgs.commandName;
+  const commandName = parsedArgs.commandName ?? "";
   const commandArguments = parsedArgs.commandArguments;
   const noOpen = parsedArgs.noOpen || userConfig.ui.noOpen;
   const noUi = parsedArgs.noUi;
   const useMitm = parsedArgs.useMitm;
 
-  // Get tool-specific config, with optional mitmproxy override for pi
+  const mitmConfig = getMitmConfig();
   let toolConfig = getToolConfig(commandName);
-  if (useMitm && commandName === "pi") {
+  if (useMitm || toolConfig.needsMitm) {
+    // if mitm is specified on the CLI or the tool always requires mitm we replace the normal reverse_proxy/forced provider urls with forward proxy redirection.
     toolConfig = {
       ...toolConfig,
       childEnv: {
-        https_proxy: `http://localhost:${CLI_CONSTANTS.MITM_PORT}`,
-        SSL_CERT_FILE: "", // filled in below with mitmproxy CA cert path
+        https_proxy: mitmConfig.proxyUrl,
+        NPM_CONFIG_HTTPS_PROXY: mitmConfig.proxyUrl,
+        WSS_PROXY: mitmConfig.proxyUrl,
+
+        //these are all filled in with the CA cert path
+        SSL_CERT_FILE: "[CA_CERT_PATH]",
+        NODE_EXTRA_CA_CERTS: "[CA_CERT_PATH]",
+        REQUESTS_CA_BUNDLE: "[CA_CERT_PATH]",
       },
       needsMitm: true,
     };
   }
+
   if (noUi && toolConfig.needsMitm) {
     console.error(
-      "Error: --no-ui is not supported for this command because mitm capture requires the analysis ingest API on :4041.",
+      `Error: --no-ui is not supported for this command because mitm capture requires the analysis ingest API on :${CLI_CONSTANTS.UI_PORT}.`,
     );
     process.exit(1);
   }
@@ -160,10 +185,13 @@ if (parsedArgs.commandName === "analyze") {
   // Check if proxy is already running
   function isProxyRunning(): Promise<boolean> {
     return new Promise((resolve) => {
-      const socket = net.connect({ port: 4040, host: "localhost" }, () => {
-        socket.end();
-        resolve(true);
-      });
+      const socket = net.connect(
+        { port: CLI_CONSTANTS.PROXY_PORT, host: "localhost" },
+        () => {
+          socket.end();
+          resolve(true);
+        },
+      );
       socket.on("error", () => resolve(false));
       socket.setTimeout(1000, () => {
         socket.destroy();
@@ -246,10 +274,13 @@ if (parsedArgs.commandName === "analyze") {
   // Check if analysis server is already running
   function isAnalysisRunning(): Promise<boolean> {
     return new Promise((resolve) => {
-      const socket = net.connect({ port: 4041, host: "localhost" }, () => {
-        socket.end();
-        resolve(true);
-      });
+      const socket = net.connect(
+        { port: CLI_CONSTANTS.UI_PORT, host: "localhost" },
+        () => {
+          socket.end();
+          resolve(true);
+        },
+      );
       socket.on("error", () => resolve(false));
       socket.setTimeout(1000, () => {
         socket.destroy();
@@ -288,7 +319,7 @@ if (parsedArgs.commandName === "analyze") {
       ...toolConfig.serverEnv,
       ...process.env,
       CONTEXT_LENS_CLI: "1",
-      CONTEXT_LENS_ANALYSIS_URL: "http://localhost:4041",
+      CONTEXT_LENS_ANALYSIS_URL: CLI_CONSTANTS.UI_URL,
     };
 
     // Start proxy
@@ -383,7 +414,7 @@ if (parsedArgs.commandName === "analyze") {
     // Open browser after a short delay (only when starting new servers)
     if (!noOpen && requiresAnalysis) {
       setTimeout(() => {
-        openBrowser("http://localhost:4041");
+        openBrowser(CLI_CONSTANTS.UI_URL);
       }, 1000);
     }
 
@@ -400,11 +431,10 @@ if (parsedArgs.commandName === "analyze") {
       return;
     }
 
-    const addonPath = CLI_CONSTANTS.MITM_ADDON_PATH;
+    const addonPath = mitmConfig.addonPath;
     console.log(
       "🔒 Starting mitmproxy (forward proxy for HTTPS interception)...",
     );
-
     mitmProcess = spawn(
       "mitmdump",
       [
@@ -412,43 +442,44 @@ if (parsedArgs.commandName === "analyze") {
         addonPath,
         "--quiet",
         "--listen-port",
-        String(CLI_CONSTANTS.MITM_PORT),
+        String(mitmConfig.port),
+        ...mitmConfig.extraArgs,
       ],
       {
         stdio: ["ignore", "pipe", "pipe"],
         env: {
           ...process.env,
-          CONTEXT_LENS_SOURCE: commandName,
-          CONTEXT_LENS_SESSION_ID: randomBytes(4).toString("hex"),
+          CONTEXT_LENS_SOURCE: resolveLensSource(
+            mitmConfig.lensSource,
+            commandName,
+          ),
+          CONTEXT_LENS_SESSION_ID: resolveLensSessionId(
+            mitmConfig.lensSessionId,
+          ),
         },
       },
     );
-
     mitmProcess.on("error", (err) => {
       console.error("Failed to start mitmproxy:", err.message);
       console.error("Install it: pipx install mitmproxy");
       cleanup(1);
     });
-
     mitmProcess.on("exit", (code) => {
       if (!mitmReady) {
         console.error("mitmproxy exited unexpectedly");
         cleanup(code || 1);
       }
     });
-
     // Poll until mitmproxy is accepting connections
     const pollMitm = setInterval(() => {
       const socket = net.connect(
-        { port: CLI_CONSTANTS.MITM_PORT, host: "localhost" },
+        { port: mitmConfig.port, host: "localhost" },
         () => {
           socket.end();
           if (!mitmReady) {
             mitmReady = true;
             clearInterval(pollMitm);
-            console.log(
-              `🔒 mitmproxy listening on port ${CLI_CONSTANTS.MITM_PORT}`,
-            );
+            console.log(`🔒 mitmproxy listening on port ${mitmConfig.port}`);
             startChild();
           }
         },
@@ -457,12 +488,14 @@ if (parsedArgs.commandName === "analyze") {
       socket.setTimeout(500, () => socket.destroy());
     }, 200);
   }
-
   // Start the child command
   function startChild(): void {
     // Inject extra args (e.g. codex -c chatgpt_base_url=...) before user args
+
     const allArgs = [...toolConfig.extraArgs, ...commandArguments];
-    console.log(`\n🚀 Launching: ${commandName} ${allArgs.join(" ")}\n`);
+    if (commandName) {
+      console.log(`\n🚀 Launching: ${commandName} ${allArgs.join(" ")}\n`);
+    }
 
     const childEnv = {
       ...process.env,
@@ -496,7 +529,7 @@ if (parsedArgs.commandName === "analyze") {
         const val = childEnv[key];
         if (typeof val !== "string") continue;
         // Match any value that points at our proxy and ends with /<source> or /<source>/
-        const proxyBase = `http://localhost:4040/`;
+        const proxyBase = `${CLI_CONSTANTS.PROXY_URL}/`;
         if (!val.startsWith(proxyBase)) continue;
         const hadTrailingSlash = val.endsWith("/");
         const after = val.slice(proxyBase.length).replace(/\/$/, "");
@@ -509,14 +542,13 @@ if (parsedArgs.commandName === "analyze") {
     }
 
     // Fill in mitmproxy CA cert path for tools that need HTTPS interception.
-    // SSL_CERT_FILE is used by OpenSSL/curl (native binaries).
-    // NODE_EXTRA_CA_CERTS is used by Node.js processes (e.g. Cline).
+    // Any childEnv value set to "[CA_CERT_PATH]" is replaced with the actual path.
     if (toolConfig.needsMitm) {
       const certPath = join(homedir(), ".mitmproxy", "mitmproxy-ca-cert.pem");
       if (fs.existsSync(certPath)) {
-        if (childEnv.SSL_CERT_FILE === "") childEnv.SSL_CERT_FILE = certPath;
-        if (childEnv.NODE_EXTRA_CA_CERTS === "")
-          childEnv.NODE_EXTRA_CA_CERTS = certPath;
+        for (const key of Object.keys(childEnv)) {
+          if (childEnv[key] === "[CA_CERT_PATH]") childEnv[key] = certPath;
+        }
         // On macOS, Codex is compiled with rustls + native-roots, which reads
         // the system Keychain and ignores SSL_CERT_FILE entirely. If the cert
         // is not trusted in the Keychain, Codex cannot connect through mitmproxy.
@@ -537,6 +569,13 @@ if (parsedArgs.commandName === "analyze") {
       );
     }
 
+    if (!commandName) {
+      //we only get here when the user wants mitm but didn't specify a command
+      console.log("Press Ctrl+C to stop.");
+      process.on("SIGINT", () => cleanup(0));
+      process.on("SIGTERM", () => cleanup(0));
+      return;
+    }
     // For bryti: if dist/cli.js exists in cwd, use it directly (dev mode).
     // Otherwise fall back to the globally installed bryti binary.
     let spawnCommand = commandName;
@@ -590,7 +629,7 @@ if (parsedArgs.commandName === "analyze") {
       setTimeout(() => {
         if (cleanupDidRun) return;
         const req = http.get(
-          "http://localhost:4041/api/requests?summary=true",
+          `${CLI_CONSTANTS.UI_URL}/api/requests?summary=true`,
           { timeout: 2000 },
           (res) => {
             let body = "";
@@ -610,11 +649,11 @@ if (parsedArgs.commandName === "analyze") {
                   );
                   if (toolConfig.needsMitm) {
                     console.error(
-                      `   Check that ${commandName} is routing through mitmproxy (https_proxy=http://localhost:8080).\n`,
+                      `   Check that ${commandName} is routing through mitmproxy (https_proxy=${mitmConfig.proxyUrl}).\n`,
                     );
                   } else {
                     console.error(
-                      `   Check that ${commandName} is using the proxy URL (http://localhost:4040).\n`,
+                      `   Check that ${commandName} is using the proxy URL (${CLI_CONSTANTS.PROXY_URL}).\n`,
                     );
                   }
                 }
@@ -1239,7 +1278,7 @@ async function backgroundStart(noUi: boolean): Promise<number> {
   const proxyEnv: Record<string, string> = {
     ...(process.env as Record<string, string>),
     CONTEXT_LENS_CLI: "1",
-    ...(noUi ? {} : { CONTEXT_LENS_ANALYSIS_URL: "http://localhost:4041" }),
+    ...(noUi ? {} : { CONTEXT_LENS_ANALYSIS_URL: CLI_CONSTANTS.UI_URL }),
   };
   const proxy = spawn("node", [proxyPath], {
     stdio: "ignore",
@@ -1284,10 +1323,10 @@ async function backgroundStart(noUi: boolean): Promise<number> {
   });
 
   console.log("Background services started.");
-  console.log(`  proxy: http://localhost:4040 (pid ${proxyPid})`);
+  console.log(`  proxy: ${CLI_CONSTANTS.PROXY_URL} (pid ${proxyPid})`);
   if (analysisPid != null) {
     console.log(
-      `  analysis/web UI: http://localhost:4041 (pid ${analysisPid})`,
+      `  analysis/web UI: ${CLI_CONSTANTS.UI_URL} (pid ${analysisPid})`,
     );
   } else {
     console.log("  analysis/web UI: disabled (--no-ui)");
@@ -1438,16 +1477,16 @@ async function runDoctor(): Promise<number> {
 
   report("node", true, process.version);
 
-  const proxyListening = await isPortListening(4040);
+  const proxyListening = await isPortListening(CLI_CONSTANTS.PROXY_PORT);
   report(
-    "proxy port :4040",
+    `proxy port :${CLI_CONSTANTS.PROXY_PORT}`,
     true,
     proxyListening ? "already running" : "available/not running",
   );
 
-  const analysisListening = await isPortListening(4041);
+  const analysisListening = await isPortListening(CLI_CONSTANTS.UI_PORT);
   report(
-    "analysis port :4041",
+    `analysis port :${CLI_CONSTANTS.UI_PORT}`,
     true,
     analysisListening ? "already running" : "available/not running",
   );

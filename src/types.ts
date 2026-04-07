@@ -333,6 +333,23 @@ export type PrivacyLevel = "minimal" | "standard" | "full";
 
 // --- CLI types ---
 
+export interface MitmConfig {
+  port: number;
+  proxyUrl: string;
+  extraArgs: string[];
+  addonPath: string;
+  /** Controls CONTEXT_LENS_SOURCE env var for the mitm addon.
+   *  "commandName" = use the CLI command name (current behaviour).
+   *  "auto"        = set to "" (let the addon auto-detect).
+   *  Any other string = use that literal value. */
+  lensSource: string;
+  /** Controls CONTEXT_LENS_SESSION_ID env var for the mitm addon.
+   *  "random" = generate a random hex string (current behaviour).
+   *  "none"   = set to "".
+   *  Any other string = use that literal value. */
+  lensSessionId: string;
+}
+
 export interface ToolConfig {
   childEnv: Record<string, string>;
   extraArgs: string[];

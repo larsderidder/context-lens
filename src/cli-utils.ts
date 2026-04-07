@@ -1,16 +1,22 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { ToolConfig } from "./types.js";
+import { loadConfig } from "./config.js";
+import type { MitmConfig, ToolConfig } from "./types.js";
 import { VERSION } from "./version.generated.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 // Known tool config: env vars for the child process, extra CLI args, server env vars, and whether mitmproxy is needed
-const PROXY_URL = "http://localhost:4040";
-const MITM_PORT = 8080;
-const MITM_PROXY_URL = `http://localhost:${MITM_PORT}`;
+const config = loadConfig();
+
+const PROXY_PORT = Number.isNaN(config.proxy.port) ? 4040 : config.proxy.port;
+const PROXY_URL = `http://localhost:${PROXY_PORT}`;
+
+const UI_PORT = Number.isNaN(config.ui.port) ? 4041 : config.ui.port;
+const UI_URL = `http://localhost:${UI_PORT}`;
+
 const PI_AGENT_DIR_PREFIX = "/tmp/context-lens-pi-agent-";
 const BRYTI_DATA_DIR_PREFIX = "/tmp/context-lens-bryti-";
 const COMMAND_ALIASES: Record<string, string> = {
@@ -19,6 +25,7 @@ const COMMAND_ALIASES: Record<string, string> = {
   gm: "gemini",
   oc: "opencode",
 };
+
 const KNOWN_PRIVACY_LEVELS = ["minimal", "standard", "full"] as const;
 type PrivacyLevel = (typeof KNOWN_PRIVACY_LEVELS)[number];
 
@@ -63,10 +70,7 @@ const TOOL_CONFIG: Record<string, ToolConfig> = {
     // We use mitmproxy as a forward HTTPS proxy to intercept traffic.
     // The mitmproxy addon captures requests and POSTs them to the
     // analysis server's ingest API.
-    childEnv: {
-      https_proxy: MITM_PROXY_URL,
-      SSL_CERT_FILE: "", // filled in by cli.ts with mitmproxy CA cert path
-    },
+    childEnv: {},
     extraArgs: [],
     serverEnv: {},
     needsMitm: true,
@@ -79,11 +83,7 @@ const TOOL_CONFIG: Record<string, ToolConfig> = {
     //
     // Cline is a Node.js process. Node ignores SSL_CERT_FILE and requires
     // NODE_EXTRA_CA_CERTS to trust the mitmproxy CA certificate.
-    childEnv: {
-      https_proxy: MITM_PROXY_URL,
-      SSL_CERT_FILE: "", // for any native/curl components
-      NODE_EXTRA_CA_CERTS: "", // filled in by cli.ts with mitmproxy CA cert path
-    },
+    childEnv: {},
     extraArgs: [],
     serverEnv: {},
     needsMitm: true,
@@ -115,10 +115,7 @@ const TOOL_CONFIG: Record<string, ToolConfig> = {
     // and cannot be redirected via base URL env vars alone when using multiple
     // providers simultaneously. We use mitmproxy as a forward HTTPS proxy so
     // all provider traffic is captured regardless of which model is active.
-    childEnv: {
-      https_proxy: MITM_PROXY_URL,
-      SSL_CERT_FILE: "", // filled in by cli.ts with mitmproxy CA cert path
-    },
+    childEnv: {},
     extraArgs: [],
     serverEnv: {},
     needsMitm: true,
@@ -367,10 +364,10 @@ export function formatHelpText(): string {
     "  -h, --help             Show this help text",
     "  -v, --version          Show version",
     "  --privacy <level>      Set privacy level: minimal|standard|full",
-    "  --no-open              Don't auto-open http://localhost:4041",
+    `  --no-open              Don't auto-open ${UI_URL}`,
     "  --no-ui                Run proxy only (no analysis/web UI server)",
     "  --no-update-check      Skip npm update check for this run",
-    "  --mitm                 Use mitmproxy for interception instead of base URL override (pi only)",
+    "  --mitm                 Use mitmproxy for interception instead of base URL override (only recommend forcing for Pi)",
     "  --redact[=preset]      Strip sensitive data before capture (experimental). Preset: secrets|pii|strict (default: secrets)",
     "  --rehydrate            With --redact: restore original values in responses (off by default)",
     "",
@@ -411,12 +408,22 @@ export function formatHelpText(): string {
 // Exported for tests (and to keep cli.ts smaller).
 export const CLI_CONSTANTS = {
   PROXY_URL,
-  MITM_PORT,
-  MITM_PROXY_URL,
+  PROXY_PORT,
+  UI_PORT,
+  UI_URL,
   PI_AGENT_DIR_PREFIX,
   BRYTI_DATA_DIR_PREFIX,
   COMMAND_ALIASES,
   KNOWN_PRIVACY_LEVELS,
-  // Resolved relative to compiled output (dist/ or dist-test/), matching cli.ts behavior.
-  MITM_ADDON_PATH: join(__dirname, "..", "mitm_addon.py"),
 } as const;
+export function getMitmConfig(): MitmConfig {
+  const port = Number.isNaN(config.mitm.port) ? 8080 : config.mitm.port;
+  return {
+    port,
+    proxyUrl: `http://localhost:${port}`,
+    extraArgs: config.mitm.extraArgs,
+    addonPath: join(__dirname, "..", "mitm_addon.py"),
+    lensSource: config.mitm.lensSource,
+    lensSessionId: config.mitm.lensSessionId,
+  };
+}

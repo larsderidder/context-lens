@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import {
   CLI_CONSTANTS,
   formatHelpText,
+  getMitmConfig,
   getToolConfig,
   parseCliArgs,
   resolveCommandAlias,
@@ -31,9 +32,9 @@ describe("cli-utils", () => {
     );
 
     const codex = getToolConfig("codex");
+    const mitmCfg = getMitmConfig();
     assert.equal(codex.needsMitm, true);
-    assert.equal(codex.childEnv.https_proxy, CLI_CONSTANTS.MITM_PROXY_URL);
-    assert.equal(codex.childEnv.SSL_CERT_FILE, ""); // filled in by cli.ts
+    assert.deepEqual(codex.childEnv, {});
     assert.deepEqual(codex.extraArgs, []);
 
     const pi = getToolConfig("pi");
@@ -111,5 +112,15 @@ describe("cli-utils", () => {
     assert.match(help, /background <start\|stop\|status>/);
     assert.match(help, /cc -> claude/);
     assert.match(help, /cpi/);
+  });
+
+  it("returns default mitm config", () => {
+    const mitm = getMitmConfig();
+    assert.equal(mitm.port, 8080);
+    assert.equal(mitm.proxyUrl, "http://localhost:8080");
+    assert.deepEqual(mitm.extraArgs, []);
+    assert.equal(mitm.lensSource, "commandName");
+    assert.equal(mitm.lensSessionId, "random");
+    assert.ok(mitm.addonPath.endsWith("mitm_addon.py"));
   });
 });
