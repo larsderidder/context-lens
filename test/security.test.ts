@@ -524,5 +524,578 @@ describe("scanSecurity", () => {
       );
       assert.equal(credAlerts.length, 0, "should not scan system messages");
     });
+
+    // -----------------------------------------------------------------------
+    // New vendor-specific patterns
+    //
+    // Each block tests: detection fires, value is redacted in the match,
+    // allowlist suppresses known FPs, and tool results are also scanned.
+    // Patterns and test values ported from gitleaks rules (MIT):
+    // https://github.com/gitleaks/gitleaks/tree/master/cmd/generate/config/rules
+    // -----------------------------------------------------------------------
+
+    describe("GCP API key (credential_gcp_api_key)", () => {
+      // AIza + exactly 35 word/hyphen chars = 39 chars total
+      const key = "AIzaSyC1234567890abcdefghijklmnopqrstuv";
+
+      it("detects GCP API key in user message", () => {
+        const ci = makeContextInfo([
+          msg("user", `Using key ${key} for Gemini`),
+        ]);
+        const result = scanSecurity(ci);
+        assert.ok(
+          result.alerts.some((a) => a.pattern === "credential_gcp_api_key"),
+          "should detect GCP API key",
+        );
+      });
+
+      it("redacts the key value in the alert match", () => {
+        const ci = makeContextInfo([msg("user", `apiKey=${key}`)]);
+        const result = scanSecurity(ci);
+        const alert = result.alerts.find(
+          (a) => a.pattern === "credential_gcp_api_key",
+        );
+        assert.ok(alert, "alert should exist");
+        assert.ok(
+          alert!.match.includes("redacted"),
+          "match should say redacted",
+        );
+        assert.ok(
+          !alert!.match.includes("AIza"),
+          "match should not expose key",
+        );
+      });
+
+      it("detects GCP key in tool result", () => {
+        const ci = makeContextInfo([
+          toolUseMsg("read_file"),
+          toolResultMsg(`GOOGLE_API_KEY=${key}`),
+        ]);
+        const result = scanSecurity(ci);
+        assert.ok(
+          result.alerts.some((a) => a.pattern === "credential_gcp_api_key"),
+          "should detect key in tool result",
+        );
+      });
+
+      it("does not flag all-same-char placeholder (AIzaaaa...)", () => {
+        // gitleaks fps: placeholder value with no entropy
+        const ci = makeContextInfo([
+          msg("user", 'apiKey: "AIzaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"'),
+        ]);
+        const result = scanSecurity(ci);
+        assert.ok(
+          !result.alerts.some((a) => a.pattern === "credential_gcp_api_key"),
+          "should not flag placeholder key",
+        );
+      });
+    });
+
+    describe("GCP service account (credential_gcp_service_account)", () => {
+      it('detects \"type\": \"service_account\" in tool result', () => {
+        const ci = makeContextInfo([
+          toolUseMsg("read_file"),
+          toolResultMsg(
+            '{"type": "service_account", "project_id": "my-project", "private_key_id": "abc"}',
+          ),
+        ]);
+        const result = scanSecurity(ci);
+        assert.ok(
+          result.alerts.some(
+            (a) => a.pattern === "credential_gcp_service_account",
+          ),
+          "should detect service account JSON",
+        );
+      });
+
+      it("does not flag other type fields", () => {
+        const ci = makeContextInfo([
+          msg("user", '{"type": "oauth2_client", "client_id": "123"}'),
+        ]);
+        const result = scanSecurity(ci);
+        assert.ok(
+          !result.alerts.some(
+            (a) => a.pattern === "credential_gcp_service_account",
+          ),
+          "should not flag unrelated type field",
+        );
+      });
+    });
+
+    describe("GitLab PAT (credential_gitlab)", () => {
+      const token = "glpat-abcdefghij1234567890";
+
+      it("detects glpat- token in user message", () => {
+        const ci = makeContextInfo([
+          msg("user", `export GITLAB_TOKEN=${token}`),
+        ]);
+        const result = scanSecurity(ci);
+        assert.ok(
+          result.alerts.some((a) => a.pattern === "credential_gitlab"),
+          "should detect GitLab PAT",
+        );
+      });
+
+      it("redacts the token value", () => {
+        const ci = makeContextInfo([msg("user", `token: ${token}`)]);
+        const result = scanSecurity(ci);
+        const alert = result.alerts.find(
+          (a) => a.pattern === "credential_gitlab",
+        );
+        assert.ok(alert, "alert should exist");
+        assert.ok(
+          alert!.match.includes("redacted"),
+          "match should say redacted",
+        );
+        assert.ok(
+          !alert!.match.includes("glpat"),
+          "match should not expose token",
+        );
+      });
+
+      it("does not flag truncated glpat- token (too short)", () => {
+        const ci = makeContextInfo([msg("user", "token=glpat-tooshort")]);
+        const result = scanSecurity(ci);
+        assert.ok(
+          !result.alerts.some((a) => a.pattern === "credential_gitlab"),
+          "should not flag short glpat token",
+        );
+      });
+    });
+
+    describe("JWT (credential_jwt)", () => {
+      // Real JWT from gitleaks test suite (gitleaks:allow)
+      const jwt =
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9" +
+        ".eyJzdWIiOiJ1c2VybmFtZTpib2IifQ" +
+        ".HcfCW67Uda-0gz54ZWTqmtgJnZeNem0Q757eTa9EZuw";
+
+      it("detects JWT in user message", () => {
+        const ci = makeContextInfo([
+          msg("user", `Authorization: Bearer ${jwt}`),
+        ]);
+        const result = scanSecurity(ci);
+        assert.ok(
+          result.alerts.some((a) => a.pattern === "credential_jwt"),
+          "should detect JWT",
+        );
+      });
+
+      it("detects JWT in tool result", () => {
+        const ci = makeContextInfo([
+          toolUseMsg("http_request"),
+          toolResultMsg(`{"access_token": "${jwt}", "expires_in": 3600}`),
+        ]);
+        const result = scanSecurity(ci);
+        assert.ok(
+          result.alerts.some((a) => a.pattern === "credential_jwt"),
+          "should detect JWT in tool result",
+        );
+      });
+
+      it("does not flag a plain base64 string", () => {
+        const ci = makeContextInfo([
+          msg("user", "The encoded value is aGVsbG8gd29ybGQ="),
+        ]);
+        const result = scanSecurity(ci);
+        assert.ok(
+          !result.alerts.some((a) => a.pattern === "credential_jwt"),
+          "should not flag plain base64",
+        );
+      });
+    });
+
+    describe("Stripe (credential_stripe)", () => {
+      // tps from gitleaks stripe.go — key split to avoid push protection false positives
+      const liveKey =
+        "sk_live_" + "FAKE000000000000000000000000000000000000000000";
+
+      it("detects sk_live_ key in user message", () => {
+        const ci = makeContextInfo([msg("user", `STRIPE_KEY=${liveKey}`)]);
+        const result = scanSecurity(ci);
+        assert.ok(
+          result.alerts.some((a) => a.pattern === "credential_stripe"),
+          "should detect Stripe key",
+        );
+      });
+
+      it("detects rk_prod_ key in tool result", () => {
+        const rk =
+          "rk_prod_" + "FAKE000000000000000000000000000000000000000000";
+        const ci = makeContextInfo([
+          toolUseMsg("read_file"),
+          toolResultMsg(`STRIPE_RESTRICTED_KEY=${rk}`),
+        ]);
+        const result = scanSecurity(ci);
+        assert.ok(
+          result.alerts.some((a) => a.pattern === "credential_stripe"),
+          "should detect Stripe restricted key",
+        );
+      });
+
+      it("does not flag task_test_ prefix", () => {
+        // fps from gitleaks stripe.go
+        const ci = makeContextInfo([
+          msg("user", 'token := "task_test_abcdefghij1234567890"'),
+        ]);
+        const result = scanSecurity(ci);
+        assert.ok(
+          !result.alerts.some((a) => a.pattern === "credential_stripe"),
+          "should not flag task_test_ prefix",
+        );
+      });
+    });
+
+    describe("Slack (credential_slack)", () => {
+      it("detects xoxb- bot token", () => {
+        // tps from gitleaks slack.go
+        const ci = makeContextInfo([
+          msg(
+            "user",
+            "bot_token=" +
+              "xoxb-" +
+              "12345678901-1234567890123-FaKeCoNtExTlEnSxYz000000",
+          ),
+        ]);
+        const result = scanSecurity(ci);
+        assert.ok(
+          result.alerts.some((a) => a.pattern === "credential_slack"),
+          "should detect Slack bot token",
+        );
+      });
+
+      it("detects xoxp- user token", () => {
+        const ci = makeContextInfo([
+          msg(
+            "user",
+            "xoxp-" +
+              "1234567890-1234567890-1234567890-FaKeCoNtExTlEnSToKeNxYzAbCdEf",
+          ),
+        ]);
+        const result = scanSecurity(ci);
+        assert.ok(
+          result.alerts.some((a) => a.pattern === "credential_slack"),
+          "should detect Slack user token",
+        );
+      });
+
+      it("detects Slack webhook URL in tool result", () => {
+        const ci = makeContextInfo([
+          toolUseMsg("read_file"),
+          toolResultMsg(
+            "SLACK_WEBHOOK=https://hooks.slack.com/services/" +
+              "TFAKE0000000000000000000000000000000000000000000",
+          ),
+        ]);
+        const result = scanSecurity(ci);
+        assert.ok(
+          result.alerts.some((a) => a.pattern === "credential_slack"),
+          "should detect Slack webhook",
+        );
+      });
+
+      it("does not flag all-x placeholder", () => {
+        // fps from gitleaks slack.go
+        const ci = makeContextInfo([
+          msg("user", "token=xoxb-xxxxxxxxx-xxxxxxxxxx-xxxxxxxxxxxx"),
+        ]);
+        const result = scanSecurity(ci);
+        assert.ok(
+          !result.alerts.some((a) => a.pattern === "credential_slack"),
+          "should not flag all-x placeholder",
+        );
+      });
+
+      it("does not flag xoxp- with too-short first segment", () => {
+        const ci = makeContextInfo([msg("user", '"token": "xoxp-1234567890"')]);
+        const result = scanSecurity(ci);
+        assert.ok(
+          !result.alerts.some((a) => a.pattern === "credential_slack"),
+          "should not flag malformed xoxp token",
+        );
+      });
+    });
+
+    describe("HuggingFace (credential_huggingface)", () => {
+      it("detects hf_ access token", () => {
+        // tps from gitleaks huggingface.go
+        const ci = makeContextInfo([
+          msg(
+            "user",
+            "huggingface-cli login --token " +
+              "hf_" +
+              "FaKeToKeNfOrTeStPuRpOsEsOnLyAbCdXy",
+          ),
+        ]);
+        const result = scanSecurity(ci);
+        assert.ok(
+          result.alerts.some((a) => a.pattern === "credential_huggingface"),
+          "should detect HuggingFace token",
+        );
+      });
+
+      it("detects hf_ token in tool result", () => {
+        const ci = makeContextInfo([
+          toolUseMsg("read_file"),
+          toolResultMsg(
+            "HF_TOKEN=" + "hf_" + "FaKeToKeNfOrTeStPuRpOsEsOnLyAbCdXy",
+          ),
+        ]);
+        const result = scanSecurity(ci);
+        assert.ok(
+          result.alerts.some((a) => a.pattern === "credential_huggingface"),
+          "should detect HuggingFace token in tool result",
+        );
+      });
+
+      it("does not flag all-x placeholder", () => {
+        // fps from gitleaks huggingface.go
+        const ci = makeContextInfo([
+          msg(
+            "user",
+            "HUGGINGFACEHUB_API_TOKEN=hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          ),
+        ]);
+        const result = scanSecurity(ci);
+        assert.ok(
+          !result.alerts.some((a) => a.pattern === "credential_huggingface"),
+          "should not flag all-x placeholder",
+        );
+      });
+
+      it("does not flag hf_ in ObjC method name", () => {
+        // fps from gitleaks huggingface.go
+        const ci = makeContextInfo([
+          msg(
+            "user",
+            "- (id)hf_requiredCharacteristicTypesForDisplayMetadata;",
+          ),
+        ]);
+        const result = scanSecurity(ci);
+        assert.ok(
+          !result.alerts.some((a) => a.pattern === "credential_huggingface"),
+          "should not flag hf_ in method name",
+        );
+      });
+    });
+
+    describe("Databricks (credential_databricks)", () => {
+      it("detects dapi token in user message", () => {
+        // tps from gitleaks databricks.go
+        const ci = makeContextInfo([
+          msg(
+            "user",
+            "token = " + "dapi" + "f13ac4b49d1cb31f69f678e39602e381-2",
+          ),
+        ]);
+        const result = scanSecurity(ci);
+        assert.ok(
+          result.alerts.some((a) => a.pattern === "credential_databricks"),
+          "should detect Databricks token",
+        );
+      });
+
+      it("detects dapi token in tool result", () => {
+        const ci = makeContextInfo([
+          toolUseMsg("read_file"),
+          toolResultMsg(
+            "DATABRICKS_TOKEN=" + "dapi" + "1234567890abcdef1234567890abcdef",
+          ),
+        ]);
+        const result = scanSecurity(ci);
+        assert.ok(
+          result.alerts.some((a) => a.pattern === "credential_databricks"),
+          "should detect Databricks token in tool result",
+        );
+      });
+
+      it("does not flag dapi with non-hex chars in body", () => {
+        // fps from gitleaks databricks.go
+        const ci = makeContextInfo([
+          msg("user", "DATABRICKS_TOKEN=dapi123456789012345678a9bc01234defg5"),
+        ]);
+        const result = scanSecurity(ci);
+        assert.ok(
+          !result.alerts.some((a) => a.pattern === "credential_databricks"),
+          "should not flag invalid dapi token",
+        );
+      });
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Gap 5 + 6 integration tests: entropy gate and new Tier 1 patterns
+// through the full scanSecurity pipeline
+// ---------------------------------------------------------------------------
+
+describe("scanSecurity — gap 5: entropy gate on credential_generic", () => {
+  it("does not flag all-same-digit value (entropy = 0)", () => {
+    const ci = makeContextInfo([
+      msg("user", "api_token=11111111111111111111111"),
+    ]);
+    const result = scanSecurity(ci);
+    assert.ok(
+      !result.alerts.some((a) => a.pattern === "credential_generic"),
+      "should not flag zero-entropy value",
+    );
+  });
+
+  it("does not flag nearly-all-same value (entropy ≈ 0.25)", () => {
+    const ci = makeContextInfo([
+      msg("user", "api_token=aaaa1aaaaaaaaaaaaaaaaaaa"),
+    ]);
+    const result = scanSecurity(ci);
+    assert.ok(
+      !result.alerts.some((a) => a.pattern === "credential_generic"),
+      "should not flag near-zero entropy value",
+    );
+  });
+
+  it("still detects high-entropy generic secret", () => {
+    const ci = makeContextInfo([
+      msg("user", "api_token=xK9mP2nR4qL7vB3c1wZ5yXa8bN"),
+    ]);
+    const result = scanSecurity(ci);
+    assert.ok(
+      result.alerts.some((a) => a.pattern === "credential_generic"),
+      "should detect high-entropy secret",
+    );
+  });
+});
+
+describe("scanSecurity — gap 6: npm, PyPI, Vault, SendGrid", () => {
+  describe("npm (credential_npm)", () => {
+    it("detects npm_ token in user message", () => {
+      const ci = makeContextInfo([
+        msg("user", 'NPM_TOKEN = "npm_abcdefghij1234567890ABCDEF1234567890"'),
+      ]);
+      const result = scanSecurity(ci);
+      assert.ok(
+        result.alerts.some((a) => a.pattern === "credential_npm"),
+        "should detect npm token",
+      );
+    });
+
+    it("detects npm_ token in tool result", () => {
+      const ci = makeContextInfo([
+        toolUseMsg("read_file"),
+        toolResultMsg("NPM_TOKEN=npm_abcdefghij1234567890ABCDEF1234567890"),
+      ]);
+      const result = scanSecurity(ci);
+      assert.ok(
+        result.alerts.some((a) => a.pattern === "credential_npm"),
+        "should detect npm token in tool result",
+      );
+    });
+
+    it("does not flag short npm_ token", () => {
+      const ci = makeContextInfo([msg("user", "npm_tooshort")]);
+      const result = scanSecurity(ci);
+      assert.ok(!result.alerts.some((a) => a.pattern === "credential_npm"));
+    });
+  });
+
+  describe("PyPI (credential_pypi)", () => {
+    const token = "pypi-AgEIcHlwaS5vcmc" + "a1b2c3d4".repeat(8);
+
+    it("detects pypi- token in user message", () => {
+      const ci = makeContextInfo([msg("user", `PYPI_TOKEN=${token}`)]);
+      const result = scanSecurity(ci);
+      assert.ok(
+        result.alerts.some((a) => a.pattern === "credential_pypi"),
+        "should detect PyPI token",
+      );
+    });
+
+    it("detects pypi- token in tool result", () => {
+      const ci = makeContextInfo([
+        toolUseMsg("read_file"),
+        toolResultMsg(`PYPI_TOKEN=${token}`),
+      ]);
+      const result = scanSecurity(ci);
+      assert.ok(
+        result.alerts.some((a) => a.pattern === "credential_pypi"),
+        "should detect PyPI token in tool result",
+      );
+    });
+  });
+
+  describe("HashiCorp Vault (credential_vault)", () => {
+    it("detects hvs. service token", () => {
+      const ci = makeContextInfo([
+        msg(
+          "user",
+          "VAULT_TOKEN=hvs.CAESIP2jTxc9S2K7Z6CtcFWQv7-044m_oSsxnPE1H3nF89l3GiYKHGh2cy5sQmlIZVNyTWJNcDRsYWJpQjlhYjVlb1cQh6PL8wE",
+        ),
+      ]);
+      const result = scanSecurity(ci);
+      assert.ok(
+        result.alerts.some((a) => a.pattern === "credential_vault"),
+        "should detect Vault service token",
+      );
+    });
+
+    it("detects s. legacy token in tool result", () => {
+      const ci = makeContextInfo([
+        toolUseMsg("read_file"),
+        toolResultMsg('vault_api_token = "s.ZC9Ecf4M5g9o34Q6RkzGsj0z"'),
+      ]);
+      const result = scanSecurity(ci);
+      assert.ok(
+        result.alerts.some((a) => a.pattern === "credential_vault"),
+        "should detect Vault legacy token",
+      );
+    });
+
+    it("does not flag s. all-lowercase (low entropy)", () => {
+      const ci = makeContextInfo([msg("user", "s.thisstringisalllowercase")]);
+      const result = scanSecurity(ci);
+      assert.ok(!result.alerts.some((a) => a.pattern === "credential_vault"));
+    });
+
+    it("does not flag hvs. all-x placeholder", () => {
+      const ci = makeContextInfo([
+        msg(
+          "user",
+          "hvs.xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        ),
+      ]);
+      const result = scanSecurity(ci);
+      assert.ok(!result.alerts.some((a) => a.pattern === "credential_vault"));
+    });
+  });
+
+  describe("SendGrid (credential_sendgrid)", () => {
+    const token = "SG." + "aBcDeFgH1234".repeat(5) + "aBcDeF";
+
+    it("detects SG. token in user message", () => {
+      const ci = makeContextInfo([msg("user", `SENDGRID_API_KEY=${token}`)]);
+      const result = scanSecurity(ci);
+      assert.ok(
+        result.alerts.some((a) => a.pattern === "credential_sendgrid"),
+        "should detect SendGrid token",
+      );
+    });
+
+    it("detects SG. token in tool result", () => {
+      const ci = makeContextInfo([
+        toolUseMsg("read_file"),
+        toolResultMsg(`SENDGRID_KEY=${token}`),
+      ]);
+      const result = scanSecurity(ci);
+      assert.ok(
+        result.alerts.some((a) => a.pattern === "credential_sendgrid"),
+        "should detect SendGrid token in tool result",
+      );
+    });
+
+    it("does not flag SG. with too few chars", () => {
+      const ci = makeContextInfo([msg("user", "SG.tooshort")]);
+      const result = scanSecurity(ci);
+      assert.ok(
+        !result.alerts.some((a) => a.pattern === "credential_sendgrid"),
+      );
+    });
   });
 });

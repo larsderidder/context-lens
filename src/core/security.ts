@@ -1,4 +1,4 @@
-import { CREDENTIAL_PATTERNS } from "@contextio/core";
+import { CREDENTIAL_PATTERNS, shannonEntropy } from "@contextio/core";
 
 import type {
   AlertSeverity,
@@ -264,6 +264,21 @@ function scanMessage(
     rule.pattern.lastIndex = 0;
     const m = rule.pattern.exec(content);
     if (m) {
+      // Apply allowlist and entropy gate.
+      const capturedValue = m[1] ?? "";
+      if (rule.allowlist) {
+        const suppressed = rule.allowlist.some((al) => {
+          const target = al.source.startsWith("^") ? capturedValue : m[0];
+          return al.test(target);
+        });
+        if (suppressed) continue;
+      }
+      if (
+        rule.minEntropy !== undefined &&
+        shannonEntropy(capturedValue) < rule.minEntropy
+      ) {
+        continue;
+      }
       const redactedMatch = `[${rule.label} detected — value redacted]`;
       alerts.push({
         messageIndex,
