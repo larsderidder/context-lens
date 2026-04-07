@@ -184,28 +184,59 @@ function parseStreamingUsage(
             parsed.usage.prompt_tokens_details.cached_tokens;
         }
       }
+      // Responses streaming: response.completed/response.created events
+      // carry usage in parsed.response.usage
+      const responsesUsage = parsed.response?.usage;
+      if (responsesUsage) {
+        result.inputTokens =
+          responsesUsage.input_tokens ??
+          responsesUsage.prompt_tokens ??
+          result.inputTokens;
+        result.outputTokens =
+          responsesUsage.output_tokens ??
+          responsesUsage.completion_tokens ??
+          result.outputTokens;
+        result.thinkingTokens =
+          responsesUsage.output_tokens_details?.reasoning_tokens ??
+          responsesUsage.completion_tokens_details?.reasoning_tokens ??
+          responsesUsage.reasoning_tokens ??
+          result.thinkingTokens;
+        result.cacheReadTokens =
+          responsesUsage.input_tokens_details?.cached_tokens ??
+          responsesUsage.prompt_tokens_details?.cached_tokens ??
+          result.cacheReadTokens;
+      }
+      if (parsed.response?.model) {
+        result.model = parsed.response.model;
+      }
       if (parsed.choices?.[0]?.finish_reason) {
         result.finishReasons = [parsed.choices[0].finish_reason];
       }
-      // Gemini streaming: usageMetadata in chunks
-      if (parsed.usageMetadata) {
-        const prompt = parsed.usageMetadata.promptTokenCount || 0;
-        const cached = parsed.usageMetadata.cachedContentTokenCount || 0;
+      // Gemini streaming: usageMetadata in chunks (direct or inside Code Assist wrapper)
+      const geminiUsage =
+        parsed.usageMetadata || parsed.response?.usageMetadata;
+      if (geminiUsage) {
+        const prompt = geminiUsage.promptTokenCount || 0;
+        const cached = geminiUsage.cachedContentTokenCount || 0;
         // Gemini's promptTokenCount includes cached tokens; subtract to get non-cached input
         if (prompt > 0) {
           result.inputTokens = prompt - cached;
           result.cacheReadTokens = cached;
         }
         result.outputTokens =
-          parsed.usageMetadata.candidatesTokenCount || result.outputTokens;
+          geminiUsage.candidatesTokenCount || result.outputTokens;
         result.thinkingTokens =
-          parsed.usageMetadata.thoughtsTokenCount || result.thinkingTokens;
+          geminiUsage.thoughtsTokenCount || result.thinkingTokens;
       }
-      if (parsed.candidates?.[0]?.finishReason) {
-        result.finishReasons = [parsed.candidates[0].finishReason];
+      const geminiCandidates =
+        parsed.candidates || parsed.response?.candidates;
+      if (geminiCandidates?.[0]?.finishReason) {
+        result.finishReasons = [geminiCandidates[0].finishReason];
       }
-      if (parsed.modelVersion) {
-        result.model = parsed.modelVersion;
+      const geminiModelVersion =
+        parsed.modelVersion || parsed.response?.modelVersion;
+      if (geminiModelVersion) {
+        result.model = geminiModelVersion;
       }
       if (parsed.model) {
         result.model = parsed.model;

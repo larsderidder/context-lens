@@ -30,6 +30,19 @@ describe("detectSource", () => {
     assert.equal(source, "claude");
   });
 
+  it("detects antigravity from user-agent header", () => {
+    const info = parseContextInfo(
+      "gemini",
+      { contents: [{ role: "user", parts: [{ text: "hi" }] }] },
+      "gemini",
+    );
+    const source = detectSource(info, null, {
+      "user-agent": "antigravity/1.21.9 windows/amd64",
+    });
+    assert.equal(source, "antigravity");
+  });
+
+
   it("detects aider from system prompt", () => {
     const info = parseContextInfo("openai", openaiChat, "chat-completions");
     const source = detectSource(info, null);
