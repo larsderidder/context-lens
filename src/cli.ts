@@ -431,6 +431,33 @@ if (parsedArgs.commandName === "analyze") {
       return;
     }
 
+    // Pre-flight: check if the mitm port is already in use.
+    // Without this, mitmproxy exits silently and the poll loop connects
+    // to whatever is already on that port, falsely reporting success.
+    const probe = net.connect(
+      { port: mitmConfig.port, host: "localhost" },
+      () => {
+        probe.end();
+        console.error(
+          `\nError: port ${mitmConfig.port} is already in use (mitmproxy cannot bind).`,
+        );
+        console.error(
+          `Set a different port in ~/.context-lens/config.toml:\n\n  [mitm]\n  port = 8082\n`,
+        );
+        cleanup(1);
+      },
+    );
+    probe.on("error", () => {
+      // Port is free, proceed
+      startMitm();
+    });
+    probe.setTimeout(500, () => {
+      probe.destroy();
+      startMitm();
+    });
+  }
+
+  function startMitm(): void {
     const addonPath = mitmConfig.addonPath;
     console.log(
       "🔒 Starting mitmproxy (forward proxy for HTTPS interception)...",
@@ -459,6 +486,13 @@ if (parsedArgs.commandName === "analyze") {
         },
       },
     );
+    // Capture stderr so binding errors ("address already in use") are visible.
+    let mitmStderr = "";
+    if (mitmProcess.stderr) {
+      mitmProcess.stderr.on("data", (chunk: Buffer) => {
+        mitmStderr += chunk.toString();
+      });
+    }
     mitmProcess.on("error", (err) => {
       console.error("Failed to start mitmproxy:", err.message);
       console.error("Install it: pipx install mitmproxy");
@@ -466,7 +500,12 @@ if (parsedArgs.commandName === "analyze") {
     });
     mitmProcess.on("exit", (code) => {
       if (!mitmReady) {
-        console.error("mitmproxy exited unexpectedly");
+        const detail = mitmStderr.trim();
+        if (detail) {
+          console.error(`mitmproxy failed to start:\n${detail}`);
+        } else {
+          console.error("mitmproxy exited unexpectedly");
+        }
         cleanup(code || 1);
       }
     });
