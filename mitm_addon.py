@@ -52,6 +52,8 @@ CAPTURE_PATTERNS = [
     # GitHub Copilot chat completions (OpenAI-compatible format)
     ("api.individual.githubcopilot.com", "/chat/completions", "openai", "copilot"),
     ("api.githubcopilot.com", "/chat/completions", "openai", "copilot"),
+    ("api.individual.githubcopilot.com", "/responses", "openai", "copilot"),
+    ("api.githubcopilot.com", "/responses", "openai", "copilot"),
     # OpenAI API — source left as None so detectSource can identify the tool
     # from headers/system prompts (opencode, aider, etc.)
     ("api.openai.com", "/v1/responses", "openai", None),

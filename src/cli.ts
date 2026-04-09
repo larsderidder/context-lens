@@ -165,6 +165,7 @@ if (parsedArgs.commandName === "analyze") {
         https_proxy: mitmConfig.proxyUrl,
         NPM_CONFIG_HTTPS_PROXY: mitmConfig.proxyUrl,
         WSS_PROXY: mitmConfig.proxyUrl,
+        NODE_USE_ENV_PROXY: "1",
 
         //these are all filled in with the CA cert path
         SSL_CERT_FILE: "[CA_CERT_PATH]",
