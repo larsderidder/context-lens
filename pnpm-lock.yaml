@@ -9,14 +9,14 @@ importers:
   .:
     dependencies:
       '@contextio/core':
+        specifier: ^0.3.2
+        version: 0.3.2
+      '@contextio/proxy':
+        specifier: ^0.2.4
+        version: 0.2.4
+      '@contextio/redact':
         specifier: ^0.3.1
         version: 0.3.1
-      '@contextio/proxy':
-        specifier: ^0.2.3
-        version: 0.2.3
-      '@contextio/redact':
-        specifier: ^0.3.0
-        version: 0.3.0
       '@hono/node-server':
         specifier: ^1.19.9
         version: 1.19.9(hono@4.11.9)
@@ -105,18 +105,15 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@contextio/core@0.3.0':
-    resolution: {integrity: sha512-8bjIu4dw5f/UqO1ZUMmxBcdWN6byGa06tcY0oSbj6Mr/pK1Tw/LyZu8lnlY57zI+3JGX4cl2FiPV6ifjo1Xk2A==}
+  '@contextio/core@0.3.2':
+    resolution: {integrity: sha512-VHYCVmRu5naCzrs1quz7Bj0/mRn5Rm51w7aHNEtpOTfJpdkuRIRCenu+LuaQj6yFifb40MJ+ZZkKKJduOE9VgA==}
 
-  '@contextio/core@0.3.1':
-    resolution: {integrity: sha512-mITEMs5upUMNiQF4QJRRTg8L10VoS8LjRkDd37ZtLOf65PRlfKcpkjxgAGoapi4ve5j2mt2nEQbpHHOthwnYGw==}
-
-  '@contextio/proxy@0.2.3':
-    resolution: {integrity: sha512-u5/SrkHtTvSb0v/0oNOX2AP3e6O5VScOTkXptdxIIUgLTQ8R7zeU9vXHu2MD4xcUHpLZsbzRwWvXetsLWD+0bQ==}
+  '@contextio/proxy@0.2.4':
+    resolution: {integrity: sha512-4aAJ34EN6DZUddlwqC1KahrKIStGzl9wkU+RL4GfEt+aYcyjr1KC9B8vRbXlcYEJh2QjmpwpsVUaVXQjHT6fJA==}
     hasBin: true
 
-  '@contextio/redact@0.3.0':
-    resolution: {integrity: sha512-gWH36r89/8daSFHindl2i0bCV6MgvJTWYJ8oZPbh221wDiqFxfWGz4FsERoAwCeOSl1loJyCSf8Tl45vt7K+Tg==}
+  '@contextio/redact@0.3.1':
+    resolution: {integrity: sha512-ESSi8poNTEOiG+m6r10588vVOKVY3+HaXDUKa5C8BZFakVfwUqGfbbOw/1CY4zTm3FABl4EOiL629Z4501vmLQ==}
 
   '@hono/node-server@1.19.9':
     resolution: {integrity: sha512-vHL6w3ecZsky+8P5MD+eFfaGTyCeOHUIFYMGpQGbrBTSmNNoxv0if69rEZ5giu36weC5saFuznL411gRX7bJDw==}
@@ -257,17 +254,15 @@ snapshots:
   '@biomejs/cli-win32-x64@2.4.4':
     optional: true
 
-  '@contextio/core@0.3.0': {}
+  '@contextio/core@0.3.2': {}
 
-  '@contextio/core@0.3.1': {}
-
-  '@contextio/proxy@0.2.3':
+  '@contextio/proxy@0.2.4':
     dependencies:
-      '@contextio/core': 0.3.0
+      '@contextio/core': 0.3.2
 
-  '@contextio/redact@0.3.0':
+  '@contextio/redact@0.3.1':
     dependencies:
-      '@contextio/core': 0.3.0
+      '@contextio/core': 0.3.2
 
   '@hono/node-server@1.19.9(hono@4.11.9)':
     dependencies:
