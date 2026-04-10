@@ -66,16 +66,60 @@ Target: under 1 second for ~3000 entries. Watch out for:
 
 Publishing to npm is automated via GitHub Actions using [npm trusted publishing (OIDC)](https://docs.npmjs.com/trusted-publishers). No tokens or secrets are needed.
 
+### Normal release
+
 1. Bump the version in `package.json`
 2. Commit and push to `main`
-3. Create and publish a GitHub release:
+3. Run:
 
 ```bash
-gh release create v0.X.0 --title "v0.X.0" --target main --latest --notes "release notes here"
-gh release edit v0.X.0 --draft=false --latest
+pnpm release -- --notes "release notes here"
 ```
 
-The `publish.yml` workflow will build, lint, test, and publish to npm automatically.
+This script checks that:
+- you are on `main`
+- the working tree is clean
+- `HEAD` matches `origin/main`
+- the git tag and GitHub release do not already exist
+
+It then creates the annotated tag, pushes it, and creates the GitHub release. That triggers `publish.yml`, which builds, lints, tests, and publishes to npm automatically.
+
+### Dependency release check
+
+`context-lens` depends on separately published `@contextio/*` packages, even though local development often uses the shared workspace. That means local changes in `../contextio` can make `context-lens` appear healthy before those packages are actually published.
+
+Before releasing `context-lens`, check whether the release depends on unpublished `contextio` changes:
+
+```bash
+npm view @contextio/core version
+npm view @contextio/proxy version
+npm view @contextio/redact version
+```
+
+If `context-lens` now imports or relies on new `@contextio/*` APIs:
+- publish the needed `contextio` packages first
+- update `context-lens` to the published versions
+- verify the lockfile matches the intended published versions
+- only then release `context-lens`
+
+Do not trust local workspace resolution alone for this check.
+
+### If a release already exists and needs to be re-run
+
+If the tag or release points at the wrong commit, recreate it from current `main`:
+
+```bash
+pnpm release -- --recreate --notes "release notes here"
+```
+
+That will delete the existing GitHub release, delete the remote and local tag, recreate the tag on current `HEAD`, and publish a fresh GitHub release.
+
+### Watch the publish workflow
+
+```bash
+gh run list --workflow publish.yml --limit 5
+gh run watch <run-id> --exit-status
+```
 
 ### How trusted publishing works
 
