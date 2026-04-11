@@ -14,6 +14,7 @@ export const HEADER_SIGNATURES: HeaderSignature[] = [
   { header: "user-agent", pattern: /aider/i, source: "aider" },
   { header: "user-agent", pattern: /kimi/i, source: "kimi" },
   { header: "user-agent", pattern: /^GeminiCLI\//, source: "gemini" },
+  { header: "user-agent", pattern: /^antigravity\//i, source: "antigravity" },
 ];
 
 /**

@@ -19,3 +19,9 @@ export const openaiChat = JSON.parse(
 export const openaiChatTools = JSON.parse(
   readFileSync(join(fixturesDir, "openai-chat-tools.json"), "utf-8"),
 );
+export const antigravityRequest = JSON.parse(
+  readFileSync(join(fixturesDir, "antigravity-request.json"), "utf-8"),
+);
+export const antigravityStreamingResponse = JSON.parse(
+  readFileSync(join(fixturesDir, "antigravity-streaming-response.json"), "utf-8"),
+);

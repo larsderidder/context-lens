@@ -1,0 +1,78 @@
+{
+  "description": "Antigravity/Code Assist request body for /v1internal:streamGenerateContent. The Code Assist envelope wraps a standard Gemini request in {project, requestId, request, model, userAgent, requestType}.",
+  "project": "miter-fightew-awpe3",
+  "requestId": "checkpoint/mboaem42-d02b-2913-a59d-03m2qaar92ib",
+  "request": {
+    "contents": [
+      {
+        "role": "user",
+        "parts": [
+          {
+            "text": " <USER_REQUEST> provide a random 5 digit number </USER_REQUEST> <ADDITIONAL_METADATA> The current local time is: 2026-04-07T12:35:18-04:00. </ADDITIONAL_METADATA>"
+          }
+        ]
+      },
+      {
+        "role": "user",
+        "parts": [
+          {
+            "text": "# Conversation History Here are the conversation IDs and summaries."
+          }
+        ]
+      },
+      {
+        "role": "model",
+        "parts": [
+          {
+            "text": "Your random 5 digit number is: **92189**"
+          }
+        ]
+      },
+      {
+        "role": "user",
+        "parts": [
+          {
+            "text": "Generate a short conversation title around 3-5 words describing the USER's intent."
+          }
+        ]
+      }
+    ],
+    "systemInstruction": {
+      "role": "user",
+      "parts": [
+        {
+          "text": "You are an expert AI coding assistant with extreme attention to detail."
+        }
+      ]
+    },
+    "tools": [
+      {
+        "functionDeclarations": [
+          {
+            "name": "do_not_call",
+            "description": "Do not call this tool.",
+            "parameters": {
+              "type": "OBJECT"
+            }
+          }
+        ]
+      }
+    ],
+    "generationConfig": {
+      "temperature": 0.4,
+      "topP": 1,
+      "topK": 40,
+      "candidateCount": 1,
+      "maxOutputTokens": 16384,
+      "stopSequences": [" Human:", "<|bot|>", "<|context_request|>", "Assistant:", "<|end_of_turn|>"],
+      "thinkingConfig": {
+        "includeThoughts": false,
+        "thinkingBudget": 0
+      }
+    },
+    "sessionId": "-12391231283990"
+  },
+  "model": "gemini-3.1-flash-lite",
+  "userAgent": "antigravity",
+  "requestType": "checkpoint"
+}

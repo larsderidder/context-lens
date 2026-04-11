@@ -8,6 +8,10 @@ import {
   resolveTargetUrl,
 } from "../src/core.js";
 import { parseResponseUsage } from "../src/lhar.js";
+import {
+  antigravityRequest,
+  antigravityStreamingResponse,
+} from "./helpers/fixtures.js";
 
 describe("Gemini support", () => {
   describe("detectProvider", () => {
@@ -370,6 +374,37 @@ describe("Gemini support", () => {
         "https://cloudcode-pa.googleapis.com/v1internal:predict",
       );
       assert.equal(result.provider, "gemini");
+    });
+  });
+
+  describe("Antigravity/Code Assist fixtures", () => {
+    it("parses antigravity streaming response with cache tokens", () => {
+      const usage = parseResponseUsage({
+        streaming: true,
+        chunks: antigravityStreamingResponse.chunks,
+      });
+      assert.equal(usage.stream, true);
+      // promptTokenCount=28393 includes cachedContentTokenCount=18000; non-cached = 10393
+      assert.equal(usage.inputTokens, 28393 - 18000);
+      assert.equal(usage.outputTokens, 4);
+      assert.equal(usage.cacheReadTokens, 18000);
+      assert.equal(usage.model, "claude-sonnet-4-6");
+      assert.deepEqual(usage.finishReasons, ["STOP"]);
+    });
+
+    it("parses antigravity Code Assist wrapped request", () => {
+      const info = parseContextInfo(
+        "gemini",
+        antigravityRequest,
+        "gemini",
+      );
+      assert.equal(info.provider, "gemini");
+      assert.ok(info.systemPrompts.length >= 1);
+      assert.equal(info.messages.length, 4);
+      assert.equal(info.messages[2].role, "assistant");
+      assert.equal(info.messages[3].role, "user");
+      assert.equal(info.tools.length, 1);
+      assert.equal((info.tools[0] as any).name, "do_not_call");
     });
   });
 });
