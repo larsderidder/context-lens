@@ -23,6 +23,37 @@ import { VERSION } from "./version.generated.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+// copied from https://github.com/badlogic/pi-mono/blob/main/packages/ai/src/env-api-keys.ts
+const piEnvMap: Record<string, string> = {
+  openai: "OPENAI_API_KEY",
+  "azure-openai-responses": "AZURE_OPENAI_API_KEY",
+  deepseek: "DEEPSEEK_API_KEY",
+  google: "GEMINI_API_KEY",
+  "google-vertex": "GOOGLE_CLOUD_API_KEY",
+  groq: "GROQ_API_KEY",
+  cerebras: "CEREBRAS_API_KEY",
+  xai: "XAI_API_KEY",
+  openrouter: "OPENROUTER_API_KEY",
+  "vercel-ai-gateway": "AI_GATEWAY_API_KEY",
+  zai: "ZAI_API_KEY",
+  mistral: "MISTRAL_API_KEY",
+  minimax: "MINIMAX_API_KEY",
+  "minimax-cn": "MINIMAX_CN_API_KEY",
+  moonshotai: "MOONSHOT_API_KEY",
+  "moonshotai-cn": "MOONSHOT_API_KEY",
+  huggingface: "HF_TOKEN",
+  fireworks: "FIREWORKS_API_KEY",
+  opencode: "OPENCODE_API_KEY",
+  "opencode-go": "OPENCODE_API_KEY",
+  "kimi-coding": "KIMI_API_KEY",
+  "cloudflare-workers-ai": "CLOUDFLARE_API_KEY",
+  "cloudflare-ai-gateway": "CLOUDFLARE_API_KEY",
+  xiaomi: "XIAOMI_API_KEY",
+  "xiaomi-token-plan-cn": "XIAOMI_TOKEN_PLAN_CN_API_KEY",
+  "xiaomi-token-plan-ams": "XIAOMI_TOKEN_PLAN_AMS_API_KEY",
+  "xiaomi-token-plan-sgp": "XIAOMI_TOKEN_PLAN_SGP_API_KEY",
+};
+
 // Known tool config: env vars for the child process, extra CLI args, server env vars, and whether mitmproxy is needed
 // Note: actual tool config lives in cli-utils.ts so it can be unit-tested without importing this entrypoint.
 
@@ -841,6 +872,36 @@ if (parsedArgs.commandName === "analyze") {
         "https://cloudcode-pa.googleapis.com",
         "https://us-central1-aiplatform.googleapis.com",
       ]);
+
+      // Add providers based on env. vars
+      for (const [providerName, envVarName] of Object.entries(piEnvMap)) {
+        if (
+          Object.hasOwn(process.env, envVarName) &&
+          !Object.hasOwn(providers, providerName)
+        ) {
+          providers[providerName] = { baseUrl: proxyBaseUrl };
+        }
+      }
+
+      // Add providers based on auth.json
+      const authJsonPath = join(sourceDir, "auth.json");
+      if (fs.existsSync(authJsonPath)) {
+        let authConfig: Record<string, unknown> = {};
+        try {
+          authConfig = JSON.parse(fs.readFileSync(authJsonPath, "utf8"));
+        } catch {
+          console.error(
+            "Warning: ~/.pi/agent/auth.json is not valid JSON; ignoring",
+          );
+        }
+        if (authConfig && typeof authConfig === "object") {
+          for (const providerName in Object.keys(authConfig)) {
+            if (!Object.hasOwn(providers, providerName)) {
+              providers[providerName] = { baseUrl: proxyBaseUrl };
+            }
+          }
+        }
+      }
 
       // Rewrite every provider that has an external baseUrl, regardless of its
       // key name. For providers whose upstream isn't natively known to the proxy,
