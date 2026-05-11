@@ -62,6 +62,8 @@ CAPTURE_PATTERNS = [
     ("api.anthropic.com", "/v1/messages", "anthropic", None),
     # Gemini API
     ("generativelanguage.googleapis.com", "/v1", "gemini", None),
+    # PPQ.ai
+    ("api.ppq.ai", "/chat/completions", "openai", None),
 ]
 
 # Catch-all path patterns: match any host with these path substrings.
