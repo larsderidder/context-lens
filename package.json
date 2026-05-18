@@ -22,6 +22,7 @@
     "postbuild": "chmod +x dist/cli.js dist/proxy/server.js dist/analysis/server.js",
     "prepare": "git config core.hooksPath .githooks",
     "check:pricing": "npx tsx scripts/check-pricing.ts",
+    "release": "node scripts/release.mjs",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "prepublishOnly": "pnpm run build && pnpm run build:ui && node -e \"require('node:fs').accessSync('ui/dist/index.html'); console.log('✓ UI bundle verified')\""
