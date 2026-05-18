@@ -23,5 +23,8 @@ export const antigravityRequest = JSON.parse(
   readFileSync(join(fixturesDir, "antigravity-request.json"), "utf-8"),
 );
 export const antigravityStreamingResponse = JSON.parse(
-  readFileSync(join(fixturesDir, "antigravity-streaming-response.json"), "utf-8"),
+  readFileSync(
+    join(fixturesDir, "antigravity-streaming-response.json"),
+    "utf-8",
+  ),
 );

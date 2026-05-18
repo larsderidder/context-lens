@@ -42,7 +42,6 @@ describe("detectSource", () => {
     assert.equal(source, "antigravity");
   });
 
-
   it("detects aider from system prompt", () => {
     const info = parseContextInfo("openai", openaiChat, "chat-completions");
     const source = detectSource(info, null);

@@ -43,10 +43,13 @@ function applyGeminiUsage(
     result.cacheReadTokens = cached;
   }
   result.outputTokens =
-    usageMetadata.candidatesTokenCount
-    || (usageMetadata.totalTokenCount != null ? usageMetadata.totalTokenCount - prompt : 0)
-    || result.outputTokens;
-  result.thinkingTokens = usageMetadata.thoughtsTokenCount || result.thinkingTokens;
+    usageMetadata.candidatesTokenCount ||
+    (usageMetadata.totalTokenCount != null
+      ? usageMetadata.totalTokenCount - prompt
+      : 0) ||
+    result.outputTokens;
+  result.thinkingTokens =
+    usageMetadata.thoughtsTokenCount || result.thinkingTokens;
 }
 
 /**
@@ -55,8 +58,10 @@ function applyGeminiUsage(
  * then the existing result value as fallback for streaming accumulation.
  */
 function applyUsageDetails(usage: any, result: ParsedResponseUsage): void {
-  result.inputTokens = usage.input_tokens || usage.prompt_tokens || result.inputTokens;
-  result.outputTokens = usage.output_tokens || usage.completion_tokens || result.outputTokens;
+  result.inputTokens =
+    usage.input_tokens || usage.prompt_tokens || result.inputTokens;
+  result.outputTokens =
+    usage.output_tokens || usage.completion_tokens || result.outputTokens;
   result.thinkingTokens =
     usage.completion_tokens_details?.reasoning_tokens ||
     usage.output_tokens_details?.reasoning_tokens ||
@@ -68,7 +73,8 @@ function applyUsageDetails(usage: any, result: ParsedResponseUsage): void {
     usage.input_tokens_details?.cached_tokens ||
     usage.cache_read_input_tokens ||
     result.cacheReadTokens;
-  result.cacheWriteTokens = usage.cache_creation_input_tokens || result.cacheWriteTokens;
+  result.cacheWriteTokens =
+    usage.cache_creation_input_tokens || result.cacheWriteTokens;
 }
 
 /**
@@ -108,7 +114,8 @@ export function extractResponseId(responseData: any): string | null {
   if (responseData.id) return responseData.id;
   if (responseData.response_id) return responseData.response_id;
   if (responseData.response?.id) return responseData.response.id;
-  if (responseData.response?.response_id) return responseData.response.response_id;
+  if (responseData.response?.response_id)
+    return responseData.response.response_id;
 
   // Streaming: scan SSE chunks for response events
   if (responseData.streaming && typeof responseData.chunks === "string") {
@@ -156,7 +163,8 @@ export function parseResponseUsage(responseData: any): ParsedResponseUsage {
   if (usage) applyUsageDetails(usage, result);
 
   // Gemini usageMetadata (direct or inside Code Assist wrapper .response)
-  const geminiMeta = responseData.usageMetadata ?? responseData.response?.usageMetadata;
+  const geminiMeta =
+    responseData.usageMetadata ?? responseData.response?.usageMetadata;
   if (geminiMeta) applyGeminiUsage(geminiMeta, result);
 
   result.model =
@@ -191,8 +199,7 @@ function parseStreamingUsage(
     // Anthropic message_delta: contains stop_reason and output token count
     if (parsed.type === "message_delta") {
       if (parsed.usage) {
-        result.outputTokens =
-          parsed.usage.output_tokens || result.outputTokens;
+        result.outputTokens = parsed.usage.output_tokens || result.outputTokens;
       }
     }
 

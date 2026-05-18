@@ -64,7 +64,13 @@
       "topK": 40,
       "candidateCount": 1,
       "maxOutputTokens": 16384,
-      "stopSequences": [" Human:", "<|bot|>", "<|context_request|>", "Assistant:", "<|end_of_turn|>"],
+      "stopSequences": [
+        " Human:",
+        "<|bot|>",
+        "<|context_request|>",
+        "Assistant:",
+        "<|end_of_turn|>"
+      ],
       "thinkingConfig": {
         "includeThoughts": false,
         "thinkingBudget": 0

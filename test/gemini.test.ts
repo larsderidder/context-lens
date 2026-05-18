@@ -393,11 +393,7 @@ describe("Gemini support", () => {
     });
 
     it("parses antigravity Code Assist wrapped request", () => {
-      const info = parseContextInfo(
-        "gemini",
-        antigravityRequest,
-        "gemini",
-      );
+      const info = parseContextInfo("gemini", antigravityRequest, "gemini");
       assert.equal(info.provider, "gemini");
       assert.ok(info.systemPrompts.length >= 1);
       assert.equal(info.messages.length, 4);
