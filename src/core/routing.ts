@@ -24,6 +24,7 @@ export const API_PATH_SEGMENTS = new Set([
   "embeddings",
   "backend-api",
   "api",
+  "codex",
 ]);
 
 /**
@@ -57,8 +58,8 @@ export function classifyRequest(
   pathname: string,
   headers: Record<string, string | undefined>,
 ): { provider: Provider; apiFormat: ApiFormat } {
-  // ChatGPT backend traffic (Codex subscription)
-  if (pathname.match(/^\/(api|backend-api)\//))
+  // ChatGPT backend traffic. /codex/ is used by Pi's openai-codex provider.
+  if (pathname.match(/^\/(api|backend-api|codex)\//))
     return { provider: "chatgpt", apiFormat: "chatgpt-backend" };
 
   // Anthropic Messages API
@@ -164,7 +165,10 @@ export function resolveTargetUrl(
   let targetUrl = headers["x-target-url"];
   if (!targetUrl) {
     if (provider === "chatgpt") {
-      targetUrl = upstreams.chatgpt + parsedUrl.pathname + search;
+      const chatgptPath = parsedUrl.pathname.match(/^\/(api|backend-api)\//)
+        ? parsedUrl.pathname
+        : `/backend-api${parsedUrl.pathname}`;
+      targetUrl = upstreams.chatgpt + chatgptPath + search;
     } else if (provider === "anthropic") {
       targetUrl = upstreams.anthropic + parsedUrl.pathname + search;
     } else if (provider === "gemini") {

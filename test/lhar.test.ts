@@ -720,6 +720,21 @@ describe("parseResponseUsage", () => {
     assert.deepEqual(usage.finishReasons, ["stop"]);
   });
 
+  it("parses streaming OpenAI Responses usage from response.completed event", () => {
+    const chunks = [
+      'data: {"type":"response.created","response":{"id":"resp_1","model":"gpt-5-mini-2025-08-07","status":"in_progress"}}',
+      'data: {"type":"response.completed","response":{"id":"resp_1","model":"gpt-5-mini-2025-08-07","status":"completed","usage":{"input_tokens":6968,"input_tokens_details":{"cached_tokens":0},"output_tokens":406,"output_tokens_details":{"reasoning_tokens":384},"total_tokens":7374}}}',
+      "data: [DONE]",
+    ].join("\n");
+    const usage = parseResponseUsage({ streaming: true, chunks });
+    assert.equal(usage.stream, true);
+    assert.equal(usage.inputTokens, 6968);
+    assert.equal(usage.outputTokens, 406);
+    assert.equal(usage.cacheReadTokens, 0);
+    assert.equal(usage.thinkingTokens, 384);
+    assert.equal(usage.model, "gpt-5-mini-2025-08-07");
+  });
+
   it("ignores [DONE] sentinel in streaming chunks", () => {
     const chunks = [
       'data: {"type":"message_start","message":{"model":"claude-sonnet-4-20250514","usage":{"input_tokens":50}}}',
