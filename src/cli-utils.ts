@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -426,4 +427,64 @@ export function getMitmConfig(): MitmConfig {
     lensSource: config.mitm.lensSource,
     lensSessionId: config.mitm.lensSessionId,
   };
+}
+
+// copied from https://github.com/badlogic/pi-mono/blob/main/packages/ai/src/env-api-keys.ts
+const piEnvMap: Record<string, string> = {
+  openai: "OPENAI_API_KEY",
+  "azure-openai-responses": "AZURE_OPENAI_API_KEY",
+  deepseek: "DEEPSEEK_API_KEY",
+  google: "GEMINI_API_KEY",
+  "google-vertex": "GOOGLE_CLOUD_API_KEY",
+  groq: "GROQ_API_KEY",
+  cerebras: "CEREBRAS_API_KEY",
+  xai: "XAI_API_KEY",
+  openrouter: "OPENROUTER_API_KEY",
+  "vercel-ai-gateway": "AI_GATEWAY_API_KEY",
+  zai: "ZAI_API_KEY",
+  mistral: "MISTRAL_API_KEY",
+  minimax: "MINIMAX_API_KEY",
+  "minimax-cn": "MINIMAX_CN_API_KEY",
+  moonshotai: "MOONSHOT_API_KEY",
+  "moonshotai-cn": "MOONSHOT_API_KEY",
+  huggingface: "HF_TOKEN",
+  fireworks: "FIREWORKS_API_KEY",
+  opencode: "OPENCODE_API_KEY",
+  "opencode-go": "OPENCODE_API_KEY",
+  "kimi-coding": "KIMI_API_KEY",
+  "cloudflare-workers-ai": "CLOUDFLARE_API_KEY",
+  "cloudflare-ai-gateway": "CLOUDFLARE_API_KEY",
+  xiaomi: "XIAOMI_API_KEY",
+  "xiaomi-token-plan-cn": "XIAOMI_TOKEN_PLAN_CN_API_KEY",
+  "xiaomi-token-plan-ams": "XIAOMI_TOKEN_PLAN_AMS_API_KEY",
+  "xiaomi-token-plan-sgp": "XIAOMI_TOKEN_PLAN_SGP_API_KEY",
+};
+
+export function addProvidersBasedOnAuthJson(
+  authConfig: Record<string, unknown>,
+  proxyBaseUrl: string,
+  providers: { [x: string]: unknown },
+) {
+  if (authConfig && typeof authConfig === "object") {
+    for (const providerName in Object.keys(authConfig)) {
+      if (!Object.hasOwn(providers, providerName)) {
+        providers[providerName] = { baseUrl: proxyBaseUrl };
+      }
+    }
+  }
+}
+
+export function addProvidersBasedOnEnvVars(
+  envDictionary: Record<string, string | undefined>,
+  proxyBaseUrl: string,
+  providers: { [x: string]: unknown },
+) {
+  for (const [providerName, envVarName] of Object.entries(piEnvMap)) {
+    if (
+      Object.hasOwn(envDictionary, envVarName) &&
+      !Object.hasOwn(providers, providerName)
+    ) {
+      providers[providerName] = { baseUrl: proxyBaseUrl };
+    }
+  }
 }
