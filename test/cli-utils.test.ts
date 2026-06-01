@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import {
   addProvidersBasedOnAuthJson,
+  addProvidersBasedOnEnvVars,
   CLI_CONSTANTS,
   formatHelpText,
   getMitmConfig,
@@ -133,6 +134,17 @@ describe("cli-utils", () => {
     const expectedProvidersValue = {
       foo: { baseUrl: proxyBaseUrl },
       bar: { baseUrl: proxyBaseUrl },
+    };
+    assert.deepEqual(providers, expectedProvidersValue);
+  });
+
+  it("addProvidersBasedOnEnvVars", () => {
+    const sampleEnvVars = { FOO: "FOO", OPENROUTER_API_KEY: "BAR" };
+    const proxyBaseUrl = "localhost";
+    const providers = {};
+    addProvidersBasedOnEnvVars(sampleEnvVars, proxyBaseUrl, providers);
+    const expectedProvidersValue = {
+      openrouter: { baseUrl: proxyBaseUrl },
     };
     assert.deepEqual(providers, expectedProvidersValue);
   });
