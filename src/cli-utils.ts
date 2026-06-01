@@ -466,7 +466,7 @@ export function addProvidersBasedOnAuthJson(
   providers: { [x: string]: unknown },
 ) {
   if (authConfig && typeof authConfig === "object") {
-    for (const providerName in Object.keys(authConfig)) {
+    for (const providerName of Object.keys(authConfig)) {
       if (!Object.hasOwn(providers, providerName)) {
         providers[providerName] = { baseUrl: proxyBaseUrl };
       }
