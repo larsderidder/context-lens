@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  addProvidersBasedOnAuthJson,
   CLI_CONSTANTS,
   formatHelpText,
   getMitmConfig,
@@ -122,5 +123,17 @@ describe("cli-utils", () => {
     assert.equal(mitm.lensSource, "commandName");
     assert.equal(mitm.lensSessionId, "random");
     assert.ok(mitm.addonPath.endsWith("mitm_addon.py"));
+  });
+
+  it("addProvidersBasedOnAuthJson", () => {
+    const sampleAuthConfig = { foo: {}, bar: {} };
+    const proxyBaseUrl = "localhost";
+    const providers = {};
+    addProvidersBasedOnAuthJson(sampleAuthConfig, proxyBaseUrl, providers);
+    const expectedProvidersValue = {
+      foo: { baseUrl: proxyBaseUrl },
+      bar: { baseUrl: proxyBaseUrl },
+    };
+    assert.deepEqual(providers, expectedProvidersValue);
   });
 });
