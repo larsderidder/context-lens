@@ -4,20 +4,26 @@ import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
-import https from "node:https";
 import net from "node:net";
-import { homedir, platform, tmpdir } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { platform } from "node:os";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { runAnalyze } from "./cli/analyze-command.js";
+import { backgroundStop, runBackgroundCommand } from "./cli/background.js";
+import { prepareChildLaunch } from "./cli/child-launch.js";
+import { runDoctor } from "./cli/doctor.js";
 import {
-  addProvidersBasedOnAuthJson,
-  addProvidersBasedOnEnvVars,
+  clearStaleLockfile,
+  decrementLockRefCount,
+  incrementLockRefCount,
+} from "./cli/lockfile.js";
+import { checkForUpdate } from "./cli/update-check.js";
+import {
   CLI_CONSTANTS,
   formatHelpText,
   getMitmConfig,
   getToolConfig,
-  injectSessionTagIntoProxyEnv,
   parseCliArgs,
   resolveLensSessionId,
   resolveLensSource,
@@ -30,8 +36,6 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 // Known tool config lives in cli-utils.ts so it can be unit-tested without importing this entrypoint.
-const LOCKFILE = join(tmpdir(), "context-lens.lock");
-
 const rawArgs = process.argv.slice(2);
 const parsedArgs = parseCliArgs(rawArgs);
 if (parsedArgs.error) {
@@ -179,58 +183,6 @@ if (parsedArgs.commandName === "analyze") {
     });
   }
 
-  // Increment reference count in lockfile
-  function incrementRefCount(): number {
-    try {
-      let count = 0;
-      if (fs.existsSync(LOCKFILE)) {
-        const data = fs.readFileSync(LOCKFILE, "utf8");
-        count = parseInt(data, 10) || 0;
-      }
-      fs.writeFileSync(LOCKFILE, String(count + 1));
-      return count + 1;
-    } catch (err: unknown) {
-      console.error(
-        "Warning: failed to update lockfile:",
-        err instanceof Error ? err.message : String(err),
-      );
-      return 1;
-    }
-  }
-
-  // If the proxy isn't actually running but a lockfile exists, it's stale (e.g. prior crash).
-  function clearStaleLockfile(): void {
-    try {
-      if (fs.existsSync(LOCKFILE)) fs.unlinkSync(LOCKFILE);
-    } catch (err: unknown) {
-      console.error(
-        "Warning: failed to clear stale lockfile:",
-        err instanceof Error ? err.message : String(err),
-      );
-    }
-  }
-
-  // Decrement reference count in lockfile
-  function decrementRefCount(): number {
-    try {
-      if (!fs.existsSync(LOCKFILE)) return 0;
-      const data = fs.readFileSync(LOCKFILE, "utf8");
-      const count = Math.max(0, (parseInt(data, 10) || 1) - 1);
-      if (count === 0) {
-        fs.unlinkSync(LOCKFILE);
-      } else {
-        fs.writeFileSync(LOCKFILE, String(count));
-      }
-      return count;
-    } catch (err: unknown) {
-      console.error(
-        "Warning: failed to update lockfile:",
-        err instanceof Error ? err.message : String(err),
-      );
-      return 0;
-    }
-  }
-
   let proxyProcess: ChildProcess | null = null;
   let analysisProcess: ChildProcess | null = null;
   let mitmProcess: ChildProcess | null = null;
@@ -280,7 +232,7 @@ if (parsedArgs.commandName === "analyze") {
 
     if (allRequiredRunning) {
       console.log("🔍 Context Lens already running, attaching...");
-      incrementRefCount();
+      incrementLockRefCount();
       proxyReady = true;
       analysisReady = !requiresAnalysis || analysisAlreadyRunning;
       shouldShutdownServers = false;
@@ -291,7 +243,7 @@ if (parsedArgs.commandName === "analyze") {
     console.log("🔍 Starting Context Lens proxy and analysis server...");
     // Clear stale lockfile if servers aren't actually running
     if (!proxyAlreadyRunning) clearStaleLockfile();
-    incrementRefCount();
+    incrementLockRefCount();
     shouldShutdownServers = true;
 
     const serverEnv = {
@@ -332,14 +284,14 @@ if (parsedArgs.commandName === "analyze") {
 
       proxyProcess.on("error", (err) => {
         console.error("Failed to start proxy:", err);
-        decrementRefCount();
+        decrementLockRefCount();
         process.exit(1);
       });
 
       proxyProcess.on("exit", (code) => {
         if (!proxyReady) {
           console.error("Proxy exited unexpectedly");
-          decrementRefCount();
+          decrementLockRefCount();
           process.exit(code || 1);
         }
       });
@@ -377,14 +329,14 @@ if (parsedArgs.commandName === "analyze") {
 
       analysisProcess.on("error", (err) => {
         console.error("Failed to start analysis server:", err);
-        decrementRefCount();
+        decrementLockRefCount();
         process.exit(1);
       });
 
       analysisProcess.on("exit", (code) => {
         if (!analysisReady) {
           console.error("Analysis server exited unexpectedly");
-          decrementRefCount();
+          decrementLockRefCount();
           process.exit(code || 1);
         }
       });
@@ -508,99 +460,42 @@ if (parsedArgs.commandName === "analyze") {
   }
   // Start the child command
   function startChild(): void {
-    // Inject extra args (e.g. codex -c chatgpt_base_url=...) before user args
+    const launch = prepareChildLaunch({
+      commandName,
+      commandArguments,
+      toolConfig,
+      useMitm,
+      sessionTag: randomBytes(4).toString("hex"),
+      proxyUrl: CLI_CONSTANTS.PROXY_URL,
+    });
 
-    const allArgs = [...toolConfig.extraArgs, ...commandArguments];
     if (commandName) {
-      console.log(`\n🚀 Launching: ${commandName} ${allArgs.join(" ")}\n`);
-    }
-
-    const childEnv = {
-      ...process.env,
-      ...toolConfig.childEnv,
-    };
-
-    // Embed a per-invocation session ID into proxy base URLs so that separate
-    // CLI runs are always grouped into distinct conversations, even when they
-    // start with identical prompts. The session ID is injected as a path
-    // segment after the source tag, which extractSource() picks up as a
-    // stable conversation key for the lifetime of this process.
-    //
-    // Format: http://localhost:4040/<source>/<session-id>/
-    // Example: http://localhost:4040/gemini/a1b2c3d4/
-    //
-    // Codex uses mitmproxy and has its own chaining via previous_response_id.
-    // Claude Code and Pi embed their own session IDs in request metadata.
-    // Tools without built-in session IDs (Gemini, Aider, custom) rely on this.
-    const sessionTag = randomBytes(4).toString("hex"); // 8 hex chars
-    if (!toolConfig.needsMitm) {
-      // For bryti, the proxy URL is baked into config.yml (not an env var),
-      // so the session tag loop below won't reach it. Pass it to prepareBrytiDataDir
-      // so it can embed the tag directly into the patched config.yml base_url.
-      if (commandName === "bryti") {
-        childEnv.BRYTI_DATA_DIR = prepareBrytiDataDir(
-          childEnv.BRYTI_DATA_DIR,
-          sessionTag,
-        );
-      }
-      Object.assign(
-        childEnv,
-        injectSessionTagIntoProxyEnv(childEnv, sessionTag),
+      console.log(
+        `\n🚀 Launching: ${commandName} ${launch.allArgs.join(" ")}\n`,
       );
     }
-
-    // Fill in mitmproxy CA cert path for tools that need HTTPS interception.
-    // Any childEnv value set to "[CA_CERT_PATH]" is replaced with the actual path.
-    if (toolConfig.needsMitm) {
-      const certPath = join(homedir(), ".mitmproxy", "mitmproxy-ca-cert.pem");
-      if (fs.existsSync(certPath)) {
-        for (const key of Object.keys(childEnv)) {
-          if (childEnv[key] === "[CA_CERT_PATH]") childEnv[key] = certPath;
-        }
-        // On macOS, Codex is compiled with rustls + native-roots, which reads
-        // the system Keychain and ignores SSL_CERT_FILE entirely. If the cert
-        // is not trusted in the Keychain, Codex cannot connect through mitmproxy.
-        if (platform() === "darwin" && commandName === "codex") {
-          warnIfMitmCertNotTrustedMacOs(certPath);
-        }
-      } else {
-        console.error(
-          `Warning: mitmproxy CA cert not found at ${certPath}. Run 'mitmdump' once to generate it.`,
-        );
-      }
+    for (const warning of launch.warnings) {
+      console.error(warning);
     }
-
-    if (commandName === "pi" && !useMitm) {
-      childEnv.PI_CODING_AGENT_DIR = preparePiAgentDir(
-        childEnv.PI_CODING_AGENT_DIR,
-        sessionTag,
-      );
+    if (launch.mitmCertWarningPath) {
+      warnIfMitmCertNotTrustedMacOs(launch.mitmCertWarningPath);
     }
+    piAgentDirToCleanup = launch.piAgentDirToCleanup ?? null;
+    brytiDataDirToCleanup = launch.brytiDataDirToCleanup ?? null;
 
     if (!commandName) {
-      //we only get here when the user wants mitm but didn't specify a command
+      // We only get here when the user wants mitm but didn't specify a command.
       console.log("Press Ctrl+C to stop.");
       process.on("SIGINT", () => cleanup(0));
       process.on("SIGTERM", () => cleanup(0));
       return;
     }
-    // For bryti: if dist/cli.js exists in cwd, use it directly (dev mode).
-    // Otherwise fall back to the globally installed bryti binary.
-    let spawnCommand = commandName;
-    let spawnArgs = allArgs;
-    if (
-      commandName === "bryti" &&
-      fs.existsSync(resolve(process.cwd(), "dist", "cli.js"))
-    ) {
-      spawnCommand = process.execPath; // node
-      spawnArgs = [resolve(process.cwd(), "dist", "cli.js"), ...allArgs];
-    }
 
-    // Spawn the child process with inherited stdio (interactive)
-    // No shell: true. Avoids intermediate process that breaks signal delivery
-    childProcess = spawn(spawnCommand, spawnArgs, {
+    // Spawn the child process with inherited stdio and no shell. This avoids an
+    // intermediate process that would break signal delivery.
+    childProcess = spawn(launch.spawnCommand, launch.spawnArgs, {
       stdio: "inherit",
-      env: childEnv,
+      env: launch.env,
     });
 
     childProcess.on("error", (err) => {
@@ -626,7 +521,7 @@ if (parsedArgs.commandName === "analyze") {
       cleanup(1);
     });
 
-    // When the child exits (however it happens), clean up and mirror its exit code
+    // When the child exits, clean up and mirror its exit code.
     childProcess.on("exit", (code, signal) => {
       cleanup(signal ? 128 + (signal === "SIGINT" ? 2 : 15) : code || 0);
     });
@@ -672,367 +567,6 @@ if (parsedArgs.commandName === "analyze") {
         req.on("error", () => {});
         req.on("timeout", () => req.destroy());
       }, 15_000);
-    }
-  }
-
-  /**
-   * Copy settings.json to the temp agent dir, resolving any relative package
-   * paths to absolute paths so they remain valid from the temp location.
-   */
-  function rewriteSettingsWithAbsolutePaths(
-    sourcePath: string,
-    targetPath: string,
-    sourceDir: string,
-  ): void {
-    try {
-      const raw = fs.readFileSync(sourcePath, "utf8");
-      const settings = JSON.parse(raw);
-      if (
-        settings &&
-        typeof settings === "object" &&
-        Array.isArray(settings.packages)
-      ) {
-        settings.packages = settings.packages.map((pkg: unknown) => {
-          if (typeof pkg === "string") {
-            return resolvePackagePath(pkg, sourceDir);
-          }
-          if (pkg && typeof pkg === "object" && "source" in pkg) {
-            const obj = pkg as Record<string, unknown>;
-            if (typeof obj.source === "string") {
-              return {
-                ...obj,
-                source: resolvePackagePath(obj.source, sourceDir),
-              };
-            }
-          }
-          return pkg;
-        });
-      }
-      fs.writeFileSync(targetPath, `${JSON.stringify(settings, null, 2)}\n`);
-    } catch {
-      // Fall back to symlinking if we can't parse/rewrite
-      try {
-        fs.symlinkSync(sourcePath, targetPath);
-      } catch {}
-    }
-  }
-
-  /**
-   * Resolve a package path to absolute if it is a relative filesystem path.
-   * Leaves URLs, npm specifiers (name@version), and already-absolute paths unchanged.
-   */
-  function resolvePackagePath(pkg: string, baseDir: string): string {
-    // Skip tilde paths (pi resolves these against homedir, not baseDir)
-    if (pkg.startsWith("~")) return pkg;
-    // Skip URLs and npm/git specifiers
-    if (/^(https?:|git[@+:]|npm:|github:)/.test(pkg)) return pkg;
-    // Skip what looks like a bare npm package name (no slashes or starts with @scope/)
-    if (/^@?[a-z0-9][\w.-]*$/i.test(pkg) || /^@[\w.-]+\/[\w.-]+/.test(pkg))
-      return pkg;
-    // If it's already absolute, leave it
-    if (isAbsolute(pkg)) return pkg;
-    // Relative path: resolve against the original agent dir
-    return resolve(baseDir, pkg);
-  }
-
-  function preparePiAgentDir(
-    targetDirEnv: string | undefined,
-    sessionTag?: string,
-  ): string {
-    const dirPrefix =
-      targetDirEnv && targetDirEnv.length > 0
-        ? targetDirEnv
-        : join(tmpdir(), "context-lens-pi-agent-");
-    const targetDir = fs.mkdtempSync(dirPrefix);
-    const homeDir = process.env.HOME || "";
-    const sourceDir = join(homeDir, ".pi", "agent");
-    const sourceModelsPath = join(sourceDir, "models.json");
-    const targetModelsPath = join(targetDir, "models.json");
-
-    try {
-      // Keep temp agent dir private to this user.
-      fs.chmodSync(targetDir, 0o700);
-      piAgentDirToCleanup = targetDir;
-
-      if (fs.existsSync(sourceDir)) {
-        for (const entry of fs.readdirSync(sourceDir, {
-          withFileTypes: true,
-        })) {
-          if (entry.name === "models.json") continue;
-          // settings.json needs special handling: relative package paths
-          // must be resolved against the real agent dir, not the temp dir.
-          if (entry.name === "settings.json") {
-            rewriteSettingsWithAbsolutePaths(
-              join(sourceDir, entry.name),
-              join(targetDir, entry.name),
-              sourceDir,
-            );
-            continue;
-          }
-          const src = join(sourceDir, entry.name);
-          const dst = join(targetDir, entry.name);
-          fs.symlinkSync(src, dst);
-        }
-      }
-
-      let modelsConfig: Record<string, unknown> = {};
-      if (fs.existsSync(sourceModelsPath)) {
-        try {
-          const parsed = JSON.parse(fs.readFileSync(sourceModelsPath, "utf8"));
-          if (parsed && typeof parsed === "object") {
-            modelsConfig = parsed as Record<string, unknown>;
-          }
-        } catch {
-          console.error(
-            "Warning: ~/.pi/agent/models.json is not valid JSON; using proxy-only overrides",
-          );
-        }
-      }
-
-      const providers =
-        modelsConfig.providers &&
-        typeof modelsConfig.providers === "object" &&
-        !Array.isArray(modelsConfig.providers)
-          ? { ...(modelsConfig.providers as Record<string, unknown>) }
-          : {};
-
-      const proxyBaseUrl = sessionTag
-        ? `${CLI_CONSTANTS.PROXY_URL}/pi/${sessionTag}`
-        : `${CLI_CONSTANTS.PROXY_URL}/pi`;
-
-      // These upstreams are natively understood by the proxy — no target
-      // override needed, the proxy routes them correctly by path/format.
-      const nativeUpstreams = new Set([
-        "https://api.anthropic.com",
-        "https://api.openai.com",
-        "https://generativelanguage.googleapis.com",
-        "https://cloudcode-pa.googleapis.com",
-        "https://us-central1-aiplatform.googleapis.com",
-      ]);
-
-      const authJsonPath = join(sourceDir, "auth.json");
-      if (fs.existsSync(authJsonPath)) {
-        let authConfig: Record<string, unknown> = {};
-        try {
-          authConfig = JSON.parse(fs.readFileSync(authJsonPath, "utf8"));
-        } catch {
-          console.error(
-            "Warning: ~/.pi/agent/auth.json is not valid JSON; ignoring",
-          );
-        }
-        addProvidersBasedOnAuthJson(authConfig, proxyBaseUrl, providers);
-      }
-
-      addProvidersBasedOnEnvVars(process.env, proxyBaseUrl, providers);
-
-      // Rewrite every provider that has an external baseUrl, regardless of its
-      // key name. For providers whose upstream isn't natively known to the proxy,
-      // stash the real URL as x-target-url so the proxy forwards correctly.
-      for (const [key, value] of Object.entries(providers)) {
-        if (!value || typeof value !== "object" || Array.isArray(value))
-          continue;
-        const provider = value as Record<string, unknown>;
-        const originalBaseUrl =
-          typeof provider.baseUrl === "string" ? provider.baseUrl : null;
-
-        // Skip providers with no baseUrl or a local/relative URL
-        if (!originalBaseUrl || !originalBaseUrl.startsWith("http")) continue;
-        // Skip providers already pointing at the proxy
-        if (originalBaseUrl.startsWith("http://localhost")) continue;
-
-        const needsTargetOverride = !nativeUpstreams.has(
-          originalBaseUrl.replace(/\/$/, ""),
-        );
-
-        const existingHeaders =
-          provider.headers &&
-          typeof provider.headers === "object" &&
-          !Array.isArray(provider.headers)
-            ? (provider.headers as Record<string, string>)
-            : {};
-
-        providers[key] = {
-          ...provider,
-          baseUrl: proxyBaseUrl,
-          ...(needsTargetOverride
-            ? {
-                headers: {
-                  ...existingHeaders,
-                  "x-target-url": originalBaseUrl,
-                },
-              }
-            : {}),
-        };
-      }
-
-      // The old code explicitly wrote "anthropic" unconditionally; the rewrite
-      // in 83225d2 switched to iterating existing providers, which dropped this.
-      // Pi uses the built-in anthropic provider by default and it may not appear
-      // in models.json at all, so we must always inject it.
-      if (!providers.anthropic) {
-        providers.anthropic = {
-          baseUrl: proxyBaseUrl,
-          api: "anthropic-messages",
-        };
-      } else {
-        const ap = providers.anthropic as Record<string, unknown>;
-        if (!String(ap.baseUrl ?? "").startsWith("http://localhost")) {
-          providers.anthropic = { ...ap, baseUrl: proxyBaseUrl };
-        }
-      }
-
-      fs.writeFileSync(
-        targetModelsPath,
-        `${JSON.stringify({ ...modelsConfig, providers }, null, 2)}\n`,
-      );
-      return targetDir;
-    } catch (err: unknown) {
-      console.error(
-        "Warning: failed to prepare Pi proxy config:",
-        err instanceof Error ? err.message : String(err),
-      );
-      return targetDir;
-    }
-  }
-
-  /**
-   * Create a temporary Bryti data directory with a proxy-aware config.yml.
-   *
-   * Bryti reads base_url for each model provider from its config.yml and does
-   * not respect environment variable overrides. We copy the real config (from
-   * the original BRYTI_DATA_DIR or ./data) into a temp dir, rewriting every
-   * provider's base_url to point at the context-lens proxy, then set
-   * BRYTI_DATA_DIR to the temp dir so Bryti picks up the patched config.
-   *
-   * The original config is never modified. The temp dir is cleaned up on exit.
-   *
-   * State dirs (users, history, logs, etc.) are symlinked into the temp dir so
-   * bryti's runtime writes go back to the real data dir.
-   *
-   * The .pi dir is NOT symlinked: bryti regenerates .pi/settings.json on every
-   * startup (via ensureDataDirs/writeExtensionSettings), which would append the
-   * temp extensions path to the real settings.json and cause duplicate tool
-   * registrations on the next run. Instead we copy .pi into the temp dir so
-   * bryti reads existing auth/models from there but writes only to temp.
-   *
-   * files/ is NOT symlinked for the same reason: bryti's writeExtensionSettings
-   * would register both the real and temp extensions paths, loading each
-   * extension twice and causing tool conflict errors.
-   *
-   * If no config.yml is found in the source data dir, we warn and fall back to
-   * the temp dir without a config patch (bryti will error on its own).
-   */
-  function prepareBrytiDataDir(
-    targetDirEnv: string | undefined,
-    sessionTag: string,
-  ): string {
-    const dirPrefix =
-      targetDirEnv && targetDirEnv.length > 0
-        ? targetDirEnv
-        : join(tmpdir(), "context-lens-bryti-");
-    const targetDir = fs.mkdtempSync(dirPrefix);
-    brytiDataDirToCleanup = targetDir;
-
-    // Find the real bryti data dir: check BRYTI_DATA_DIR in current env (before
-    // our override) or fall back to ./data relative to cwd.
-    const realDataDir = resolve(
-      process.env.BRYTI_DATA_DIR || join(process.cwd(), "data"),
-    );
-    const sourceConfigPath = join(realDataDir, "config.yml");
-
-    try {
-      if (!fs.existsSync(sourceConfigPath)) {
-        console.error(
-          `Warning: no Bryti config.yml found at ${sourceConfigPath}. ` +
-            "Bryti will start without a proxy-patched config.",
-        );
-        return targetDir;
-      }
-
-      const raw = fs.readFileSync(sourceConfigPath, "utf-8");
-
-      // Patch every `base_url:` value in the YAML that looks like an HTTP(S)
-      // URL (or is empty, meaning default Anthropic). We replace all provider
-      // base URLs with the proxy URL so all traffic is captured.
-      //
-      // We do a targeted line-level rewrite rather than full YAML parse+emit to
-      // avoid disturbing formatting, comments, or env-var substitution markers
-      // (${VAR}) that would fail a raw parse before substitution.
-      // Include the session tag in the proxy URL so all requests from this
-      // bryti invocation share a stable conversation ID in context-lens.
-      const proxyBase = `${CLI_CONSTANTS.PROXY_URL}/bryti/${sessionTag}`;
-      const patched = raw
-        .split("\n")
-        .map((line) => {
-          // Match lines like:  base_url: "..." or  base_url: ''  or  base_url:
-          // Only rewrite lines that are clearly provider base_url fields.
-          const m = line.match(/^(\s*base_url:\s*)(.*)$/);
-          if (!m) return line;
-          // Preserve the indent + key, replace the value
-          return `${m[1]}"${proxyBase}"`;
-        })
-        .join("\n");
-
-      const targetConfigPath = join(targetDir, "config.yml");
-      fs.writeFileSync(targetConfigPath, patched, "utf-8");
-
-      // Symlink state dirs that should persist back to the real data dir.
-      // Exclude config.yml (patched above), .pi (copied below), and files/
-      // (both contain paths that bryti writes into settings.json on startup,
-      // which would corrupt the real settings with temp dir paths).
-      const SYMLINK_ENTRIES = [
-        "users",
-        "history",
-        "logs",
-        "pending",
-        "skills",
-        "usage",
-        "whatsapp-auth",
-        "core-memory.md",
-        "sessions",
-        "extensions",
-      ];
-      for (const name of SYMLINK_ENTRIES) {
-        const src = join(realDataDir, name);
-        if (!fs.existsSync(src)) continue;
-        const dst = join(targetDir, name);
-        try {
-          fs.symlinkSync(src, dst);
-        } catch {
-          // Non-fatal
-        }
-      }
-
-      // Copy .pi into the temp dir so bryti reads existing auth/models.json
-      // but all writes (including settings.json rewrites) stay in temp.
-      const realPiDir = join(realDataDir, ".pi");
-      const tempPiDir = join(targetDir, ".pi");
-      if (fs.existsSync(realPiDir)) {
-        fs.mkdirSync(tempPiDir, { recursive: true });
-        for (const entry of fs.readdirSync(realPiDir, {
-          withFileTypes: true,
-        })) {
-          const src = join(realPiDir, entry.name);
-          const dst = join(tempPiDir, entry.name);
-          try {
-            if (entry.isDirectory()) {
-              fs.symlinkSync(src, dst);
-            } else {
-              fs.copyFileSync(src, dst);
-            }
-          } catch {
-            // Non-fatal
-          }
-        }
-      }
-
-      return targetDir;
-    } catch (err: unknown) {
-      console.error(
-        "Warning: failed to prepare Bryti proxy config:",
-        err instanceof Error ? err.message : String(err),
-      );
-      return targetDir;
     }
   }
 
@@ -1096,7 +630,7 @@ if (parsedArgs.commandName === "analyze") {
     if (cleanupDidRun) return;
     cleanupDidRun = true;
 
-    const remainingRefs = decrementRefCount();
+    const remainingRefs = decrementLockRefCount();
 
     if (mitmProcess && !mitmProcess.killed) {
       mitmProcess.kill();
@@ -1140,547 +674,4 @@ if (parsedArgs.commandName === "analyze") {
   process.on("SIGTERM", () => {
     if (childProcess && !childProcess.killed) childProcess.kill("SIGTERM");
   });
-}
-
-interface UpdateCheckCache {
-  checkedAt: number;
-  latestVersion: string;
-}
-
-interface BackgroundState {
-  proxyPid: number;
-  analysisPid: number | null;
-  noUi: boolean;
-  startedAt: string;
-}
-
-function getBackgroundStatePath(): string {
-  return join(homedir(), ".context-lens", "background.json");
-}
-
-function ensureContextLensDir(): void {
-  fs.mkdirSync(join(homedir(), ".context-lens"), { recursive: true });
-}
-
-function readBackgroundState(): BackgroundState | null {
-  try {
-    const raw = fs.readFileSync(getBackgroundStatePath(), "utf8");
-    const parsed = JSON.parse(raw);
-    if (
-      parsed &&
-      typeof parsed === "object" &&
-      typeof parsed.proxyPid === "number" &&
-      (typeof parsed.analysisPid === "number" || parsed.analysisPid === null) &&
-      typeof parsed.noUi === "boolean" &&
-      typeof parsed.startedAt === "string"
-    ) {
-      return parsed as BackgroundState;
-    }
-  } catch {}
-  return null;
-}
-
-function writeBackgroundState(state: BackgroundState): void {
-  ensureContextLensDir();
-  fs.writeFileSync(
-    getBackgroundStatePath(),
-    `${JSON.stringify(state, null, 2)}\n`,
-  );
-}
-
-function clearBackgroundState(): void {
-  try {
-    fs.unlinkSync(getBackgroundStatePath());
-  } catch {}
-}
-
-function isPidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function isBackgroundRunning(state: BackgroundState): boolean {
-  const proxyAlive = isPidAlive(state.proxyPid);
-  const analysisAlive =
-    state.analysisPid == null || isPidAlive(state.analysisPid);
-  return proxyAlive && analysisAlive;
-}
-
-function parseBackgroundArgs(
-  args: string[],
-  globalNoUi: boolean,
-): { action: "start" | "stop" | "status"; noUi: boolean } | { error: string } {
-  const actionArg = args[0] || "status";
-  if (!["start", "stop", "status"].includes(actionArg)) {
-    return {
-      error: "Error: background command requires one of: start, stop, status",
-    };
-  }
-  const localNoUi = args.includes("--no-ui");
-  return {
-    action: actionArg as "start" | "stop" | "status",
-    noUi: globalNoUi || localNoUi,
-  };
-}
-
-async function runBackgroundCommand(
-  args: string[],
-  globalNoUi: boolean,
-): Promise<number> {
-  const parsed = parseBackgroundArgs(args, globalNoUi);
-  if ("error" in parsed) {
-    console.error(parsed.error);
-    return 1;
-  }
-  if (parsed.action === "status") {
-    return backgroundStatus();
-  }
-  if (parsed.action === "stop") {
-    return backgroundStop();
-  }
-  return backgroundStart(parsed.noUi);
-}
-
-function backgroundStatus(): number {
-  const state = readBackgroundState();
-  if (!state) {
-    console.log("Background status: not running");
-    return 0;
-  }
-  const running = isBackgroundRunning(state);
-  if (!running) {
-    console.log("Background status: stale state found (not running)");
-    clearBackgroundState();
-    return 0;
-  }
-  console.log("Background status: running");
-  console.log(`  proxy pid: ${state.proxyPid}`);
-  if (state.analysisPid != null) {
-    console.log(`  analysis pid: ${state.analysisPid}`);
-  } else {
-    console.log("  analysis: disabled (--no-ui)");
-  }
-  console.log(`  started: ${state.startedAt}`);
-  return 0;
-}
-
-function backgroundStop(): number {
-  const state = readBackgroundState();
-  if (!state) {
-    console.log("Background status: not running");
-    return 0;
-  }
-
-  const pids = [state.proxyPid, state.analysisPid].filter(
-    (pid): pid is number => pid != null,
-  );
-  for (const pid of pids) {
-    try {
-      process.kill(pid, "SIGTERM");
-    } catch {}
-  }
-  clearBackgroundState();
-  console.log("Background services stopped.");
-  return 0;
-}
-
-async function backgroundStart(noUi: boolean): Promise<number> {
-  const existing = readBackgroundState();
-  if (existing && isBackgroundRunning(existing)) {
-    console.log("Background status: already running");
-    console.log(`  proxy pid: ${existing.proxyPid}`);
-    return 0;
-  }
-  if (existing) clearBackgroundState();
-
-  const proxyPath = join(__dirname, "proxy", "server.js");
-  const proxyEnv: Record<string, string> = {
-    ...(process.env as Record<string, string>),
-    CONTEXT_LENS_CLI: "1",
-    ...(noUi ? {} : { CONTEXT_LENS_ANALYSIS_URL: CLI_CONSTANTS.UI_URL }),
-  };
-  const proxy = spawn("node", [proxyPath], {
-    stdio: "ignore",
-    detached: true,
-    env: proxyEnv,
-  });
-  proxy.unref();
-
-  let analysis: ChildProcess | null = null;
-  if (!noUi) {
-    const analysisPath = join(__dirname, "analysis", "server.js");
-    analysis = spawn("node", [analysisPath], {
-      stdio: "ignore",
-      detached: true,
-      env: { ...process.env, CONTEXT_LENS_CLI: "1" },
-    });
-    analysis.unref();
-  }
-
-  // Give children a brief chance to fail immediately (e.g. command not found).
-  await new Promise((resolve) => setTimeout(resolve, 150));
-
-  const proxyPid = proxy.pid ?? 0;
-  const analysisPid = analysis?.pid ?? null;
-  if (!proxyPid || !isPidAlive(proxyPid)) {
-    console.error("Failed to start proxy in background.");
-    return 1;
-  }
-  if (analysisPid != null && !isPidAlive(analysisPid)) {
-    console.error("Failed to start analysis server in background.");
-    try {
-      process.kill(proxyPid, "SIGTERM");
-    } catch {}
-    return 1;
-  }
-
-  writeBackgroundState({
-    proxyPid,
-    analysisPid,
-    noUi,
-    startedAt: new Date().toISOString(),
-  });
-
-  console.log("Background services started.");
-  console.log(`  proxy: ${CLI_CONSTANTS.PROXY_URL} (pid ${proxyPid})`);
-  if (analysisPid != null) {
-    console.log(
-      `  analysis/web UI: ${CLI_CONSTANTS.UI_URL} (pid ${analysisPid})`,
-    );
-  } else {
-    console.log("  analysis/web UI: disabled (--no-ui)");
-  }
-  return 0;
-}
-
-async function isPortListening(port: number): Promise<boolean> {
-  return await new Promise((resolve) => {
-    const socket = net.connect({ port, host: "localhost" }, () => {
-      socket.end();
-      resolve(true);
-    });
-    socket.on("error", () => resolve(false));
-    socket.setTimeout(700, () => {
-      socket.destroy();
-      resolve(false);
-    });
-  });
-}
-
-function findBinaryOnPath(binary: string): string | null {
-  const pathValue = process.env.PATH || "";
-  const dirs = pathValue.split(":").filter(Boolean);
-  for (const dir of dirs) {
-    const full = join(dir, binary);
-    if (fs.existsSync(full)) return full;
-  }
-  return null;
-}
-
-function checkWritableDir(targetDir: string): boolean {
-  try {
-    fs.mkdirSync(targetDir, { recursive: true });
-    fs.accessSync(targetDir, fs.constants.W_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function runAnalyze(args: string[]): Promise<number> {
-  // Lazy import to avoid loading analysis code unless needed
-  const { readLharFile } = await import("./lhar.js");
-  const { analyzeSession, formatSessionAnalysis } = await import("./core.js");
-
-  // Parse analyze-specific arguments
-  let filepath: string | undefined;
-  let outputJson = false;
-  let mainOnly = false;
-  let showPath = true;
-  let compositionArg: string | undefined;
-
-  for (const arg of args) {
-    if (arg === "--json") {
-      outputJson = true;
-    } else if (arg === "--main-only") {
-      mainOnly = true;
-    } else if (arg === "--no-path") {
-      showPath = false;
-    } else if (arg.startsWith("--composition=")) {
-      compositionArg = arg.split("=", 1 + 1)[1];
-    } else if (arg === "--help" || arg === "-h") {
-      console.log(
-        [
-          "Usage: context-lens analyze <session.lhar> [options]",
-          "",
-          "Analyze an LHAR session file and print detailed statistics.",
-          "",
-          "Options:",
-          "  --json                    Output as JSON",
-          "  --no-path                 Omit agent path trace",
-          "  --main-only               Only analyze main agent entries",
-          "  --composition=last        Composition of last entry (default)",
-          "  --composition=pre-compaction  Composition before each compaction",
-          "  --composition=N           Composition at end of user turn N",
-        ].join("\n"),
-      );
-      return 0;
-    } else if (!arg.startsWith("-")) {
-      filepath = arg;
-    } else {
-      console.error(`Unknown option: ${arg}`);
-      return 1;
-    }
-  }
-
-  if (!filepath) {
-    console.error(
-      "Error: no session file specified. Usage: context-lens analyze <session.lhar>",
-    );
-    return 1;
-  }
-
-  // Resolve filepath: try as-is, then in ~/.context-lens/data/, then in ./data/
-  let resolvedPath = filepath;
-  if (!fs.existsSync(resolvedPath)) {
-    const homeData = join(homedir(), ".context-lens", "data", filepath);
-    const localData = join("data", filepath);
-    if (fs.existsSync(homeData)) {
-      resolvedPath = homeData;
-    } else if (fs.existsSync(localData)) {
-      resolvedPath = localData;
-    } else {
-      console.error(`Error: file not found: ${filepath}`);
-      console.error(`  Searched: ${filepath}, ${homeData}, ${localData}`);
-      return 1;
-    }
-  }
-
-  try {
-    const { session, entries } = readLharFile(resolvedPath);
-    const basename = resolvedPath.split("/").pop() || resolvedPath;
-    const analysis = analyzeSession(session, entries, basename, { mainOnly });
-
-    if (outputJson) {
-      console.log(JSON.stringify(analysis, null, 2));
-    } else {
-      const output = formatSessionAnalysis(analysis, {
-        showPath,
-        composition: compositionArg,
-        entries,
-      });
-      console.log(output);
-    }
-    return 0;
-  } catch (err: unknown) {
-    console.error(
-      `Error analyzing ${resolvedPath}:`,
-      err instanceof Error ? err.message : String(err),
-    );
-    return 1;
-  }
-}
-
-async function runDoctor(): Promise<number> {
-  let hasFailures = false;
-  function report(name: string, ok: boolean, detail: string): void {
-    const mark = ok ? "OK" : "FAIL";
-    console.log(`[${mark}] ${name}: ${detail}`);
-    if (!ok) hasFailures = true;
-  }
-  function info(name: string, detail: string): void {
-    console.log(`[INFO] ${name}: ${detail}`);
-  }
-
-  console.log(`Context Lens doctor v${VERSION}`);
-
-  report("node", true, process.version);
-
-  const proxyListening = await isPortListening(CLI_CONSTANTS.PROXY_PORT);
-  report(
-    `proxy port :${CLI_CONSTANTS.PROXY_PORT}`,
-    true,
-    proxyListening ? "already running" : "available/not running",
-  );
-
-  const analysisListening = await isPortListening(CLI_CONSTANTS.UI_PORT);
-  report(
-    `analysis port :${CLI_CONSTANTS.UI_PORT}`,
-    true,
-    analysisListening ? "already running" : "available/not running",
-  );
-
-  // mitmproxy is only needed for Codex subscription mode, so report as
-  // informational rather than a hard failure.
-  const mitmdumpPath = findBinaryOnPath("mitmdump");
-  info(
-    "mitmdump (Codex, pi --mitm)",
-    mitmdumpPath ?? "not found (install: pipx install mitmproxy)",
-  );
-
-  const certPath = join(homedir(), ".mitmproxy", "mitmproxy-ca-cert.pem");
-  const certExists = fs.existsSync(certPath);
-  info(
-    "mitm CA cert (Codex, pi --mitm)",
-    certExists ? certPath : "not present (run 'mitmdump' once to generate)",
-  );
-  if (certExists && platform() === "darwin") {
-    try {
-      const result = spawnSync("security", ["verify-cert", "-c", certPath], {
-        stdio: "pipe",
-      });
-      info(
-        "mitm CA cert trusted in macOS Keychain",
-        result.status === 0
-          ? "yes"
-          : `NO — Codex will fail. Fix: sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ${certPath}`,
-      );
-    } catch {
-      // Non-fatal.
-    }
-  }
-
-  const contextDir = join(homedir(), ".context-lens");
-  const dataDir = join(contextDir, "data");
-  report("context dir writable", checkWritableDir(contextDir), contextDir);
-  report("data dir writable", checkWritableDir(dataDir), dataDir);
-
-  const bg = readBackgroundState();
-  if (!bg) {
-    report("background state", true, "not running");
-  } else {
-    report(
-      "background state",
-      isBackgroundRunning(bg),
-      isBackgroundRunning(bg) ? "running" : "stale state file",
-    );
-  }
-
-  const lockfileExists = fs.existsSync(LOCKFILE);
-  report(
-    "lockfile",
-    true,
-    lockfileExists ? `${LOCKFILE} present` : `${LOCKFILE} absent`,
-  );
-
-  const configPath = join(homedir(), ".context-lens", "config.toml");
-  const configExists = fs.existsSync(configPath);
-  info(
-    "config file",
-    configExists
-      ? configPath
-      : `not present — create ${configPath} to set defaults`,
-  );
-  if (configExists) {
-    const cfg = loadConfig();
-    if (cfg.proxy.redact) info("config: redact", cfg.proxy.redact);
-    if (cfg.proxy.rehydrate) info("config: rehydrate", "true");
-    if (cfg.ui.noOpen) info("config: no_open", "true");
-    if (cfg.privacy.level) info("config: privacy", cfg.privacy.level);
-  }
-
-  if (hasFailures) {
-    console.log("Doctor result: issues found.");
-    return 1;
-  }
-  console.log("Doctor result: all checks passed.");
-  return 0;
-}
-
-function checkForUpdate(currentVersion: string): void {
-  const cachePath = join(homedir(), ".context-lens", "update-check.json");
-  const dayMs = 24 * 60 * 60 * 1000;
-  let cached: UpdateCheckCache | null = null;
-  try {
-    const raw = fs.readFileSync(cachePath, "utf8");
-    const parsed = JSON.parse(raw);
-    if (
-      parsed &&
-      typeof parsed === "object" &&
-      typeof parsed.checkedAt === "number" &&
-      typeof parsed.latestVersion === "string"
-    ) {
-      cached = parsed as UpdateCheckCache;
-    }
-  } catch {}
-
-  if (cached && Date.now() - cached.checkedAt < dayMs) {
-    if (isNewerVersion(cached.latestVersion, currentVersion)) {
-      printUpdateNotice(currentVersion, cached.latestVersion);
-    }
-    return;
-  }
-
-  const req = https.get(
-    "https://registry.npmjs.org/context-lens/latest",
-    { timeout: 1500 },
-    (res) => {
-      if (res.statusCode !== 200) return;
-      let body = "";
-      res.setEncoding("utf8");
-      res.on("data", (chunk) => {
-        body += chunk;
-      });
-      res.on("end", () => {
-        try {
-          const parsed = JSON.parse(body) as { version?: string };
-          if (!parsed.version) return;
-          const latestVersion = parsed.version;
-          try {
-            fs.mkdirSync(join(homedir(), ".context-lens"), {
-              recursive: true,
-            });
-            fs.writeFileSync(
-              cachePath,
-              `${JSON.stringify(
-                { checkedAt: Date.now(), latestVersion },
-                null,
-                2,
-              )}\n`,
-            );
-          } catch {}
-          if (isNewerVersion(latestVersion, currentVersion)) {
-            printUpdateNotice(currentVersion, latestVersion);
-          }
-        } catch {}
-      });
-    },
-  );
-  req.on("error", () => {});
-  req.on("timeout", () => req.destroy());
-}
-
-function isNewerVersion(candidate: string, current: string): boolean {
-  const a = splitSemver(candidate);
-  const b = splitSemver(current);
-  for (let i = 0; i < 3; i++) {
-    if (a[i] > b[i]) return true;
-    if (a[i] < b[i]) return false;
-  }
-  return false;
-}
-
-function splitSemver(version: string): [number, number, number] {
-  const [major, minor, patch] = version.split(".", 3).map((part) => {
-    const parsed = Number.parseInt(part.replace(/[^0-9].*$/, ""), 10);
-    return Number.isFinite(parsed) ? parsed : 0;
-  });
-  return [major ?? 0, minor ?? 0, patch ?? 0];
-}
-
-function printUpdateNotice(
-  currentVersion: string,
-  latestVersion: string,
-): void {
-  console.error(
-    `\nUpdate available: context-lens ${currentVersion} -> ${latestVersion}`,
-  );
-  console.error("Run: npm install -g context-lens");
-  console.error(
-    "Skip this check: --no-update-check or CONTEXT_LENS_NO_UPDATE_CHECK=1\n",
-  );
 }
