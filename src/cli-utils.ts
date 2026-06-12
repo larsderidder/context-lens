@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -488,4 +489,73 @@ export function addProvidersBasedOnEnvVars(
       providers[providerName] = { baseUrl: proxyBaseUrl };
     }
   }
+}
+
+export function resolveLensSource(
+  setting: string,
+  commandName: string,
+): string {
+  if (setting === "commandName") return commandName;
+  if (setting === "auto") return "";
+  return setting;
+}
+
+export function resolveLensSessionId(
+  setting: string,
+  randomHex: () => string = () => randomBytes(4).toString("hex"),
+): string {
+  if (setting === "random") return randomHex();
+  if (setting === "none") return "";
+  return setting;
+}
+
+/**
+ * Convert a reverse-proxy tool config into an HTTPS forward-proxy config.
+ * Values set to [CA_CERT_PATH] are replaced later once the CA file is known.
+ */
+export function toMitmToolConfig(
+  toolConfig: ToolConfig,
+  mitmConfig: MitmConfig,
+): ToolConfig {
+  return {
+    ...toolConfig,
+    childEnv: {
+      https_proxy: mitmConfig.proxyUrl,
+      NPM_CONFIG_HTTPS_PROXY: mitmConfig.proxyUrl,
+      WSS_PROXY: mitmConfig.proxyUrl,
+      NODE_USE_ENV_PROXY: "1",
+      SSL_CERT_FILE: "[CA_CERT_PATH]",
+      NODE_EXTRA_CA_CERTS: "[CA_CERT_PATH]",
+      REQUESTS_CA_BUNDLE: "[CA_CERT_PATH]",
+    },
+    needsMitm: true,
+  };
+}
+
+/**
+ * Add a per-run session path segment to plain context-lens proxy URLs.
+ * URLs already carrying a second path segment are left untouched.
+ */
+export function injectSessionTagIntoProxyEnv(
+  env: Record<string, string | undefined>,
+  sessionTag: string,
+  proxyUrl = PROXY_URL,
+): Record<string, string | undefined> {
+  const result: Record<string, string | undefined> = { ...env };
+  const proxyBase = `${proxyUrl}/`;
+
+  for (const key of Object.keys(result)) {
+    const value = result[key];
+    if (typeof value !== "string") continue;
+    if (!value.startsWith(proxyBase)) continue;
+
+    const hadTrailingSlash = value.endsWith("/");
+    const after = value.slice(proxyBase.length).replace(/\/$/, "");
+    if (!after || after.includes("/")) continue;
+
+    const suffix = hadTrailingSlash ? "/" : "";
+    result[key] = `${proxyBase}${after}/${sessionTag}${suffix}`;
+  }
+
+  return result;
 }

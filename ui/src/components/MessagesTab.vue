@@ -5,9 +5,22 @@ import { useSessionStore } from '@/stores/session'
 import { useExpandable } from '@/composables/useExpandable'
 import { fmtTokens, shortModel } from '@/utils/format'
 import { groupMessagesByCategory, buildToolNameMap, extractPreview, CATEGORY_META, classifyMessageRole, classifyEntries } from '@/utils/messages'
-import { makeRelative, shortFileName } from '@/utils/files'
+import { shortFileName } from '@/utils/files'
 import { messageIdAt, isPrunedAt } from '@/utils/prune'
-import type { ParsedMessage, ToolUseBlock, ProjectedEntry } from '@/api-types'
+import {
+  findFileRelatedMessageIndices,
+  findIndexBySelectionSignature as findSelectionIndex,
+  messageSelectionSignature,
+} from '@/utils/message-focus'
+import {
+  buildChronoMessages,
+  buildTurnNumberMap,
+  countLocalTurns,
+  detectTurnBoundarySet,
+  getMainTurnNumber,
+  groupSubagentEntriesByTurnBoundary,
+} from '@/utils/message-timeline'
+import type { ParsedMessage, ProjectedEntry } from '@/api-types'
 import DetailPane from '@/components/DetailPane.vue'
 
 const store = useSessionStore()
@@ -102,81 +115,15 @@ function findPrunedMessage(origIdx: number): ParsedMessage | null {
   return null
 }
 
-const chronoAllMessages = computed(() => {
-  const pruned = prunedMessages.value
-  const currentMsgs = messages.value
+const chronoAllMessages = computed(() => buildChronoMessages({
+  currentMessages: messages.value,
+  latestMessages: latestMessages.value,
+  prunedMessageIds: prunedMessages.value,
+  includeFuture: hasFutureMessages.value,
+  findPrunedMessage,
+}))
 
-  // Build the full list, re-inserting pruned messages at their original indices
-  type ChronoItem = { msg: ParsedMessage; origIdx: number; future: boolean; prunedGhost: boolean }
-  const result: ChronoItem[] = []
-
-  if (pruned.length > 0) {
-    // Parse pruned indices: "user:2" → { index: 2 }, "tool_use:xxx" → no index
-    const prunedIndices = new Map<number, string>() // index → pruneId
-    for (const id of pruned) {
-      const match = id.match(/^(user|assistant|unknown):(\d+)$/)
-      if (match) prunedIndices.set(parseInt(match[2]), id)
-    }
-
-    // Merge: walk through original indices, inserting current messages
-    // and pruned ghosts at the right positions
-    let currentIdx = 0
-    const maxIdx = Math.max(
-      currentMsgs.length + prunedIndices.size,
-      prunedIndices.size > 0 ? Math.max(...prunedIndices.keys()) + 1 : 0,
-    )
-    for (let origIdx = 0; origIdx < maxIdx; origIdx++) {
-      if (prunedIndices.has(origIdx)) {
-        const ghost = findPrunedMessage(origIdx)
-        if (ghost) {
-          result.push({ msg: ghost, origIdx, future: false, prunedGhost: true })
-        }
-      } else if (currentIdx < currentMsgs.length) {
-        result.push({ msg: currentMsgs[currentIdx], origIdx, future: false, prunedGhost: false })
-        currentIdx++
-      }
-    }
-    // Remaining current messages (shouldn't happen, but safe)
-    while (currentIdx < currentMsgs.length) {
-      result.push({ msg: currentMsgs[currentIdx], origIdx: result.length, future: false, prunedGhost: false })
-      currentIdx++
-    }
-  } else {
-    for (let i = 0; i < currentMsgs.length; i++) {
-      result.push({ msg: currentMsgs[i], origIdx: i, future: false, prunedGhost: false })
-    }
-  }
-
-  // Append future messages if applicable
-  if (hasFutureMessages.value) {
-    for (let i = currentMsgs.length; i < latestMessages.value.length; i++) {
-      result.push({ msg: latestMessages.value[i], origIdx: i, future: true, prunedGhost: false })
-    }
-  }
-
-  return result
-})
-
-// Detect turn boundaries in the message list.
-// A turn boundary is where a new user message appears after assistant output,
-// signaling the start of a new conversational turn.
-const chronoTurnBoundaries = computed(() => {
-  const msgs = chronoAllMessages.value
-  const boundaries = new Set<number>()
-  // Mark index 0 as the start of turn 1
-  if (msgs.length > 0) boundaries.add(0)
-  let seenAssistant = false
-  for (let i = 0; i < msgs.length; i++) {
-    const role = msgs[i].msg.role
-    if (role === 'assistant') {
-      seenAssistant = true
-    } else if (role === 'user' && seenAssistant) {
-      boundaries.add(i)
-      seenAssistant = false
-    }
-  }
-  return boundaries
-})
+const chronoTurnBoundaries = computed(() => detectTurnBoundarySet(chronoAllMessages.value))
 
 // ── Subagent interleaving for "All" mode ──
 
@@ -188,63 +135,12 @@ const subagentEntriesByTurnBoundary = computed((): Map<number, ProjectedEntry[]>
   const e = entry.value
   if (!s || !e || store.messagesMode !== 'all') return new Map()
 
-  // Classify entries oldest-first
-  const classified = classifyEntries([...s.entries].reverse())
-
-  // Build list of main entries and collect subagent entries between them.
-  // groups[i] = subagent entries that come after main entry i and before main entry i+1.
-  const mainEntries: ProjectedEntry[] = []
-  const subsBetween: ProjectedEntry[][] = [] // subsBetween[i] = subs after main[i]
-  let pendingSubs: ProjectedEntry[] = []
-
-  for (const item of classified) {
-    if (item.isMain) {
-      mainEntries.push(item.entry)
-      // Flush pending subs from before this main entry
-      if (mainEntries.length > 1) {
-        subsBetween.push([...pendingSubs])
-      }
-      pendingSubs = []
-    } else {
-      if (mainEntries.length > 0) {
-        pendingSubs.push(item.entry)
-      }
-    }
-  }
-  // Trailing subs after the last main entry
-  subsBetween.push([...pendingSubs])
-
-  // Find which main-entry index the selected entry is
-  const selectedMainIdx = mainEntries.findIndex(me => me.id === e.id)
-  if (selectedMainIdx < 0) return new Map()
-
-  // The turn boundaries (sorted) correspond to main turns visible in the context.
-  // boundary[0] = first visible main turn, boundary[1] = second, etc.
-  // The offset tells us how many main turns were compacted.
-  const boundaries = Array.from(chronoTurnBoundaries.value).sort((a, b) => a - b)
-  const offset = turnOffset.value // number of compacted main turns before boundary[0]
-
-  const result = new Map<number, ProjectedEntry[]>()
-
-  // For each group of subagent entries between main[i] and main[i+1]:
-  // They should appear before the turn boundary for main[i+1].
-  // subsBetween[0] = between main[0] and main[1] -> before boundary for main[1]
-  // subsBetween[k] = between main[k] and main[k+1] -> before boundary for main[k+1]
-  for (let i = 0; i <= selectedMainIdx && i < subsBetween.length; i++) {
-    const subs = subsBetween[i]
-    if (subs.length === 0) continue
-
-    // This group goes before main entry i+1, which is boundary index (i+1 - offset)
-    const boundaryLocalIdx = (i + 1) - offset
-    if (boundaryLocalIdx < 0) continue // compacted away
-    if (boundaryLocalIdx < boundaries.length) {
-      result.set(boundaries[boundaryLocalIdx], subs)
-    }
-    // If boundaryLocalIdx >= boundaries.length, subs are after the last visible turn
-    // (shouldn't happen since we stop at selectedMainIdx)
-  }
-
-  return result
+  return groupSubagentEntriesByTurnBoundary({
+    entriesNewestFirst: s.entries,
+    selectedEntryId: e.id,
+    boundaryIndices: Array.from(chronoTurnBoundaries.value),
+    turnOffset: turnOffset.value,
+  })
 })
 
 // Global turn number of the selected entry (1-based), derived from the session's
@@ -255,40 +151,18 @@ const globalTurnNumber = computed(() => {
   const s = session.value
   const e = entry.value
   if (!s || !e) return 1
-  // entries are newest-first; reverse for chronological order
-  const classified = classifyEntries([...s.entries].reverse())
-  let idx = 0
-  for (const item of classified) {
-    if (item.isMain) idx++
-    if (item.entry.id === e.id) return idx
-  }
-  return 1
+  return getMainTurnNumber(s.entries, e.id)
 })
 
-// How many user/assistant turns belong to the *selected* entry (exclude future messages).
-const localTurnCount = computed(() => {
-  const msgCount = selectedMessageCount.value
-  let count = 0
-  for (const idx of chronoTurnBoundaries.value) {
-    if (idx < msgCount) count++
-  }
-  return count
-})
+// How many user/assistant turns belong to the selected entry, excluding future messages.
+const localTurnCount = computed(() => countLocalTurns(chronoTurnBoundaries.value, selectedMessageCount.value))
 
 // Offset: global turn number minus local turn count gives how many turns
 // were compacted away before the first visible message.
 const turnOffset = computed(() => Math.max(0, globalTurnNumber.value - localTurnCount.value))
 
 // Map from message index to turn number
-const chronoTurnNumbers = computed(() => {
-  const map = new Map<number, number>()
-  let turnNum = turnOffset.value
-  for (const idx of chronoTurnBoundaries.value) {
-    turnNum++
-    map.set(idx, turnNum)
-  }
-  return map
-})
+const chronoTurnNumbers = computed(() => buildTurnNumberMap(chronoTurnBoundaries.value, turnOffset.value))
 
 const categorized = computed(() => {
   return groupMessagesByCategory(messages.value)
@@ -414,45 +288,15 @@ function onMessagesKeydown(e: KeyboardEvent) {
   }
 }
 
-function messageKey(msg: ParsedMessage): string {
-  const first = (msg.contentBlocks || [])[0]
-  if (!first) return `${msg.role}|${msg.tokens || 0}|${msg.content?.slice(0, 160) || ''}`
-  if (first.type === 'tool_result') {
-    const content = typeof first.content === 'string' ? first.content : JSON.stringify(first.content || '')
-    return `${msg.role}|${msg.tokens || 0}|tool_result|${first.tool_use_id || ''}|${content.slice(0, 160)}`
-  }
-  if (first.type === 'tool_use') {
-    return `${msg.role}|${msg.tokens || 0}|tool_use|${first.id || ''}|${first.name || ''}|${JSON.stringify(first.input || {}).slice(0, 120)}`
-  }
-  const anyFirst = first as unknown as Record<string, unknown>
-  const text = String((anyFirst.text as string) || (anyFirst.thinking as string) || '').slice(0, 160)
-  return `${msg.role}|${msg.tokens || 0}|${String(anyFirst.type || 'other')}|${text}`
-}
-
 function syncSelectionSignature(index: number) {
-  const item = flatMessages.value[index]
-  if (!item) return
-  const key = messageKey(item.msg)
-  selectedMsgKey.value = key
-
-  let ordinal = 0
-  for (let i = 0; i <= index; i++) {
-    if (messageKey(flatMessages.value[i].msg) === key) ordinal += 1
-  }
-  selectedMsgOrdinal.value = Math.max(1, ordinal)
+  const signature = messageSelectionSignature(flatMessages.value, index)
+  if (!signature) return
+  selectedMsgKey.value = signature.key
+  selectedMsgOrdinal.value = signature.ordinal
 }
 
 function findIndexBySelectionSignature(): number {
-  const key = selectedMsgKey.value
-  if (!key) return -1
-  let seen = 0
-  for (let i = 0; i < flatMessages.value.length; i++) {
-    if (messageKey(flatMessages.value[i].msg) === key) {
-      seen += 1
-      if (seen === selectedMsgOrdinal.value) return i
-    }
-  }
-  return -1
+  return findSelectionIndex(flatMessages.value, selectedMsgKey.value, selectedMsgOrdinal.value)
 }
 
 function onDetailNavigate(idx: number) {
@@ -581,7 +425,7 @@ async function applyMessageFocus() {
   const snapshotFile = store.messageFocusFile
   store.clearMessageFocus()
 
-  // Focus by message index (e.g. from security alert findings)
+  // Focus by message index, such as from security alert findings.
   const focusIdx = snapshotIndex
   if (focusIdx != null) {
     // In chrono mode, origIdx maps directly to position
@@ -631,41 +475,8 @@ async function applyMessageFocus() {
     viewMode.value = 'chrono'
     await nextTick()
 
-    // Build the set of related message indices for this file
-    const msgs = messages.value
-    const fileToolIds = new Set<string>()
-    for (const msg of msgs) {
-      if (!msg.contentBlocks) continue
-      for (const block of msg.contentBlocks) {
-        if (block.type === 'tool_use') {
-          const tb = block as ToolUseBlock
-          const fp = extractToolFilePath(tb)
-          if (fp === snapshotFile) fileToolIds.add(tb.id)
-        }
-      }
-    }
-
-    // Find the first tool_result for this file and scroll to it
-    let firstRelatedIdx = -1
-    for (let i = 0; i < msgs.length; i++) {
-      const msg = msgs[i]
-      if (!msg.contentBlocks) continue
-      for (const block of msg.contentBlocks) {
-        if (block.type === 'tool_result' && fileToolIds.has(block.tool_use_id)) {
-          firstRelatedIdx = i
-          break
-        }
-        if (block.type === 'tool_use') {
-          const tb = block as ToolUseBlock
-          const fp = extractToolFilePath(tb)
-          if (fp === snapshotFile && firstRelatedIdx < 0) {
-            firstRelatedIdx = i
-            break
-          }
-        }
-      }
-      if (firstRelatedIdx >= 0) break
-    }
+    const related = findFileRelatedMessageIndices(messages.value, snapshotFile, session.value?.workingDirectory)
+    const firstRelatedIdx = related.size > 0 ? Math.min(...related) : -1
 
     if (firstRelatedIdx >= 0) {
       for (let attempt = 0; attempt < 4; attempt++) {
@@ -756,73 +567,11 @@ function clearFileFilter() {
   store.clearMessageFocus()
 }
 
-/**
- * Build a set of message indices that relate to the focused file path.
- * A message is related if it contains a tool_use targeting that file,
- * or a tool_result whose corresponding tool_use targeted that file.
- */
 const fileRelatedMessageIndices = computed((): Set<number> => {
   const file = focusedFile.value
   if (!file) return new Set()
-
-  const msgs = messages.value
-  const indices = new Set<number>()
-
-  // Build a map of tool_use IDs that target the focused file
-  const fileToolIds = new Set<string>()
-  for (let i = 0; i < msgs.length; i++) {
-    const msg = msgs[i]
-    if (!msg.contentBlocks) continue
-    for (const block of msg.contentBlocks) {
-      if (block.type === 'tool_use') {
-        const tb = block as ToolUseBlock
-        const filePath = extractToolFilePath(tb)
-        if (filePath === file) {
-          fileToolIds.add(tb.id)
-          indices.add(i)
-        }
-      }
-    }
-  }
-
-  // Find tool_result messages whose tool_use_id matches
-  for (let i = 0; i < msgs.length; i++) {
-    const msg = msgs[i]
-    if (!msg.contentBlocks) continue
-    for (const block of msg.contentBlocks) {
-      if (block.type === 'tool_result' && fileToolIds.has(block.tool_use_id)) {
-        indices.add(i)
-      }
-    }
-  }
-
-  return indices
+  return findFileRelatedMessageIndices(messages.value, file, session.value?.workingDirectory)
 })
-
-/**
- * Extract a normalized file path from a tool_use block, or null.
- * Applies makeRelative using the session's working directory so paths
- * match the relative format used by the file attribution panel.
- *
- * When input is empty (compacted entries), falls back to parsing
- * the parent message's content string.
- */
-function extractToolFilePath(block: ToolUseBlock): string | null {
-  const input = block.input
-  const wd = store.selectedSession?.workingDirectory
-  if (input && typeof input === 'object') {
-    for (const key of ['file_path', 'path', 'filePath']) {
-      const val = input[key]
-      if (typeof val === 'string' && val.length > 0) {
-        let result = val.replace(/\/+/g, '/')
-        if (result.startsWith('./')) result = result.slice(2)
-        if (result.length > 1 && result.endsWith('/')) result = result.slice(0, -1)
-        return makeRelative(result, wd)
-      }
-    }
-  }
-  return null
-}
 
 function rowClassForFileFocus(origIdx: number): Record<string, boolean> {
   const file = focusedFile.value
@@ -987,7 +736,7 @@ watch(
               >
                 <span class="msg-role">{{ item.msg.role === 'user' ? '›' : item.msg.role === 'assistant' ? '‹' : '·' }}</span>
                 <span class="msg-preview">{{ extractPreview(item.msg, toolNameMap) || '(empty)' }}</span>
-                <span class="msg-tok" :class="{ hot: (item.msg.tokens || 0) > 2000, oversized: isOversizedResult(item.msg) }" v-tooltip="isOversizedResult(item.msg) ? 'Tool result exceeds 8K tokens — re-sent every turn' : undefined">{{ fmtTokens(item.msg.tokens || 0) }}</span>
+                <span class="msg-tok" :class="{ hot: (item.msg.tokens || 0) > 2000, oversized: isOversizedResult(item.msg) }" v-tooltip="isOversizedResult(item.msg) ? 'Tool result exceeds 8K tokens, re-sent every turn' : undefined">{{ fmtTokens(item.msg.tokens || 0) }}</span>
               </div>
             </div>
           </div>
@@ -1057,7 +806,7 @@ watch(
                   <span class="chrono-cat-dot" :style="{ background: chronoCategoryColor(item.msg) }" />
                   <span class="chrono-type">{{ chronoCategoryLabel(item.msg) }}</span>
                   <span class="chrono-preview">{{ extractPreview(item.msg, toolNameMap) || '(empty)' }}</span>
-                  <span class="chrono-tok" :class="{ hot: !item.future && (item.msg.tokens || 0) > 2000, oversized: !item.future && isOversizedResult(item.msg) }" v-tooltip="!item.future && isOversizedResult(item.msg) ? 'Tool result exceeds 8K tokens — re-sent every turn, crowding conversation history' : undefined">{{ fmtTokens(item.msg.tokens || 0) }}</span>
+                  <span class="chrono-tok" :class="{ hot: !item.future && (item.msg.tokens || 0) > 2000, oversized: !item.future && isOversizedResult(item.msg) }" v-tooltip="!item.future && isOversizedResult(item.msg) ? 'Tool result exceeds 8K tokens, re-sent every turn, crowding conversation history' : undefined">{{ fmtTokens(item.msg.tokens || 0) }}</span>
                   <button
                     v-if="!item.future && !item.prunedGhost && !isMsgPruned(item.msg, item.origIdx)"
                     class="prune-btn"

@@ -17,7 +17,11 @@ import {
   formatHelpText,
   getMitmConfig,
   getToolConfig,
+  injectSessionTagIntoProxyEnv,
   parseCliArgs,
+  resolveLensSessionId,
+  resolveLensSource,
+  toMitmToolConfig,
 } from "./cli-utils.js";
 import { loadConfig } from "./config.js";
 import { VERSION } from "./version.generated.js";
@@ -25,20 +29,7 @@ import { VERSION } from "./version.generated.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Known tool config: env vars for the child process, extra CLI args, server env vars, and whether mitmproxy is needed
-// Note: actual tool config lives in cli-utils.ts so it can be unit-tested without importing this entrypoint.
-
-function resolveLensSource(setting: string, commandName: string): string {
-  if (setting === "commandName") return commandName;
-  if (setting === "auto") return "";
-  return setting; // fixed string
-}
-
-function resolveLensSessionId(setting: string): string {
-  if (setting === "random") return randomBytes(4).toString("hex");
-  if (setting === "none") return "";
-  return setting; // fixed string
-}
+// Known tool config lives in cli-utils.ts so it can be unit-tested without importing this entrypoint.
 const LOCKFILE = join(tmpdir(), "context-lens.lock");
 
 const rawArgs = process.argv.slice(2);
@@ -62,7 +53,7 @@ const envKeyToValue: Record<string, string> = {
   CONTEXT_LENS_PROXY_PORT: String(CLI_CONSTANTS.PROXY_PORT),
   CONTEXT_LENS_ANALYSIS_PORT: String(CLI_CONSTANTS.UI_PORT),
   CONTEXT_LENS_ANALYSIS_URL: CLI_CONSTANTS.UI_URL,
-  CONTEXT_LENS_INGEST_URL: CLI_CONSTANTS.UI_URL + "/api/ingest",
+  CONTEXT_LENS_INGEST_URL: `${CLI_CONSTANTS.UI_URL}/api/ingest`,
 };
 for (const [key, value] of Object.entries(envKeyToValue)) {
   if (!process.env[key]) process.env[key] = value;
@@ -160,22 +151,7 @@ if (parsedArgs.commandName === "analyze") {
   const mitmConfig = getMitmConfig();
   let toolConfig = getToolConfig(commandName);
   if (useMitm || toolConfig.needsMitm) {
-    // if mitm is specified on the CLI or the tool always requires mitm we replace the normal reverse_proxy/forced provider urls with forward proxy redirection.
-    toolConfig = {
-      ...toolConfig,
-      childEnv: {
-        https_proxy: mitmConfig.proxyUrl,
-        NPM_CONFIG_HTTPS_PROXY: mitmConfig.proxyUrl,
-        WSS_PROXY: mitmConfig.proxyUrl,
-        NODE_USE_ENV_PROXY: "1",
-
-        //these are all filled in with the CA cert path
-        SSL_CERT_FILE: "[CA_CERT_PATH]",
-        NODE_EXTRA_CA_CERTS: "[CA_CERT_PATH]",
-        REQUESTS_CA_BUNDLE: "[CA_CERT_PATH]",
-      },
-      needsMitm: true,
-    };
+    toolConfig = toMitmToolConfig(toolConfig, mitmConfig);
   }
 
   if (noUi && toolConfig.needsMitm) {
@@ -567,20 +543,10 @@ if (parsedArgs.commandName === "analyze") {
           sessionTag,
         );
       }
-      for (const key of Object.keys(childEnv)) {
-        const val = childEnv[key];
-        if (typeof val !== "string") continue;
-        // Match any value that points at our proxy and ends with /<source> or /<source>/
-        const proxyBase = `${CLI_CONSTANTS.PROXY_URL}/`;
-        if (!val.startsWith(proxyBase)) continue;
-        const hadTrailingSlash = val.endsWith("/");
-        const after = val.slice(proxyBase.length).replace(/\/$/, "");
-        // Only inject if the remaining path is just the source tag (no session already)
-        if (after && !after.includes("/")) {
-          const suffix = hadTrailingSlash ? "/" : "";
-          childEnv[key] = `${proxyBase}${after}/${sessionTag}${suffix}`;
-        }
-      }
+      Object.assign(
+        childEnv,
+        injectSessionTagIntoProxyEnv(childEnv, sessionTag),
+      );
     }
 
     // Fill in mitmproxy CA cert path for tools that need HTTPS interception.

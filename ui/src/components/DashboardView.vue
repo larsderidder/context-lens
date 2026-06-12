@@ -3,24 +3,41 @@ import { computed, ref, watch } from 'vue'
 import SearchInput from '@/components/SearchInput.vue'
 import TagFilter from '@/components/TagFilter.vue'
 import { useSessionStore } from '@/stores/session'
-import { fmtTokens, fmtCost, shortModel, sourceBadgeClass, healthColor } from '@/utils/format'
+import { fmtTokens, fmtCost, shortModel, sourceBadgeClass } from '@/utils/format'
 import { computeSessionPriority } from '@/utils/priority'
-import { CATEGORY_META } from '@/utils/messages'
+import {
+  auditRatingClass,
+  compactDir,
+  computeDashboardKpis,
+  COMPOSITION_TAPE_CATEGORIES,
+  exactTime,
+  filterSummaries,
+  getSparkSVG as buildSessionSparkSVG,
+  healthRatingClass,
+  maxSummaryCost,
+  relativeTime,
+  sortSummaries,
+  summariesForKpiScope,
+  type DashboardSortMode,
+  type KpiScope,
+  utilClass,
+  utilization,
+} from '@/utils/dashboard'
 import { computeRecommendations } from '@/utils/recommendations'
 import { classifyEntries } from '@/utils/messages'
-import type { ConversationSummary, ConversationGroup, CompositionEntry } from '@/api-types'
+import type { ConversationSummary, CompositionEntry } from '@/api-types'
 import type { Recommendation } from '@/utils/recommendations'
 
 const store = useSessionStore()
 
 // ── Local UI state ──
-const sortMode = ref<'recent' | 'priority' | 'cost'>('recent')
+const sortMode = ref<DashboardSortMode>('recent')
 const expandedIds = ref<Set<string>>(new Set())
 const sourceMenuOpen = ref(false)
 const searchQuery = ref('')
 const selectingForCompare = ref(false)
 
-// Reset selection mode when compare state is cleared externally (e.g. exitCompare)
+// Reset selection mode when compare state is cleared externally, such as exitCompare.
 watch(() => store.compareSessionIds.size, (size) => {
   if (size === 0 && selectingForCompare.value) {
     selectingForCompare.value = false
@@ -95,38 +112,13 @@ const sourceFilterLabel = computed(() => {
 })
 
 // ── Filtered & sorted summaries ──
-const filteredSummaries = computed(() => {
-  let list = store.summaries
-  if (activeSources.value) {
-    list = list.filter(s => activeSources.value!.has(s.source))
-  }
-  const q = searchQuery.value.trim().toLowerCase()
-  if (q) {
-    list = list.filter(s => {
-      const haystack = [
-        s.id,
-        s.source,
-        s.label,
-        s.workingDirectory ?? '',
-        s.latestModel,
-      ].join('\0').toLowerCase()
-      return haystack.includes(q)
-    })
-  }
-  if (store.tagFilter) {
-    const tag = store.tagFilter.toLowerCase()
-    list = list.filter(s => s.tags?.includes(tag))
-  }
-  return list
-})
+const filteredSummaries = computed(() => filterSummaries(store.summaries, {
+  activeSources: activeSources.value,
+  searchQuery: searchQuery.value,
+  tagFilter: store.tagFilter,
+}))
 
-const maxCost = computed(() => {
-  let max = 0
-  for (const s of filteredSummaries.value) {
-    max = Math.max(max, s.totalCost)
-  }
-  return max
-})
+const maxCost = computed(() => maxSummaryCost(filteredSummaries.value))
 
 const priorityMap = computed(() => {
   const map = new Map<string, ReturnType<typeof computeSessionPriority>>()
@@ -136,53 +128,20 @@ const priorityMap = computed(() => {
   return map
 })
 
-const sortedSummaries = computed(() => {
-  const list = [...filteredSummaries.value]
-  if (sortMode.value === 'priority') {
-    list.sort((a, b) => {
-      const aScore = priorityMap.value.get(a.id)?.score ?? 0
-      const bScore = priorityMap.value.get(b.id)?.score ?? 0
-      return bScore - aScore
-    })
-  } else if (sortMode.value === 'cost') {
-    list.sort((a, b) => b.totalCost - a.totalCost)
-  }
-  // 'recent' is already sorted by latestTimestamp from the API
-  return list
-})
+const sortedSummaries = computed(() => sortSummaries(filteredSummaries.value, sortMode.value, maxCost.value))
 
 // ── KPI Calculations ──
 // KPIs show today's activity by default (scoped to current calendar day).
-const kpiScope = ref<'today' | 'all'>('today')
+const kpiScope = ref<KpiScope>('today')
 
-const todaySummaries = computed(() => {
-  if (kpiScope.value === 'all') return filteredSummaries.value
-  const todayStart = new Date()
-  todayStart.setHours(0, 0, 0, 0)
-  const cutoff = todayStart.getTime()
-  return filteredSummaries.value.filter(s => new Date(s.latestTimestamp).getTime() >= cutoff)
-})
+const todaySummaries = computed(() => summariesForKpiScope(filteredSummaries.value, kpiScope.value))
+const dashboardKpis = computed(() => computeDashboardKpis(todaySummaries.value))
 
-const totalSessions = computed(() => todaySummaries.value.length)
-
-const totalRequests = computed(() => {
-  return todaySummaries.value.reduce((sum, s) => sum + s.entryCount, 0)
-})
-
-const totalTokens = computed(() => {
-  return todaySummaries.value.reduce((sum, s) => sum + s.latestTotalTokens, 0)
-})
-
-const totalCost = computed(() => {
-  return todaySummaries.value.reduce((sum, s) => sum + s.totalCost, 0)
-})
-
-const avgHealth = computed(() => {
-  const withHealth = todaySummaries.value.filter(s => s.healthScore?.overall != null)
-  if (withHealth.length === 0) return 0
-  const sum = withHealth.reduce((acc, s) => acc + (s.healthScore?.overall ?? 0), 0)
-  return Math.round(sum / withHealth.length)
-})
+const totalSessions = computed(() => dashboardKpis.value.totalSessions)
+const totalRequests = computed(() => dashboardKpis.value.totalRequests)
+const totalTokens = computed(() => dashboardKpis.value.totalTokens)
+const totalCost = computed(() => dashboardKpis.value.totalCost)
+const avgHealth = computed(() => dashboardKpis.value.avgHealth)
 
 // ── Helpers ──
 function getPriority(id: string) {
@@ -192,110 +151,13 @@ function getPriority(id: string) {
   }
 }
 
-function utilization(s: ConversationSummary): number {
-  if (!s.contextLimit) return 0
-  return s.latestTotalTokens / s.contextLimit
-}
-
-function utilClass(u: number): string {
-  if (u >= 0.8) return 'util-high'
-  if (u >= 0.6) return 'util-mid'
-  return 'util-low'
-}
-
-function healthRatingClass(s: ConversationSummary): string {
-  const rating = s.healthScore?.rating
-  if (rating === 'poor') return 'health-bad'
-  if (rating === 'needs-work') return 'health-warn'
-  return 'health-good'
-}
-
-function auditRatingClass(score: number): string {
-  if (score >= 90) return 'health-good'
-  if (score >= 50) return 'health-warn'
-  return 'health-bad'
-}
-
-function relativeTime(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime()
-  if (diff < 60000) return 'just now'
-  if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`
-  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`
-  return `${Math.floor(diff / 86400000)}d ago`
-}
-
-function exactTime(iso: string): string {
-  const d = new Date(iso)
-  const time = d.toLocaleTimeString('en-US', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false
-  })
-  const date = d.toLocaleDateString('en-CA') // YYYY-MM-DD format
-  return `${time} on ${date}`
-}
-
-function compactDir(path: string | null | undefined): string {
-  if (!path) return ''
-  let p = path
-  if (/^\/home\/[^/]+(\/|$)/.test(p)) p = p.replace(/^\/home\/[^/]+/, '~')
-  else if (/^\/Users\/[^/]+(\/|$)/.test(p)) p = p.replace(/^\/Users\/[^/]+/, '~')
-  // Show last 2 segments
-  const parts = p.split('/')
-  if (parts.length > 2) return parts.slice(-2).join('/')
-  return p
-}
-
-// ── Sparkline SVG ──
-function sparkColor(barClass: string): string {
-  if (barClass === 'prio-critical') return '#ef4444'
-  if (barClass === 'prio-warning') return '#f59e0b'
-  return '#0ea5e9'
-}
-
-function buildSparkSVG(data: number[], color: string): string {
-  if (data.length === 0) return ''
-  const w = 72
-  const h = 22
-  const max = Math.max(...data)
-  if (max === 0) return ''
-  const pts = data.map((v, i) => {
-    const x = data.length <= 1 ? w / 2 : (i / (data.length - 1)) * w
-    const y = h - (v / max) * (h - 4) - 2
-    return `${x.toFixed(1)},${y.toFixed(1)}`
-  })
-  const area = pts.join(' ') + ` ${w},${h} 0,${h}`
-  const id = 'sg' + color.replace('#', '')
-  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" style="display:block;width:100%;height:100%">`
-    + `<defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1">`
-    + `<stop offset="0%" stop-color="${color}" stop-opacity="0.15"/>`
-    + `<stop offset="100%" stop-color="${color}" stop-opacity="0.02"/>`
-    + `</linearGradient></defs>`
-    + `<polygon points="${area}" fill="url(#${id})"/>`
-    + `<polyline points="${pts.join(' ')}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>`
-    + `<circle cx="${pts[pts.length - 1].split(',')[0]}" cy="${pts[pts.length - 1].split(',')[1]}" r="2" fill="${color}"/>`
-    + `</svg>`
-}
-
 function getSparkSVG(s: ConversationSummary): string {
-  const data = s.tokenHistory
-  if (!data || data.length < 2) return ''
-  const prio = getPriority(s.id)
-  return buildSparkSVG(data, sparkColor(prio.barClass))
+  return buildSessionSparkSVG(s, getPriority(s.id).barClass)
 }
 
 // ── Composition tape for expanded detail ──
 
-const COMP_CATS = [
-  { key: 'system_prompt', label: 'System', color: 'var(--cat-system, #3b82f6)' },
-  { key: 'tool_definitions', label: 'Tool defs', color: 'var(--cat-tools, #ec4899)' },
-  { key: 'tool_results', label: 'Tool results', color: 'var(--cat-tool-results, #10b981)' },
-  { key: 'assistant_text', label: 'Assistant', color: 'var(--cat-assistant, #f59e0b)' },
-  { key: 'user_text', label: 'User', color: 'var(--cat-user, #06b6d4)' },
-  { key: 'thinking', label: 'Thinking', color: 'var(--cat-thinking, #8b5cf6)' },
-  { key: 'system_injections', label: 'Injections', color: 'var(--cat-injections, #6366f1)' },
-]
+const COMP_CATS = COMPOSITION_TAPE_CATEGORIES
 
 function getComposition(s: ConversationSummary): CompositionEntry[] {
   const loaded = store.loadedConversations.get(s.id)
