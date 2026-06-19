@@ -120,15 +120,20 @@ describe("cli-utils", () => {
     assert.equal(resolveCommandAlias("python"), "python");
   });
 
-  it("renders help text with key options", () => {
+  it("renders compact help with only common global options", () => {
     const help = formatHelpText();
     assert.match(help, new RegExp(`context-lens v${VERSION}`));
     assert.match(help, /--no-ui/);
-    assert.match(help, /--no-update-check/);
+    assert.match(help, /--mitm/);
     assert.match(help, /context-lens doctor/);
     assert.match(help, /background <start\|stop\|status>/);
     assert.match(help, /cc -> claude/);
-    assert.match(help, /cpi/);
+
+    assert.doesNotMatch(help, /--no-update-check/);
+    assert.doesNotMatch(help, /--privacy/);
+    assert.doesNotMatch(help, /--redact/);
+    assert.doesNotMatch(help, /--rehydrate/);
+    assert.doesNotMatch(help, /alias cpi/);
   });
 
   it("returns default mitm config", () => {
