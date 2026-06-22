@@ -39,7 +39,7 @@ function resolveLensSessionId(setting: string): string {
   if (setting === "none") return "";
   return setting; // fixed string
 }
-const LOCKFILE = "/tmp/context-lens.lock";
+const LOCKFILE = join(tmpdir(), "context-lens.lock");
 
 const rawArgs = process.argv.slice(2);
 const parsedArgs = parseCliArgs(rawArgs);

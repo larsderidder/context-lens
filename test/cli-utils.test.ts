@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, it } from "node:test";
 
 import {
@@ -34,7 +36,6 @@ describe("cli-utils", () => {
     );
 
     const codex = getToolConfig("codex");
-    const mitmCfg = getMitmConfig();
     assert.equal(codex.needsMitm, true);
     assert.deepEqual(codex.childEnv, {});
     assert.deepEqual(codex.extraArgs, []);
@@ -44,6 +45,16 @@ describe("cli-utils", () => {
     assert.equal(
       pi.childEnv.PI_CODING_AGENT_DIR,
       CLI_CONSTANTS.PI_AGENT_DIR_PREFIX,
+    );
+    assert.equal(
+      CLI_CONSTANTS.PI_AGENT_DIR_PREFIX,
+      path.join(tmpdir(), "context-lens-pi-agent-"),
+    );
+
+    const bryti = getToolConfig("bryti");
+    assert.equal(
+      bryti.childEnv.BRYTI_DATA_DIR,
+      path.join(tmpdir(), "context-lens-bryti-"),
     );
   });
 

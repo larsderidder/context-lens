@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -18,8 +19,8 @@ const PROXY_URL = `http://localhost:${PROXY_PORT}`;
 const UI_PORT = Number.isNaN(config.ui.port) ? 4041 : config.ui.port;
 const UI_URL = `http://localhost:${UI_PORT}`;
 
-const PI_AGENT_DIR_PREFIX = "/tmp/context-lens-pi-agent-";
-const BRYTI_DATA_DIR_PREFIX = "/tmp/context-lens-bryti-";
+const PI_AGENT_DIR_PREFIX = join(tmpdir(), "context-lens-pi-agent-");
+const BRYTI_DATA_DIR_PREFIX = join(tmpdir(), "context-lens-bryti-");
 const COMMAND_ALIASES: Record<string, string> = {
   cc: "claude",
   cx: "codex",
