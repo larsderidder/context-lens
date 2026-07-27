@@ -16,7 +16,7 @@
     "splitpanes": "^3.1.5",
     "floating-vue": "^5.2.2",
     "markdown-it": "^14.1.0",
-    "shiki": "^3.1.0",
+    "shiki": "^4.3.1",
     "d3-array": "^3.2.4",
     "d3-hierarchy": "^3.1.2",
     "d3-scale": "^4.0.2",
