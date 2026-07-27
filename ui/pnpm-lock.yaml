@@ -67,8 +67,8 @@ importers:
         specifier: ^66.7.5
         version: 66.7.5
       '@vitejs/plugin-vue':
-        specifier: ^5.2.1
-        version: 5.2.4(vite@6.4.1(jiti@2.7.0)(sass@1.102.0))(vue@3.5.40(typescript@5.9.3))
+        specifier: ^6.0.8
+        version: 6.0.8(vite@6.4.1(jiti@2.7.0)(sass@1.102.0))(vue@3.5.40(typescript@5.9.3))
       sass:
         specifier: ^1.102.0
         version: 1.102.0
@@ -657,6 +657,9 @@ packages:
   '@quansync/fs@1.0.0':
     resolution: {integrity: sha512-4TJ3DFtlf1L5LDMaM6CanJ/0lckGNtJcMjQ1NAV6zDmA0tEHKZtxNKin8EgPaVX1YzljbxckyT2tJrpQKAtngQ==}
 
+  '@rolldown/pluginutils@1.0.1':
+    resolution: {integrity: sha512-2j9bGt5Jh8hj+vPtgzPtl72j0yRxHAyumoo6TNfAjsLB04UtpSvPbPcDcBMxz7n+9CYB0c1GxQFxYRg2jimqGw==}
+
   '@rollup/rollup-android-arm-eabi@4.57.1':
     resolution: {integrity: sha512-A6ehUVSiSaaliTxai040ZpZ2zTevHYbvu/lDoeAteHI8QnaosIzm4qwtezfRg1jOYaUmnzLX1AOD6Z+UJjtifg==}
     cpu: [arm]
@@ -918,11 +921,11 @@ packages:
     peerDependencies:
       vite: ^5.0.0-0 || ^6.0.0-0 || ^7.0.0-0 || ^8.0.0-0
 
-  '@vitejs/plugin-vue@5.2.4':
-    resolution: {integrity: sha512-7Yx/SXSOcQq5HiiV3orevHUFn+pmMB4cgbEkDYgnkUWb0WfeQ/wa2yFv6D5ICiCQOVpjA7vYDXrC7AGO8yjDHA==}
-    engines: {node: ^18.0.0 || >=20.0.0}
+  '@vitejs/plugin-vue@6.0.8':
+    resolution: {integrity: sha512-0ZjgOg7oO6farnNGup7yvoM/YXZV84OZxHAwtflItNa/6zzQyVb5LNxyea3FEKEX2XlagIKzrlH7wwxkKgtiew==}
+    engines: {node: ^20.19.0 || >=22.12.0}
     peerDependencies:
-      vite: ^5.0.0 || ^6.0.0
+      vite: ^5.0.0 || ^6.0.0 || ^7.0.0 || ^8.0.0
       vue: ^3.2.25
 
   '@vitest/expect@2.1.9':
@@ -2077,6 +2080,8 @@ snapshots:
     dependencies:
       quansync: 1.0.0
 
+  '@rolldown/pluginutils@1.0.1': {}
+
   '@rollup/rollup-android-arm-eabi@4.57.1':
     optional: true
 
@@ -2360,8 +2365,9 @@ snapshots:
       unplugin-utils: 0.3.2
       vite: 6.4.1(jiti@2.7.0)(sass@1.102.0)
 
-  '@vitejs/plugin-vue@5.2.4(vite@6.4.1(jiti@2.7.0)(sass@1.102.0))(vue@3.5.40(typescript@5.9.3))':
+  '@vitejs/plugin-vue@6.0.8(vite@6.4.1(jiti@2.7.0)(sass@1.102.0))(vue@3.5.40(typescript@5.9.3))':
     dependencies:
+      '@rolldown/pluginutils': 1.0.1
       vite: 6.4.1(jiti@2.7.0)(sass@1.102.0)
       vue: 3.5.40(typescript@5.9.3)
 
