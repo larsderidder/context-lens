@@ -27,7 +27,7 @@
     "@vitejs/plugin-vue": "^5.2.1",
     "typescript": "^5.7.3",
     "vitest": "^2.1.8",
-    "vue-tsc": "^2.2.0",
+    "vue-tsc": "^3.3.8",
     "sass": "^1.102.0",
     "unocss": "^66.7.5",
     "@unocss/preset-icons": "^66.7.5",
