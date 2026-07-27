@@ -10,12 +10,12 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "vue": "^3.5.13",
+    "vue": "^3.5.40",
     "pinia": "^2.3.1",
     "@vueuse/core": "^12.5.0",
     "splitpanes": "^3.1.5",
     "floating-vue": "^5.2.2",
-    "markdown-it": "^14.1.0",
+    "markdown-it": "^14.3.0",
     "shiki": "^3.1.0",
     "d3-array": "^3.2.4",
     "d3-hierarchy": "^3.1.2",
