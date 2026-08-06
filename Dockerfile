@@ -1,4 +1,4 @@
-FROM node:22-slim AS build
+FROM node:26-slim AS build
 
 WORKDIR /app
 
@@ -12,7 +12,7 @@ COPY . .
 RUN pnpm run build
 RUN pnpm run build:ui
 
-FROM node:22-slim AS runtime
+FROM node:26-slim AS runtime
 
 WORKDIR /app
 
