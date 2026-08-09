@@ -54,6 +54,50 @@ type StoreChangeListener = (event: StoreChangeEvent) => void;
 const CODEX_SESSION_TTL_MS = 5 * 60 * 1000;
 const GEMINI_SESSION_TTL_MS = 5 * 60 * 1000;
 
+interface PpqPricing {
+  input_per_1M_tokens: number;
+  output_per_1M_tokens: number;
+}
+
+interface PpqModelsData {
+  data: [
+    {
+      id: string;
+      pricing: PpqPricing;
+    },
+  ];
+}
+
+class PpqPricingData {
+  private static instance: PpqPricingData | null = null;
+  private data: Map<string, PpqPricing> = new Map();
+
+  private constructor(modelsData: PpqModelsData) {
+    for (const model of modelsData.data) {
+      // PPQ API uses price of -1 for automatic models. Ignore them to not have negative costs.
+      if (
+        model.pricing.input_per_1M_tokens > 0 &&
+        model.pricing.output_per_1M_tokens > 0
+      ) {
+        this.data.set(model.id, model.pricing);
+      }
+    }
+  }
+
+  public static async getInstance(): Promise<PpqPricingData> {
+    if (!PpqPricingData.instance) {
+      const response = await fetch("https://api.ppq.ai/v1/models");
+      const json = await response.json();
+      PpqPricingData.instance = new PpqPricingData(json as PpqModelsData);
+    }
+    return PpqPricingData.instance;
+  }
+
+  public getPricing(model: string): PpqPricing | undefined {
+    return this.data.get(model);
+  }
+}
+
 export class Store {
   private readonly dataDir: string;
   private readonly stateFile: string;
@@ -87,6 +131,9 @@ export class Store {
   // Tags storage
   private tagsStore: TagsStore;
 
+  // PPQ pricing data. Fetched from PPQ API when Store is created.
+  private ppqPricingData: PpqPricingData | undefined;
+
   constructor(opts: {
     dataDir: string;
     stateFile: string;
@@ -113,6 +160,10 @@ export class Store {
     }
 
     this.tagsStore = new TagsStore(this.dataDir);
+
+    PpqPricingData.getInstance().then((instance) => {
+      this.ppqPricingData = instance;
+    });
   }
 
   getRevision(): number {
@@ -431,15 +482,26 @@ export class Store {
       httpStatus === null || (httpStatus >= 200 && httpStatus < 300);
     const inputTok = usage.inputTokens || contextInfo.totalTokens;
     const outputTok = usage.outputTokens;
-    const costUsd = isSuccessResponse
-      ? estimateCost(
+    let costUsd: number | null = 0;
+    if (isSuccessResponse) {
+      if (meta?.targetUrl?.includes("ppq.ai")) {
+        const pricing = this.ppqPricingData?.getPricing(contextInfo.model);
+        if (pricing) {
+          costUsd =
+            (inputTok * pricing.input_per_1M_tokens +
+              outputTok * pricing.output_per_1M_tokens) /
+            1000000;
+        }
+      } else {
+        costUsd = estimateCost(
           contextInfo.model,
           inputTok,
           outputTok,
           usage.cacheReadTokens,
           usage.cacheWriteTokens,
-        )
-      : 0;
+        );
+      }
+    }
 
     const entry: CapturedEntry = {
       id: this.nextEntryId++,
