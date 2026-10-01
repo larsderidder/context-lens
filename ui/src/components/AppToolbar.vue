@@ -37,6 +37,7 @@ async function handleImport() {
   }
 }
 
+const store = useSessionStore()
 const showTagEditor = ref(false)
 const toolbarTagsEl = ref<HTMLElement>()
 
@@ -63,7 +64,6 @@ onUnmounted(() => document.removeEventListener('click', onDocClick, true))
 // Close tag editor when switching sessions
 watch(() => store.selectedSessionId, () => { showTagEditor.value = false })
 
-const store = useSessionStore()
 const showExportMenu = ref(false)
 const showResetMenu = ref(false)
 const sessionIdCopied = ref(false)

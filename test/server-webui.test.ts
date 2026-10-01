@@ -51,6 +51,133 @@ describe("webui handler", () => {
     if (cleanup) cleanup();
   });
 
+  it("rejects malformed JSON without storing a request", async (t) => {
+    t.mock.method(console, "error", () => {});
+    const res = await app.request("/api/ingest", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: '{"body":',
+    });
+    assert.equal(res.status, 400);
+    assert.deepEqual(await res.json(), { error: "Invalid JSON" });
+    assert.equal(store.getCapturedRequests().length, 0);
+  });
+
+  const invalidPayloads = [
+    { name: "null", payload: null },
+    { name: "an array", payload: [] },
+    { name: "a scalar", payload: "not a request" },
+    { name: "an empty object", payload: {} },
+    { name: "a non-object legacy body", payload: { body: [] } },
+    { name: "a non-string provider", payload: { provider: 42, body: {} } },
+    {
+      name: "a non-object legacy response",
+      payload: { body: {}, response: "invalid" },
+    },
+    { name: "an array legacy response", payload: { body: {}, response: [] } },
+    {
+      name: "array capture headers",
+      payload: {
+        timestamp: "2026-01-01T00:00:00Z",
+        path: "/v1/messages",
+        provider: "anthropic",
+        requestHeaders: [],
+        requestBody: {},
+      },
+    },
+    {
+      name: "array capture response headers",
+      payload: {
+        timestamp: "2026-01-01T00:00:00Z",
+        path: "/v1/messages",
+        provider: "anthropic",
+        responseHeaders: [],
+        requestBody: {},
+      },
+    },
+    {
+      name: "invalid capture timings",
+      payload: {
+        timestamp: "2026-01-01T00:00:00Z",
+        path: "/v1/messages",
+        provider: "anthropic",
+        requestBody: {},
+        timings: { total_ms: "slow" },
+      },
+    },
+    {
+      name: "invalid capture headers",
+      payload: {
+        timestamp: "2026-01-01T00:00:00Z",
+        path: "/v1/messages",
+        provider: "anthropic",
+        requestHeaders: { authorization: 42 },
+        requestBody: {},
+      },
+    },
+    {
+      name: "a malformed capture with a legacy body",
+      payload: {
+        timestamp: "2026-01-01T00:00:00Z",
+        path: "/v1/messages",
+        provider: "anthropic",
+        requestBody: [],
+        body: {},
+      },
+    },
+  ];
+
+  for (const { name, payload } of invalidPayloads) {
+    it(`rejects ${name} without mutating state`, async (t) => {
+      t.mock.method(console, "error", () => {});
+      const res = await app.request("/api/ingest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      assert.equal(res.status, 400);
+      assert.equal(typeof (await res.json()).error, "string");
+      assert.equal(store.getCapturedRequests().length, 0);
+    });
+  }
+
+  it("accepts capture-format input and fills omitted optional fields", async () => {
+    const res = await app.request("/api/ingest", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        timestamp: "2026-01-01T00:00:00Z",
+        path: "/v1/messages",
+        provider: "anthropic",
+        apiFormat: "anthropic-messages",
+        source: null,
+        requestBody: {
+          model: "claude-sonnet-4",
+          messages: [{ role: "user", content: "hello" }],
+        },
+      }),
+    });
+    assert.equal(res.status, 200);
+    const [request] = store.getCapturedRequests();
+    assert.equal(request.source, "unknown");
+    assert.equal(request.contextInfo.model, "claude-sonnet-4");
+    assert.equal(request.httpStatus, 200);
+    assert.equal(request.requestBytes, 0);
+    assert.equal(request.timings?.total_ms, 0);
+  });
+
+  it("accepts a legacy body with default provider and response", async () => {
+    const res = await app.request("/api/ingest", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ body: { text: "unrecognized request format" } }),
+    });
+    assert.equal(res.status, 200);
+    const [request] = store.getCapturedRequests();
+    assert.equal(request.source, "unknown");
+    assert.equal(request.contextInfo.provider, "unknown");
+  });
+
   it("POST /api/ingest stores an entry and GET /api/requests returns it", async () => {
     const ingest = {
       provider: "anthropic",

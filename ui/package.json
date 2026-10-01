@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
     "type-check": "vue-tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:e2e": "tsc --project tsconfig.test.json && playwright test"
   },
   "dependencies": {
     "@vueuse/core": "^14.4.0",
@@ -24,6 +25,7 @@
   },
   "devDependencies": {
     "@iconify-json/carbon": "^1.2.24",
+    "@playwright/test": "^1.63.0",
     "@types/d3-array": "^3.2.2",
     "@types/d3-hierarchy": "^3.1.7",
     "@types/d3-scale": "^4.0.9",
