@@ -1,7 +1,12 @@
 name: Publish Docker image
 on:
+  push:
+    tags: ['v*']
   release:
     types: [published]
+concurrency:
+  group: docker-publish-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   publish:

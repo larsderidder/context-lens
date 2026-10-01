@@ -1,7 +1,12 @@
 name: Publish to npm
 on:
+  push:
+    tags: ['v*']
   release:
     types: [published]
+concurrency:
+  group: npm-publish-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -26,4 +31,11 @@ jobs:
       - name: Verify npm package includes UI bundle
         run: |
           npm pack --dry-run 2>&1 | grep -q 'ui/dist/index.html' || { echo "ERROR: ui/dist/index.html missing from npm tarball"; exit 1; }
-      - run: npm publish --access public
+      - name: Publish to npm
+        run: |
+          version=$(jq -r .version package.json)
+          if [ "$(npm view "context-lens@${version}" version 2>/dev/null)" = "$version" ]; then
+            echo "Skipping context-lens@${version} (already published)"
+            exit 0
+          fi
+          npm publish --access public

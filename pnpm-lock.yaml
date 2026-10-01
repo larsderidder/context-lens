@@ -9,14 +9,14 @@ importers:
   .:
     dependencies:
       '@contextio/core':
+        specifier: ^0.4.0
+        version: 0.4.0
+      '@contextio/proxy':
+        specifier: ^0.2.5
+        version: 0.2.5
+      '@contextio/redact':
         specifier: ^0.3.2
         version: 0.3.2
-      '@contextio/proxy':
-        specifier: ^0.2.4
-        version: 0.2.4
-      '@contextio/redact':
-        specifier: ^0.3.1
-        version: 0.3.1
       '@hono/node-server':
         specifier: ^1.19.9
         version: 1.19.9(hono@4.12.32)
@@ -74,24 +74,28 @@ packages:
     engines: {node: '>=14.21.3'}
     cpu: [arm64]
     os: [linux]
+    libc: [musl]
 
   '@biomejs/cli-linux-arm64@2.4.4':
     resolution: {integrity: sha512-V/NFfbWhsUU6w+m5WYbBenlEAz8eYnSqRMDMAW3K+3v0tYVkNyZn8VU0XPxk/lOqNXLSCCrV7FmV/u3SjCBShg==}
     engines: {node: '>=14.21.3'}
     cpu: [arm64]
     os: [linux]
+    libc: [glibc]
 
   '@biomejs/cli-linux-x64-musl@2.4.4':
     resolution: {integrity: sha512-gGvFTGpOIQDb5CQ2VC0n9Z2UEqlP46c4aNgHmAMytYieTGEcfqhfCFnhs6xjt0S3igE6q5GLuIXtdQt3Izok+g==}
     engines: {node: '>=14.21.3'}
     cpu: [x64]
     os: [linux]
+    libc: [musl]
 
   '@biomejs/cli-linux-x64@2.4.4':
     resolution: {integrity: sha512-R4+ZCDtG9kHArasyBO+UBD6jr/FcFCTH8QkNTOCu0pRJzCWyWC4EtZa2AmUZB5h3e0jD7bRV2KvrENcf8rndBg==}
     engines: {node: '>=14.21.3'}
     cpu: [x64]
     os: [linux]
+    libc: [glibc]
 
   '@biomejs/cli-win32-arm64@2.4.4':
     resolution: {integrity: sha512-trzCqM7x+Gn832zZHgr28JoYagQNX4CZkUZhMUac2YxvvyDRLJDrb5m9IA7CaZLlX6lTQmADVfLEKP1et1Ma4Q==}
@@ -105,15 +109,15 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@contextio/core@0.3.2':
-    resolution: {integrity: sha512-VHYCVmRu5naCzrs1quz7Bj0/mRn5Rm51w7aHNEtpOTfJpdkuRIRCenu+LuaQj6yFifb40MJ+ZZkKKJduOE9VgA==}
+  '@contextio/core@0.4.0':
+    resolution: {integrity: sha512-8YfxMojiPqcGClDJ4aV+JM4UTGZS7Ud0Rq4eQ8JcI8GXYRnUBN5DOG5/jDrCJVuR8pdsTJRp8tEa99PNATSBuQ==}
 
-  '@contextio/proxy@0.2.4':
-    resolution: {integrity: sha512-4aAJ34EN6DZUddlwqC1KahrKIStGzl9wkU+RL4GfEt+aYcyjr1KC9B8vRbXlcYEJh2QjmpwpsVUaVXQjHT6fJA==}
+  '@contextio/proxy@0.2.5':
+    resolution: {integrity: sha512-Y2A5ADO1YsAtrRjG4edjUrMEOeTeDasvhKphxHvA6c2eJnVZ6V/OVg+ERbgNgtQ8v+/yA6CDNIORfRScXTxPZg==}
     hasBin: true
 
-  '@contextio/redact@0.3.1':
-    resolution: {integrity: sha512-ESSi8poNTEOiG+m6r10588vVOKVY3+HaXDUKa5C8BZFakVfwUqGfbbOw/1CY4zTm3FABl4EOiL629Z4501vmLQ==}
+  '@contextio/redact@0.3.2':
+    resolution: {integrity: sha512-RzWIHGIuTdI/XcyyCI3LMgOkWypeYt10x/smQ7/eb25sXStdvCXEn6/Vxzlw5ieoLo3/ua5U9haZw4vKqRtqlQ==}
 
   '@hono/node-server@1.19.9':
     resolution: {integrity: sha512-vHL6w3ecZsky+8P5MD+eFfaGTyCeOHUIFYMGpQGbrBTSmNNoxv0if69rEZ5giu36weC5saFuznL411gRX7bJDw==}
@@ -254,15 +258,15 @@ snapshots:
   '@biomejs/cli-win32-x64@2.4.4':
     optional: true
 
-  '@contextio/core@0.3.2': {}
+  '@contextio/core@0.4.0': {}
 
-  '@contextio/proxy@0.2.4':
+  '@contextio/proxy@0.2.5':
     dependencies:
-      '@contextio/core': 0.3.2
+      '@contextio/core': 0.4.0
 
-  '@contextio/redact@0.3.1':
+  '@contextio/redact@0.3.2':
     dependencies:
-      '@contextio/core': 0.3.2
+      '@contextio/core': 0.4.0
 
   '@hono/node-server@1.19.9(hono@4.12.32)':
     dependencies:

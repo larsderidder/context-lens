@@ -5,14 +5,14 @@ import { estimateCost, getContextLimit } from "../src/core.js";
 
 describe("getContextLimit", () => {
   it("returns correct limit for exact model names", () => {
-    assert.equal(getContextLimit("claude-sonnet-4-20250514"), 1000000);
+    assert.equal(getContextLimit("claude-sonnet-4-20250514"), 200000);
     assert.equal(getContextLimit("gpt-4o-mini"), 128000);
     assert.equal(getContextLimit("gpt-4"), 8192);
     assert.equal(getContextLimit("gpt-3.5-turbo"), 16385);
   });
 
-  it("matches by substring", () => {
-    assert.equal(getContextLimit("claude-sonnet-4-latest"), 1000000);
+  it("recognizes latest and dated model aliases", () => {
+    assert.equal(getContextLimit("claude-sonnet-4-latest"), 200000);
     assert.equal(getContextLimit("gpt-4o-mini-2024-07-18"), 128000);
   });
 
@@ -176,9 +176,26 @@ describe("estimateCost", () => {
 });
 
 describe("getContextLimit - extended models", () => {
-  it("returns 1_000_000 for claude-sonnet-4 family", () => {
-    assert.equal(getContextLimit("claude-sonnet-4"), 1_000_000);
-    assert.equal(getContextLimit("claude-sonnet-4.5"), 1_000_000);
+  it("returns 200_000 for Claude Sonnet 4 and 4.5", () => {
+    assert.equal(getContextLimit("claude-sonnet-4"), 200_000);
+    assert.equal(getContextLimit("claude-sonnet-4.5"), 200_000);
+  });
+
+  it("uses total GPT-5 windows while keeping Chat variants separate", () => {
+    assert.equal(getContextLimit("gpt-5"), 400_000);
+    assert.equal(getContextLimit("openai/gpt-5.2-codex"), 400_000);
+    assert.equal(getContextLimit("gpt-5.2-chat-latest"), 128_000);
+  });
+
+  it("does not inherit metadata for unknown model variants", () => {
+    assert.equal(getContextLimit("gpt-5.4"), 128_000);
+    assert.equal(estimateCost("gpt-5.4", 1000, 500), null);
+  });
+
+  it("uses published MiniMax metadata for native IDs", () => {
+    assert.equal(getContextLimit("MiniMax-M2.5"), 204_800);
+    assert.equal(estimateCost("MiniMax-M2.5", 1_000_000, 0), 0.3);
+    assert.equal(estimateCost("MiniMax-M2.5-highspeed", 0, 1_000_000), 2.4);
   });
 
   it("returns 1_047_576 for gpt-4.1 family", () => {

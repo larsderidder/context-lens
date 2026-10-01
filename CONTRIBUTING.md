@@ -82,7 +82,7 @@ This script checks that:
 - `HEAD` matches `origin/main`
 - the git tag and GitHub release do not already exist
 
-It then creates the annotated tag, pushes it, and creates the GitHub release. That triggers `publish.yml`, which builds, lints, tests, and publishes to npm automatically.
+It then creates the annotated tag, pushes it, and creates the GitHub release. Pushing a `v*` tag triggers npm and Docker publication automatically; a GitHub release is optional. The npm workflow builds, lints, tests, and publishes the package. Runs for the same tag are serialized, and already-published npm versions are skipped.
 
 ### Dependency release check
 

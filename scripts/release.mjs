@@ -96,8 +96,8 @@ if (tagExists) {
   runStreaming("git", ["tag", "-d", tag]);
 }
 
-// Tag first, then create the GitHub release. The publish workflow triggers on
-// release publication, not on tag push.
+// Tag first to trigger npm and Docker publication. The optional GitHub release
+// also triggers publication; workflows serialize runs for the same tag.
 console.log(`Creating tag ${tag} at ${head}`);
 runStreaming("git", ["tag", "-a", tag, "-m", tag]);
 runStreaming("git", ["push", "origin", tag]);
