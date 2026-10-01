@@ -12,8 +12,8 @@ import { describe, it } from "node:test";
 
 import {
   clearStaleLockfile,
-  decrementLockRefCount,
   DEFAULT_LOCKFILE,
+  decrementLockRefCount,
   incrementLockRefCount,
 } from "../src/cli/lockfile.js";
 
