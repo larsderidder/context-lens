@@ -11,11 +11,11 @@ jobs:
       matrix:
         node-version: [22]
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
         with:
           version: 9
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: ${{ matrix.node-version }}
           cache: pnpm
@@ -24,6 +24,7 @@ jobs:
       - run: pnpm run build:ui
       - run: pnpm exec biome check .
       - run: pnpm test
+      - run: pnpm --dir ui test
       - name: Verify npm package includes UI bundle
         run: |
           npm pack --dry-run 2>&1 | grep -q 'ui/dist/index.html' || { echo "ERROR: ui/dist/index.html missing from npm tarball"; exit 1; }

@@ -1,6 +1,7 @@
 {
   "compilerOptions": {
     "target": "ES2022",
+    "types": ["node"],
     "module": "Node16",
     "moduleResolution": "Node16",
     "outDir": "dist",
