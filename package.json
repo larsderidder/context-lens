@@ -68,7 +68,7 @@
     "typescript": "^7.0.2"
   },
   "dependencies": {
-    "@contextio/core": "^0.3.2",
+    "@contextio/core": "^0.4.0",
     "@contextio/proxy": "^0.2.4",
     "@contextio/redact": "^0.3.1",
     "@hono/node-server": "^2.1.3",

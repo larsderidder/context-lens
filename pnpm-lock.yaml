@@ -9,26 +9,26 @@ importers:
   .:
     dependencies:
       '@contextio/core':
-        specifier: ^0.3.2
-        version: 0.3.2
+        specifier: ^0.4.0
+        version: 0.4.0
       '@contextio/proxy':
         specifier: ^0.2.4
-        version: 0.2.4
+        version: 0.2.5
       '@contextio/redact':
         specifier: ^0.3.1
-        version: 0.3.1
+        version: 0.3.2
       '@hono/node-server':
         specifier: ^2.1.3
-        version: 2.1.3(hono@4.13.12)
+        version: 2.1.5(hono@4.13.13)
       hono:
         specifier: ^4.13.12
-        version: 4.13.12
+        version: 4.13.13
       js-tiktoken:
         specifier: ^1.0.21
         version: 1.0.21
       smol-toml:
         specifier: ^1.9.0
-        version: 1.9.0
+        version: 1.9.1
       valibot:
         specifier: ^1.5.0
         version: 1.5.0(typescript@7.0.2)
@@ -105,21 +105,21 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@contextio/core@0.3.2':
-    resolution: {integrity: sha512-VHYCVmRu5naCzrs1quz7Bj0/mRn5Rm51w7aHNEtpOTfJpdkuRIRCenu+LuaQj6yFifb40MJ+ZZkKKJduOE9VgA==}
+  '@contextio/core@0.4.0':
+    resolution: {integrity: sha512-8YfxMojiPqcGClDJ4aV+JM4UTGZS7Ud0Rq4eQ8JcI8GXYRnUBN5DOG5/jDrCJVuR8pdsTJRp8tEa99PNATSBuQ==}
 
-  '@contextio/proxy@0.2.4':
-    resolution: {integrity: sha512-4aAJ34EN6DZUddlwqC1KahrKIStGzl9wkU+RL4GfEt+aYcyjr1KC9B8vRbXlcYEJh2QjmpwpsVUaVXQjHT6fJA==}
+  '@contextio/proxy@0.2.5':
+    resolution: {integrity: sha512-Y2A5ADO1YsAtrRjG4edjUrMEOeTeDasvhKphxHvA6c2eJnVZ6V/OVg+ERbgNgtQ8v+/yA6CDNIORfRScXTxPZg==}
     hasBin: true
 
-  '@contextio/redact@0.3.1':
-    resolution: {integrity: sha512-ESSi8poNTEOiG+m6r10588vVOKVY3+HaXDUKa5C8BZFakVfwUqGfbbOw/1CY4zTm3FABl4EOiL629Z4501vmLQ==}
+  '@contextio/redact@0.3.2':
+    resolution: {integrity: sha512-RzWIHGIuTdI/XcyyCI3LMgOkWypeYt10x/smQ7/eb25sXStdvCXEn6/Vxzlw5ieoLo3/ua5U9haZw4vKqRtqlQ==}
 
-  '@hono/node-server@2.1.3':
-    resolution: {integrity: sha512-TA//nWMqPhbfdfneACk6t5a9eqbS9lABEPyKn0/xZTah3H3U2XaVg85rJFl0/Fyit0I552YDHgXGVSf3GwqbUw==}
+  '@hono/node-server@2.1.5':
+    resolution: {integrity: sha512-MgP/I06GdvsilDspMk/qmRzpk8LOUStP6jFAbSRi40W09DhoyUn+Mj7eyKICPqeYKybOjVFLVIAQzvu1bfIa7Q==}
     engines: {node: '>=20'}
     peerDependencies:
-      hono: ^4
+      hono: ^4 || ^5.0.0-0
 
   '@jsdevtools/ono@7.1.3':
     resolution: {integrity: sha512-4JQNk+3mVzK3xh2rqd6RB4J46qUR19azEHBneZyTZM+c456qOrbbM/5xcR8huNCCcbVt7+UmizG6GuUvPvKUYg==}
@@ -268,8 +268,8 @@ packages:
       picomatch:
         optional: true
 
-  hono@4.13.12:
-    resolution: {integrity: sha512-6E2QDAc9Ick9Sq77ZrGS/dk2WUYni91aufTw6LJKpV7w8kW5/GxVUc650FOADOmlwg3K+f7Pun6XlV+pYmW6gw==}
+  hono@4.13.13:
+    resolution: {integrity: sha512-CQ46U0ZkAGmbT/4UxdzzGJpacP2IeKgY4a5/tOI9AABbpOMfK739wfDXmv1usCk+3RkKj1hQy4/fjhiwa2xlrA==}
     engines: {node: '>=16.9.0'}
 
   is-extglob@2.1.1:
@@ -307,8 +307,8 @@ packages:
     engines: {node: '>=14'}
     hasBin: true
 
-  smol-toml@1.9.0:
-    resolution: {integrity: sha512-hpd+HLON7HdZXqYchMM/+LaTTbdK0AU3NngIJ4KVyWbY9bfQqdL9cD+4yf6dUoU2Ap4VsU0JkQi6FxAI1B2mXQ==}
+  smol-toml@1.9.1:
+    resolution: {integrity: sha512-j7WyPdf0CJoutMzMoPLF/bVXHtKZIT9Rb4eGeEbWw8X2t5oirjPgpL+OpaENZrILYaXqYwnVH+qgUwVbl+pUJQ==}
     engines: {node: '>= 18'}
 
   tinyglobby@0.2.15:
@@ -374,19 +374,19 @@ snapshots:
   '@biomejs/cli-win32-x64@2.5.15':
     optional: true
 
-  '@contextio/core@0.3.2': {}
+  '@contextio/core@0.4.0': {}
 
-  '@contextio/proxy@0.2.4':
+  '@contextio/proxy@0.2.5':
     dependencies:
-      '@contextio/core': 0.3.2
+      '@contextio/core': 0.4.0
 
-  '@contextio/redact@0.3.1':
+  '@contextio/redact@0.3.2':
     dependencies:
-      '@contextio/core': 0.3.2
+      '@contextio/core': 0.4.0
 
-  '@hono/node-server@2.1.3(hono@4.13.12)':
+  '@hono/node-server@2.1.5(hono@4.13.13)':
     dependencies:
-      hono: 4.13.12
+      hono: 4.13.13
 
   '@jsdevtools/ono@7.1.3': {}
 
@@ -466,7 +466,7 @@ snapshots:
     optionalDependencies:
       picomatch: 4.0.7
 
-  hono@4.13.12: {}
+  hono@4.13.13: {}
 
   is-extglob@2.1.1: {}
 
@@ -502,7 +502,7 @@ snapshots:
 
   prettier@3.8.1: {}
 
-  smol-toml@1.9.0: {}
+  smol-toml@1.9.1: {}
 
   tinyglobby@0.2.15:
     dependencies:
