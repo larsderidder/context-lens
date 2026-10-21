@@ -246,6 +246,20 @@ export const StateLineSchema = v.variant("type", [
 // Ingest API (POST /api/ingest)
 // ---------------------------------------------------------------------------
 
+const JsonObjectSchema = v.pipe(
+  v.unknown(),
+  v.check(
+    (value) =>
+      value !== null && typeof value === "object" && !Array.isArray(value),
+    "Expected a JSON object",
+  ),
+  v.record(v.string(), v.unknown()),
+);
+
+const IngestHeadersSchema = v.pipe(
+  JsonObjectSchema,
+  v.record(v.string(), v.string()),
+);
 /**
  * Legacy ingest format (provider + body + response).
  */
@@ -253,8 +267,8 @@ export const IngestLegacyPayloadSchema = v.object({
   provider: v.optional(v.string(), "unknown"),
   apiFormat: v.optional(v.string(), "unknown"),
   source: v.optional(v.string(), "unknown"),
-  body: v.optional(v.record(v.string(), v.unknown()), {}),
-  response: v.optional(v.record(v.string(), v.unknown()), {}),
+  body: JsonObjectSchema,
+  response: v.optional(JsonObjectSchema, {}),
 });
 
 /**
@@ -269,11 +283,11 @@ export const IngestCapturePayloadSchema = v.object({
   provider: v.string(),
   apiFormat: v.optional(v.string(), "unknown"),
   targetUrl: v.optional(v.string(), ""),
-  requestHeaders: v.optional(v.record(v.string(), v.string()), {}),
-  requestBody: v.optional(v.nullable(v.record(v.string(), v.unknown())), null),
+  requestHeaders: v.optional(IngestHeadersSchema, {}),
+  requestBody: v.optional(v.nullable(JsonObjectSchema), null),
   requestBytes: v.optional(v.number(), 0),
   responseStatus: v.optional(v.number(), 200),
-  responseHeaders: v.optional(v.record(v.string(), v.string()), {}),
+  responseHeaders: v.optional(IngestHeadersSchema, {}),
   responseBody: v.optional(v.string(), ""),
   responseIsStreaming: v.optional(v.boolean(), false),
   responseBytes: v.optional(v.number(), 0),

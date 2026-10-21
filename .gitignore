@@ -41,6 +41,7 @@ ui/tsconfig.tsbuildinfo
 # Local output
 screenshots/
 test-results/
+playwright-report/
 
 # Reference repos (cloned for study, not shipped)
 reference/
