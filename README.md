@@ -18,6 +18,8 @@ Works with Claude Code, Codex, Gemini CLI, Cline, Aider, Pi, and anything else t
 
 ## Installation
 
+Requires Node.js 22.23.4+, 24.22.1+, or 26.12.1+ within those release lines. These minimums include the [eMudhra TLS trust fixes](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases). Native installs use your Node runtime; updating Context Lens alone does not update its certificate trust.
+
 ```bash
 npm install -g context-lens
 # or: pnpm add -g context-lens

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * Pricing diff against litellm's canonical model price list.
+ * Pricing diff against the LiteLLM comparison catalog.
+ * Provider documentation remains authoritative for price corrections.
  *
  * Fetches https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json
  * and compares it against MODEL_PRICING in src/core/models.ts.
@@ -95,7 +96,7 @@ function matchPriority(
 
 /**
  * Find the best matching MODEL_PRICING key for a given litellm model name.
- * Uses the same most-specific-first substring matching that estimateCost uses.
+ * Uses development-only family matching; runtime model lookup is stricter.
  */
 function findOurKey(litellmName: string): string | null {
   const bare = stripProviderPrefix(litellmName);
