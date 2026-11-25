@@ -2,7 +2,7 @@ FROM node:26.13.1-slim AS build
 
 WORKDIR /app
 
-RUN corepack enable
+RUN npm install --global pnpm@9.15.9
 
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile --ignore-scripts
@@ -16,7 +16,7 @@ FROM node:26.13.1-slim AS runtime
 
 WORKDIR /app
 
-RUN corepack enable
+RUN npm install --global pnpm@9.15.9
 
 ENV NODE_ENV=production
 ENV CONTEXT_LENS_NO_UPDATE_CHECK=1
