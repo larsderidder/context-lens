@@ -33,6 +33,17 @@ pnpm test              # build + run all tests (node:test)
 pnpm build:test        # build tests only
 ```
 
+UI helper tests and Chromium regression tests run separately:
+
+```bash
+pnpm --dir ui install --frozen-lockfile
+pnpm --dir ui test
+pnpm --dir ui exec playwright install chromium
+pnpm --dir ui test:e2e
+```
+
+The browser suite builds the backend and production UI, then starts an isolated analysis server on `127.0.0.1:14042`. It uses synthetic captures and temporary data directories, never your saved sessions. That port must be free. CI and npm publishing run both UI suites; CI installs Chromium's system dependencies with `playwright install --with-deps chromium`.
+
 For manual testing, `pnpm start` launches the proxy and web UI, then point your tool at `http://localhost:4040`.
 
 ### Startup performance

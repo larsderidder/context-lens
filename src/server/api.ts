@@ -148,7 +148,15 @@ export function createApiApp(store: Store): Hono {
   // --- Ingest ---
 
   app.post("/api/ingest", async (c) => {
-    const raw = await c.req.json();
+    let raw: unknown;
+    try {
+      raw = await c.req.json();
+    } catch {
+      return c.json({ error: "Invalid JSON" }, 400);
+    }
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      return c.json({ error: "Request body must be a JSON object" }, 400);
+    }
 
     // Try capture format first (from mitmproxy addon), then legacy format
     const captureResult = v.safeParse(IngestCapturePayloadSchema, raw);
@@ -165,6 +173,10 @@ export function createApiApp(store: Store): Hono {
       return c.json({ ok: true });
     }
 
+    // A malformed capture must not be reinterpreted as a legacy request.
+    if ("requestBody" in raw || "responseBody" in raw || "path" in raw) {
+      return c.json({ error: v.summarize(captureResult.issues) }, 400);
+    }
     const legacyResult = v.safeParse(IngestLegacyPayloadSchema, raw);
     if (legacyResult.success) {
       const data = legacyResult.output;

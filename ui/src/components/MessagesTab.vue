@@ -653,7 +653,8 @@ watch(
 
 <template>
   <div v-if="entry" class="messages-tab" @keydown="onMessagesKeydown">
-    <Splitpanes class="default-theme" :push-other-panes="false">
+    <!-- Default push behavior keeps both panes within their minimum sizes. -->
+    <Splitpanes class="default-theme">
       <Pane :min-size="25" :size="detailOpen ? 42 : 100">
         <div ref="msgListEl" class="msg-list">
           <div class="msg-toolbar">

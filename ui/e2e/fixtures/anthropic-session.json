@@ -1,0 +1,41 @@
+{
+  "provider": "anthropic",
+  "apiFormat": "anthropic-messages",
+  "source": "browser-test",
+  "body": {
+    "model": "claude-sonnet-4",
+    "system": "Synthetic browser test session.",
+    "messages": [
+      {
+        "role": "user",
+        "content": "# Browser fixture\n\n**Markdown works** and [safe link](https://example.com).\n\n<img src=x onerror=\"window.injected = true\">\n\n[unsafe](javascript:alert(1))"
+      },
+      {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "tool_use",
+            "id": "read-test",
+            "name": "read",
+            "input": { "path": "src/example.ts" }
+          }
+        ]
+      },
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "tool_result",
+            "tool_use_id": "read-test",
+            "content": "export const message: string = \"<img src=x onerror=alert(1)>\";\nexport function greet(name: string) {\n  return `Hello ${name}`;\n}"
+          }
+        ]
+      }
+    ]
+  },
+  "response": {
+    "model": "claude-sonnet-4",
+    "content": [{ "type": "text", "text": "Synthetic response." }],
+    "stop_reason": "end_turn"
+  }
+}
