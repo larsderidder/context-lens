@@ -291,7 +291,13 @@ export interface TagsResponse {
 // --- SSE events ---
 
 export interface SSEEvent {
-  type: "connected" | "entry-added" | "conversation-deleted" | "reset" | "tags-updated";
+  type:
+    | "connected"
+    | "entry-added"
+    | "entry-updated"
+    | "conversation-deleted"
+    | "reset"
+    | "tags-updated";
   revision: number;
   conversationId?: string | null;
 }
