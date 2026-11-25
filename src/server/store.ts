@@ -40,6 +40,12 @@ import type {
   RequestMeta,
   ResponseData,
 } from "../types.js";
+import {
+  estimatePpqCost,
+  isPpqTarget,
+  lookupPpqPricing,
+  type PpqPricingLookup,
+} from "./ppq-pricing.js";
 import { projectEntry } from "./projection.js";
 import { TagsStore } from "./tags-store.js";
 
@@ -61,6 +67,7 @@ export class Store {
   private readonly maxSessions: number;
   private readonly maxCompactMessages: number;
   private readonly privacy: PrivacyLevel;
+  private readonly ppqPricingLookup: PpqPricingLookup;
 
   private capturedRequests: CapturedEntry[] = [];
   private conversations = new Map<string, Conversation>(); // fingerprint -> conversation
@@ -93,6 +100,7 @@ export class Store {
     maxSessions: number;
     maxCompactMessages: number;
     privacy?: PrivacyLevel;
+    ppqPricingLookup?: PpqPricingLookup;
   }) {
     this.dataDir = opts.dataDir;
     this.stateFile = opts.stateFile;
@@ -100,6 +108,7 @@ export class Store {
     this.maxSessions = opts.maxSessions;
     this.maxCompactMessages = opts.maxCompactMessages;
     this.privacy = opts.privacy ?? "standard";
+    this.ppqPricingLookup = opts.ppqPricingLookup ?? lookupPpqPricing;
 
     try {
       fs.mkdirSync(this.dataDir, { recursive: true });
@@ -431,15 +440,20 @@ export class Store {
       httpStatus === null || (httpStatus >= 200 && httpStatus < 300);
     const inputTok = usage.inputTokens || contextInfo.totalTokens;
     const outputTok = usage.outputTokens;
-    const costUsd = isSuccessResponse
-      ? estimateCost(
-          contextInfo.model,
-          inputTok,
-          outputTok,
-          usage.cacheReadTokens,
-          usage.cacheWriteTokens,
-        )
-      : 0;
+    const needsPpqPricing = isSuccessResponse && isPpqTarget(meta?.targetUrl);
+    let costUsd: number | null = 0;
+    if (needsPpqPricing) {
+      // Leave unknown until the lazy pricing lookup completes.
+      costUsd = null;
+    } else if (isSuccessResponse) {
+      costUsd = estimateCost(
+        contextInfo.model,
+        inputTok,
+        outputTok,
+        usage.cacheReadTokens,
+        usage.cacheWriteTokens,
+      );
+    }
 
     const entry: CapturedEntry = {
       id: this.nextEntryId++,
@@ -597,15 +611,50 @@ export class Store {
 
     this.dataRevision++;
     this.emitChange("entry-added", conversationId);
-    this.logToDisk(entry);
+    if (!needsPpqPricing) {
+      this.logToDisk(entry);
+    }
     this.saveEntryDetail(entry);
-    this.compactEntry(entry);
+    if (!needsPpqPricing) {
+      this.compactEntry(entry);
+    }
     // saveState() already wrote the full state including this entry,
     // so skip the append to avoid duplicating it in the file.
     if (!evicted) {
       this.appendToState(entry, conversationId);
     }
+    if (needsPpqPricing) {
+      void this.resolvePpqCost(entry, inputTok, outputTok).catch(() => {
+        console.warn("PPQ cost update failed");
+      });
+    }
     return entry;
+  }
+
+  /** Resolve PPQ prices without blocking capture or leaving rejected promises. */
+  private async resolvePpqCost(
+    entry: CapturedEntry,
+    inputTokens: number,
+    outputTokens: number,
+  ): Promise<void> {
+    try {
+      const pricing = await this.ppqPricingLookup(entry.contextInfo.model);
+      // A reset, deletion or eviction may have removed the entry while fetching.
+      if (!this.capturedRequests.includes(entry)) {
+        return;
+      }
+      entry.costUsd = estimatePpqCost(pricing, inputTokens, outputTokens);
+    } catch {
+      // Custom lookup failures also mean unknown, never generic or zero pricing.
+    }
+    if (!this.capturedRequests.includes(entry)) {
+      return;
+    }
+    this.logToDisk(entry);
+    this.compactEntry(entry);
+    this.saveState();
+    this.dataRevision++;
+    this.emitChange("entry-updated", entry.conversationId);
   }
 
   deleteConversation(convoId: string): void {
