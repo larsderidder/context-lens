@@ -35,7 +35,7 @@
     "@unocss/preset-wind": "^66.12.0",
     "@vitejs/plugin-vue": "^6.0.10",
     "sass": "^1.108.0",
-    "typescript": "^5.9.3",
+    "typescript": "^6.0.3",
     "unocss": "^66.12.0",
     "vite": "^6.4.5",
     "vitest": "^4.1.12",
