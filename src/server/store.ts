@@ -739,61 +739,102 @@ export class Store {
 
   /** Backfill health scores for entries loaded from state that don't have one. */
   private backfillHealthScores(): void {
-    // Process oldest-first so previousTokens lookups work correctly.
-    const sorted = [...this.capturedRequests].sort(
-      (a, b) =>
-        new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+    const affectedConversations = new Set(
+      this.capturedRequests
+        .filter((entry) => !entry.healthScore && entry.conversationId)
+        .map((entry) => entry.conversationId),
     );
-    const contexts = new Map<number, ContextInfo>();
-    const scoringContext = (entry: CapturedEntry): ContextInfo => {
-      let context = contexts.get(entry.id);
-      if (!context) {
+    const sorted = this.capturedRequests
+      .filter(
+        (entry) =>
+          !entry.healthScore || affectedConversations.has(entry.conversationId),
+      )
+      .sort(
+        (a, b) =>
+          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+      );
+    type AgentHistory = { tokens: number; count: number };
+    type History = {
+      tools: Set<string>;
+      agents: Map<string | null, AgentHistory>;
+    };
+    const histories = new Map<string, History>();
+    let start = 0;
+    while (start < sorted.length) {
+      let end = start + 1;
+      const timestamp = new Date(sorted[start].timestamp).getTime();
+      while (
+        end < sorted.length &&
+        new Date(sorted[end].timestamp).getTime() === timestamp
+      ) {
+        end++;
+      }
+      // Equal timestamps are not earlier turns. Commit only small aggregates
+      // after scoring the whole timestamp group, never retaining detail contexts.
+      const pending = new Map<string, History>();
+      for (let i = start; i < end; i++) {
+        const entry = sorted[i];
+        let history: History | undefined;
+        if (entry.conversationId) {
+          history = histories.get(entry.conversationId);
+        }
+        const previous = history?.agents.get(entry.agentKey);
         const detail = this.getEntryDetail(entry.id);
-        context = { ...entry.contextInfo };
+        const context = { ...entry.contextInfo };
         if (detail) {
           // Compacted state omits tool definitions and some message content.
           context.tools = detail.tools;
           context.messages = detail.messages;
         }
-        contexts.set(entry.id, context);
-      }
-      return context;
-    };
-    for (const entry of sorted) {
-      if (entry.healthScore) continue;
-
-      const sameConvo = entry.conversationId
-        ? sorted.filter(
-            (e) =>
-              e.conversationId === entry.conversationId &&
-              new Date(e.timestamp).getTime() <
-                new Date(entry.timestamp).getTime(),
-          )
-        : [];
-      const previousAgentTurn = sameConvo
-        .filter((e) => e.agentKey === entry.agentKey)
-        .sort(
-          (a, b) =>
-            new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
-        )[0];
-
-      // Collect all tools used across the conversation (up to this entry)
-      const sessionToolsUsed = new Set<string>();
-      for (const e of [...sameConvo, entry]) {
-        for (const tool of extractToolsUsed(scoringContext(e).messages)) {
-          sessionToolsUsed.add(tool);
+        const toolsUsed = extractToolsUsed(context.messages);
+        if (!entry.healthScore) {
+          const sessionToolsUsed = new Set(history?.tools);
+          for (const tool of toolsUsed) {
+            sessionToolsUsed.add(tool);
+          }
+          entry.healthScore = computeHealthScore(
+            { ...entry, contextInfo: context },
+            previous?.tokens ?? null,
+            sessionToolsUsed,
+            (previous?.count ?? 0) + 1,
+          );
+        }
+        if (entry.conversationId) {
+          let delta = pending.get(entry.conversationId);
+          if (!delta) {
+            delta = { tools: new Set(), agents: new Map() };
+            pending.set(entry.conversationId, delta);
+          }
+          for (const tool of toolsUsed) {
+            delta.tools.add(tool);
+          }
+          const agent = delta.agents.get(entry.agentKey);
+          if (agent) {
+            agent.count++;
+          } else {
+            // Preserve the first turn at a tied timestamp as previousTokens.
+            delta.agents.set(entry.agentKey, {
+              tokens: entry.contextInfo.totalTokens,
+              count: 1,
+            });
+          }
         }
       }
-
-      const turnCount =
-        sameConvo.filter((e) => e.agentKey === entry.agentKey).length + 1;
-
-      entry.healthScore = computeHealthScore(
-        { ...entry, contextInfo: scoringContext(entry) },
-        previousAgentTurn?.contextInfo.totalTokens ?? null,
-        sessionToolsUsed,
-        turnCount,
-      );
+      for (const [conversationId, delta] of pending) {
+        const history = histories.get(conversationId);
+        if (!history) {
+          histories.set(conversationId, delta);
+          continue;
+        }
+        for (const tool of delta.tools) {
+          history.tools.add(tool);
+        }
+        for (const [agentKey, agent] of delta.agents) {
+          agent.count += history.agents.get(agentKey)?.count ?? 0;
+          history.agents.set(agentKey, agent);
+        }
+      }
+      start = end;
     }
   }
 

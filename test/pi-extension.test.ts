@@ -18,7 +18,7 @@ const extensionUrl = new URL(
   import.meta.url,
 );
 const { default: register } = await import(extensionUrl.href);
-const { checkMitmPort } = await import(
+const { checkMitmPort, preflightCapture } = await import(
   new URL("./mitm-preflight.js", extensionUrl).href
 );
 
@@ -141,7 +141,7 @@ describe("bundled Pi extension", () => {
             "--thinking",
             "high",
           ],
-          { PATH: "/bin", CONTEXT_LENS_ACTIVE: "1" },
+          { PATH: "/bin", CONTEXT_LENS_ACTIVE: "1", CONTEXT_LENS_SOURCE: "pi" },
         ],
       ]);
       await fixture.run();
@@ -151,6 +151,56 @@ describe("bundled Pi extension", () => {
     }
   });
 
+  it("passes the launch environment to preflight and explicitly tags Pi", async () => {
+    const fixture = setup();
+    fixture.runtime.env.CONTEXT_LENS_MITM_PORT = "24082";
+    fixture.runtime.env.CONTEXT_LENS_SOURCE = "other-tool";
+    register(fixture.pi, fixture.runtime, async (env: NodeJS.ProcessEnv) => {
+      assert.equal(env.CONTEXT_LENS_MITM_PORT, "24082");
+    });
+    try {
+      await fixture.run();
+      fixture.exit();
+      const call = fixture.calls[2] as [
+        string,
+        string,
+        string[],
+        NodeJS.ProcessEnv,
+      ];
+      assert.equal(call[3].CONTEXT_LENS_SOURCE, "pi");
+      assert.equal(call[3].CONTEXT_LENS_MITM_PORT, "24082");
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it("rejects invalid port overrides before leaving Pi", async () => {
+    const fixture = setup();
+    register(fixture.pi, fixture.runtime, preflightCapture);
+    try {
+      for (const port of [
+        "",
+        "0",
+        "65536",
+        "-1",
+        "8082.5",
+        "abc",
+        " 8082",
+        "0x1f92",
+      ]) {
+        fixture.runtime.env.CONTEXT_LENS_MITM_PORT = port;
+        await fixture.run();
+        fixture.exit();
+        assert.deepEqual(fixture.calls, []);
+        assert.match(
+          fixture.notifications.at(-1) ?? "",
+          /CONTEXT_LENS_MITM_PORT must be an integer from 1 to 65535/,
+        );
+      }
+    } finally {
+      fixture.cleanup();
+    }
+  });
   for (const scenario of [
     "active",
     "busy",
@@ -392,6 +442,10 @@ describe("bundled Pi extension", () => {
     const port = address.port;
     try {
       await assert.rejects(checkMitmPort(port), /already in use.*config.toml/);
+      await assert.rejects(
+        preflightCapture({ CONTEXT_LENS_MITM_PORT: String(port) }),
+        /already in use.*CONTEXT_LENS_MITM_PORT/,
+      );
     } finally {
       await new Promise<void>((resolve, reject) => {
         server.close((error) => {
@@ -405,6 +459,8 @@ describe("bundled Pi extension", () => {
     }
     await checkMitmPort(port);
     await checkMitmPort(port);
+    await preflightCapture({ CONTEXT_LENS_MITM_PORT: String(port) });
+    await preflightCapture({ CONTEXT_LENS_MITM_PORT: String(port) });
   });
 
   it("executes a native process replacement from the exit hook", () => {
@@ -455,6 +511,46 @@ describe("bundled Pi extension", () => {
     }
   });
 
+  it("reloads MITM config after an earlier resolver call", () => {
+    const fixture = setup();
+    try {
+      const configUrl = new URL("../../dist/cli-utils.js", import.meta.url)
+        .href;
+      const result = spawnSync(
+        process.execPath,
+        [
+          "--input-type=module",
+          "-e",
+          `
+        import { mkdirSync, writeFileSync } from "node:fs";
+        import { join } from "node:path";
+        const directory = join(process.env.HOME, ".context-lens");
+        mkdirSync(directory);
+        const config = join(directory, "config.toml");
+        writeFileSync(config, "[mitm]\\nport = 18080\\n");
+        const { getMitmConfig } = await import(${JSON.stringify(configUrl)});
+        const first = getMitmConfig({}).port;
+        writeFileSync(config, "[mitm]\\nport = 18081\\n");
+        console.log(JSON.stringify([first, getMitmConfig({}).port,
+          getMitmConfig({ CONTEXT_LENS_MITM_PORT: "18082" }).port]));
+      `,
+        ],
+        {
+          encoding: "utf8",
+          timeout: 10000,
+          env: {
+            ...process.env,
+            HOME: fixture.ctx.cwd,
+            USERPROFILE: fixture.ctx.cwd,
+          },
+        },
+      );
+      assert.equal(result.status, 0, result.stderr);
+      assert.deepEqual(JSON.parse(result.stdout), [18080, 18081, 18082]);
+    } finally {
+      fixture.cleanup();
+    }
+  });
   it("declares the extension in the npm package", () => {
     const manifest = JSON.parse(
       readFileSync(new URL("../../package.json", import.meta.url), "utf8"),

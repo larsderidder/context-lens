@@ -15,6 +15,7 @@ const root = fileURLToPath(new URL("../", import.meta.url));
 const temporary = mkdtempSync(join(tmpdir(), "context-lens-package-"));
 const originalHome = process.env.HOME;
 const originalProfile = process.env.USERPROFILE;
+const originalMitmPort = process.env.CONTEXT_LENS_MITM_PORT;
 try {
   const [archive] = JSON.parse(
     execFileSync(
@@ -70,6 +71,7 @@ try {
   );
   process.env.HOME = home;
   process.env.USERPROFILE = home;
+  delete process.env.CONTEXT_LENS_MITM_PORT;
   const { preflightCapture } = await import(
     pathToFileURL(join(installed, "extensions", "mitm-preflight.js")).href
   );
@@ -87,6 +89,11 @@ try {
     delete process.env.USERPROFILE;
   } else {
     process.env.USERPROFILE = originalProfile;
+  }
+  if (originalMitmPort === undefined) {
+    delete process.env.CONTEXT_LENS_MITM_PORT;
+  } else {
+    process.env.CONTEXT_LENS_MITM_PORT = originalMitmPort;
   }
   rmSync(temporary, { recursive: true, force: true });
 }
