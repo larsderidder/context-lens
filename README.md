@@ -40,6 +40,18 @@ context-lens -- python my_agent.py
 
 This starts the proxy (port 4040), opens the web UI (http://localhost:4041), sets the right env vars, and runs your command. Multiple tools can share one proxy; just open more terminals.
 
+### Attach to a running Pi session
+
+Install the bundled Pi extension once:
+
+```bash
+pi install npm:context-lens
+```
+
+Run `/reload` in Pi, then use `/context-lens` when you want to start capturing. The command restarts Pi in the same terminal through `context-lens --mitm`, resuming the current session with its model and thinking level.
+
+Requires Linux or macOS and [mitmproxy](https://mitmproxy.org/). Capture starts with subsequent requests; earlier requests are not reconstructed.
+
 ## CLI Options
 
 ```bash

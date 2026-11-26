@@ -1,6 +1,6 @@
 {
   "name": "context-lens",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "type": "module",
   "packageManager": "pnpm@9.15.9",
   "engines": {
@@ -13,6 +13,11 @@
     "context-lens-proxy": "./dist/proxy/server.js",
     "context-lens-analysis": "./dist/analysis/server.js"
   },
+  "pi": {
+    "extensions": [
+      "./extensions/context-lens.js"
+    ]
+  },
   "scripts": {
     "generate:types": "json2ts schema/lhar.schema.json src/lhar-types.generated.ts --unreachableDefinitions",
     "generate:version": "node -e \"const v=JSON.parse(require('node:fs').readFileSync('package.json','utf8')).version;require('node:fs').writeFileSync('src/version.generated.ts','export const VERSION = '+JSON.stringify(v)+';\\n')\"",
@@ -21,7 +26,7 @@
     "clean:test": "node -e \"require('node:fs').rmSync('dist-test', { recursive: true, force: true })\"",
     "build:test": "pnpm run generate:version && pnpm run generate:types && pnpm run clean:test && tsc -p tsconfig.test.json",
     "start": "node dist/cli.js",
-    "test": "pnpm run build:test && node --test --experimental-test-isolation=none 'dist-test/test/**/*.test.js'",
+    "test": "pnpm run build:test && node --import ./test/helpers/isolated-home.mjs --test --experimental-test-isolation=none 'dist-test/test/**/*.test.js'",
     "dev": "tsc --watch",
     "postbuild": "chmod +x dist/cli.js dist/proxy/server.js dist/analysis/server.js",
     "prepare": "git config core.hooksPath .githooks",
@@ -33,6 +38,7 @@
   },
   "files": [
     "dist/",
+    "extensions/",
     "public/",
     "schema/",
     "ui/dist/",
@@ -45,6 +51,7 @@
   ],
   "keywords": [
     "llm",
+    "pi-package",
     "proxy",
     "context-window",
     "anthropic",

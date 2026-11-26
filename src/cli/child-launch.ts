@@ -119,6 +119,10 @@ export function prepareChildLaunch(
     piAgentDirToCleanup = env.PI_CODING_AGENT_DIR;
   }
 
+  if (options.commandName === "pi") {
+    env.CONTEXT_LENS_ACTIVE = "1";
+  }
+
   let spawnCommand = options.commandName;
   let spawnArgs = allArgs;
   const localBrytiCli = resolve(cwd, "dist", "cli.js");

@@ -102,4 +102,20 @@ describe("child launch planning", () => {
     assert.equal(plan.env.BRYTI_DATA_DIR, "/tmp/bryti-prepared");
     assert.equal(plan.brytiDataDirToCleanup, "/tmp/bryti-prepared");
   });
+
+  it("marks wrapped Pi processes to prevent nested extension restarts", () => {
+    const plan = prepareChildLaunch({
+      commandName: "pi",
+      commandArguments: ["--session", "/tmp/session.jsonl"],
+      toolConfig: mitmTool,
+      useMitm: true,
+      sessionTag: "deadbeef",
+      baseEnv: {},
+      proxyUrl: "http://localhost:4040",
+      certExists: () => true,
+    });
+    assert.equal(plan.env.CONTEXT_LENS_ACTIVE, "1");
+    assert.equal(plan.piAgentDirToCleanup, undefined);
+    assert.deepEqual(plan.spawnArgs, ["--session", "/tmp/session.jsonl"]);
+  });
 });

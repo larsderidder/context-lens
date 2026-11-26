@@ -1,5 +1,5 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.6.6/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.6.7/schema.json",
   "assist": {
     "actions": {
       "source": {
@@ -27,6 +27,7 @@
       "apps/**",
       "test/**",
       "scripts/**",
+      "extensions/**",
       "biome.json",
       "package.json",
       "tsconfig*.json",
