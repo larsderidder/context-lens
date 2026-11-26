@@ -7,10 +7,10 @@ const store = useSessionStore()
 
 <template>
   <footer class="status-bar">
-    <span class="status-item" v-if="store.totalCost > 0">
+    <span class="status-item">
       <span class="cost">{{ fmtCost(store.totalCost) }}</span>
     </span>
-    <span class="status-sep" v-if="store.totalCost > 0" />
+    <span class="status-sep" />
     <span class="status-item">
       {{ store.totalRequests }} req{{ store.totalRequests !== 1 ? 's' : '' }}
     </span>

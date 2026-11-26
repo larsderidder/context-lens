@@ -15,6 +15,7 @@ export {
   extractUserPrompt,
   extractWorkingDirectory,
 } from "./core/conversation.js";
+export { sumCosts } from "./core/cost.js";
 
 export { computeHealthScore } from "./core/health.js";
 export {

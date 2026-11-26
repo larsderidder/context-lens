@@ -33,9 +33,10 @@ export function computeSessionPriority(
     ? utilizationRisk
     : clamp01((healthRisk * 0.7) + (utilizationRisk * 0.3))
 
-  const normalizedCost = maxCost > 0
-    ? clamp01(summary.totalCost / maxCost)
-    : 0
+  let normalizedCost = 0
+  if (maxCost > 0 && summary.totalCost !== null) {
+    normalizedCost = clamp01(summary.totalCost / maxCost)
+  }
   const score = clamp01((risk * 0.7) + (normalizedCost * 0.3))
 
   let label: PriorityMeta['label'] = 'Healthy'

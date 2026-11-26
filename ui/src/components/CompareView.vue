@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useSessionStore } from '@/stores/session'
+import { sumCosts } from '@/utils/cost'
 import { fmtTokens, fmtCost, fmtDuration, fmtPct, shortModel, healthColor, sourceBadgeClass } from '@/utils/format'
 import { SIMPLE_GROUPS, SIMPLE_META } from '@/utils/messages'
 import { cacheHitRate } from '@/utils/timeline'
@@ -24,7 +25,7 @@ interface TurnBlock {
   isError: boolean
   isStall: boolean
   tokens: number
-  costUsd: number
+  costUsd: number | null
   segments: { key: string; color: string; pct: number }[]
 }
 
@@ -34,7 +35,7 @@ interface CompareSession {
   model: string
   directory: string
   turnCount: number
-  totalCost: number
+  totalCost: number | null
   totalDurationMs: number
   finalTokens: number
   contextLimit: number
@@ -42,7 +43,7 @@ interface CompareSession {
   healthScore: number
   turns: TurnBlock[]
   tokenHistory: number[]
-  costHistory: number[]
+  costHistory: (number | null)[]
   utilization: number
   outputTokens: number
   cacheRate: number | null
@@ -146,7 +147,7 @@ function buildTurns(convo: ConversationGroup): TurnBlock[] {
       isError,
       isStall,
       tokens: entry.contextInfo.totalTokens,
-      costUsd: entry.costUsd ?? 0,
+      costUsd: entry.costUsd,
       segments: computeSegments(entry.composition),
     }
   })
@@ -180,9 +181,10 @@ const compareSessions = computed<CompareSession[]>(() => {
     if (!convo && !summary) continue
 
     const turns = convo ? buildTurns(convo) : []
-    const totalCost = convo
-      ? convo.entries.reduce((sum, e) => sum + (e.costUsd ?? 0), 0)
-      : (summary?.totalCost ?? 0)
+    let totalCost = summary?.totalCost ?? null
+    if (convo) {
+      totalCost = sumCosts(convo.entries.map(e => e.costUsd))
+    }
     const totalDurationMs = convo
       ? convo.entries.reduce((sum, e) => sum + (e.timings?.total_ms ?? 0), 0)
       : 0
@@ -207,9 +209,10 @@ const compareSessions = computed<CompareSession[]>(() => {
       : []
 
     const cacheRate = sessionCacheRate(turns)
-    const costPerOutputK = outputTokens > 0 && totalCost > 0
-      ? (totalCost / outputTokens) * 1000
-      : null
+    let costPerOutputK = null
+    if (outputTokens > 0 && totalCost !== null) {
+      costPerOutputK = (totalCost / outputTokens) * 1000
+    }
 
     sessions.push({
       id,
@@ -252,7 +255,9 @@ const globalMaxCost = computed(() => {
   let max = 0
   for (const s of compareSessions.value) {
     for (const t of s.turns) {
-      if (t.costUsd > max) max = t.costUsd
+      if (t.costUsd !== null && t.costUsd > max) {
+        max = t.costUsd
+      }
     }
   }
   return max || 0.01
@@ -279,14 +284,19 @@ function blockHeight(tokens: number): string {
 }
 
 /** Cost dot opacity: 0.15 for cheap turns, 1.0 for the most expensive. */
-function costDotOpacity(cost: number): number {
-  if (cost <= 0) return 0
+function costDotOpacity(cost: number | null): number {
+  if (cost === null || cost <= 0) {
+    return 0
+  }
   const ratio = cost / globalMaxCost.value
   return 0.15 + ratio * 0.85
 }
 
-function sparklinePath(history: number[], maxVal: number): string {
+function sparklinePath(history: (number | null)[], maxVal: number): string {
   if (history.length === 0) return ''
+  if (!history.every((value): value is number => value !== null)) {
+    return ''
+  }
   const w = 100
   const h = 100
   const step = history.length > 1 ? w / (history.length - 1) : 0
@@ -299,8 +309,11 @@ function sparklinePath(history: number[], maxVal: number): string {
     .join(' ')
 }
 
-function sparklineAreaPath(history: number[], maxVal: number): string {
+function sparklineAreaPath(history: (number | null)[], maxVal: number): string {
   if (history.length === 0) return ''
+  if (!history.every((value): value is number => value !== null)) {
+    return ''
+  }
   const w = 100
   const h = 100
   const step = history.length > 1 ? w / (history.length - 1) : 0
@@ -326,7 +339,9 @@ const costSparklineMax = computed(() => {
   let max = 0
   for (const s of compareSessions.value) {
     for (const c of s.costHistory) {
-      if (c > max) max = c
+      if (c !== null && c > max) {
+        max = c
+      }
     }
   }
   return max || 0.01
@@ -426,14 +441,20 @@ const metricDeltas = computed(() => {
   const turns = sessions.map(s => s.turnCount)
   const efficiencies = sessions.map(s => s.costPerOutputK)
 
-  const minCost = Math.min(...costs)
+  let minCost = null
+  if (costs.every((cost): cost is number => cost !== null)) {
+    minCost = Math.min(...costs)
+  }
   const minTokens = Math.min(...tokens)
   const minTurns = Math.min(...turns)
   const validEff = efficiencies.filter((e): e is number => e !== null)
-  const bestEff = validEff.length > 0 ? Math.min(...validEff) : null
+  let bestEff = null
+  if (validEff.length === sessions.length) {
+    bestEff = Math.min(...validEff)
+  }
 
   return sessions.map(s => ({
-    isCheapest: s.totalCost <= minCost,
+    isCheapest: minCost !== null && s.totalCost !== null && s.totalCost <= minCost,
     isLeanest: s.finalTokens <= minTokens,
     isFewest: s.turnCount <= minTurns,
     isMostEfficient: bestEff !== null && s.costPerOutputK !== null && s.costPerOutputK <= bestEff,

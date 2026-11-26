@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { sumCosts } from '@/utils/cost'
 import type {
   ApiRequestsResponse,
   ConversationGroup,
@@ -192,11 +193,7 @@ export const useSessionStore = defineStore('session', () => {
   })
 
   const totalCost = computed(() => {
-    let cost = 0
-    for (const s of summaries.value) {
-      cost += s.totalCost ?? 0
-    }
-    return cost
+    return sumCosts(summaries.value.map(s => s.totalCost))
   })
 
   const totalRequests = computed(() => {

@@ -72,6 +72,50 @@ test('Codex utilization uses its 500k window on the dashboard and in the inspect
   await expect(page.getByText(/Context utilization critical/)).toHaveCount(0)
 })
 
+test('compare does not award a cheapest winner when a session cost is unknown', async ({ page, request }) => {
+  expect((await request.post('/api/ingest', { data: {
+    ...capture,
+    response: { ...capture.response, usage: { input_tokens: 100, output_tokens: 20 } },
+  } })).ok()).toBe(true)
+  const payload = structuredClone(capture)
+  payload.source = 'unknown-cost-session'
+  payload.body.model = 'unpriced-browser-model'
+  payload.body.system = 'Independent unknown-cost session.'
+  payload.body.messages = [{ role: 'user', content: 'Independent cost fixture.' }]
+  expect((await request.post('/api/ingest', { data: payload })).ok()).toBe(true)
+  await expect(page.locator('.main-row')).toHaveCount(2)
+  await page.locator('.compare-toggle').click()
+  await page.locator('.main-row').nth(0).click()
+  await page.locator('.main-row').nth(1).click()
+  await page.locator('.compare-bar-btn').click()
+  await expect(page.locator('.compare-view')).toBeVisible()
+  const costs = page.locator('.lm-cell').filter({ has: page.locator('.lm-key', { hasText: /^cost$/ }) })
+  await expect(costs).toHaveCount(2)
+  await expect(costs.locator('.lm-value').filter({ hasText: /^--$/ })).toHaveCount(1)
+  await expect(costs.locator('.lm-winner')).toHaveCount(0)
+})
+
+test('unknown turn pricing stays unknown in session totals', async ({ page, request }) => {
+  const payload = structuredClone(capture)
+  payload.body.model = 'unpriced-browser-model'
+  const response = await request.post('/api/ingest', { data: payload })
+  expect(response.ok()).toBe(true)
+  const summary = await (await request.get('/api/requests?summary=true')).json()
+  expect(summary.conversations[0].totalCost).toBeNull()
+  await expect(page.locator('.col-cost .num')).toHaveText('--')
+  await expect(page.locator('.kpi-card').filter({ hasText: 'Cost' }).locator('.kpi-value')).toHaveText('--')
+  await expect(page.locator('.toolbar-stat.cost')).toHaveText('--')
+  await page.getByRole('link', { name: 'Open in inspector' }).click()
+  await expect(page.locator('.session-stat.cost')).toHaveText('--')
+  await page.getByRole('button', { name: 'Overview', exact: true }).click()
+  await expect(page.locator('.stat-detail').filter({ hasText: 'session' })).toContainText('-- session')
+  await page.getByRole('button', { name: 'Timeline', exact: true }).click()
+  await expect(page.locator('.unknown-cost')).toHaveText('--')
+  await expect(page.locator('.unknown-cost')).toBeVisible()
+  await expect(page.locator('.panel--cost .y-axis')).toHaveText('--')
+  await expect(page.locator('.bar--unknown .bar-cost')).toHaveCount(0)
+})
+
 test('Markdown renders while HTML and script links remain inert', async ({ page, request }) => {
   await openMessages(page, request)
   await page.locator('.chrono-row').filter({ hasText: 'Browser fixture' }).click()

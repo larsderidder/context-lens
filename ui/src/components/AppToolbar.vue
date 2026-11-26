@@ -293,7 +293,7 @@ function onSessionIdKeydown(e: KeyboardEvent) {
       </span>
       <span v-if="selectedSessionId" class="toolbar-sep"></span>
       <span class="session-stat">{{ summary?.entryCount ?? session.entries.length }} turns</span>
-      <span class="session-stat cost">{{ fmtCost(summary?.totalCost ?? 0) }}</span>
+      <span class="session-stat cost">{{ fmtCost(summary?.totalCost) }}</span>
       <span
         v-if="session.prunedMessages?.length"
         class="session-stat session-stat--pruned"

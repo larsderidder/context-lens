@@ -18,6 +18,39 @@ import type {
   LharSessionLine,
 } from "../src/lhar-types.generated.js";
 
+describe("cost completeness", () => {
+  it("includes unknown subagent costs even in main-only analysis", () => {
+    const subagent = mkEntry({ agentRole: "subagent", costUsd: null });
+    for (const entries of [[subagent], [mkEntry({ costUsd: 0.1 }), subagent]]) {
+      const result = analyzeSession(null, entries, "cost.lhar", {
+        mainOnly: true,
+      });
+      assert.equal(result.totalCostUsd, null);
+    }
+  });
+  for (const [name, costs, expected] of [
+    ["empty", [], 0],
+    ["unknown", [null, null], null],
+    ["mixed", [0.1, null], null],
+    ["zero", [0, 0], 0],
+    ["known", [0.1, 0.2], 0.3],
+  ] as const) {
+    it(name, () => {
+      const entries = costs.map((costUsd, i) =>
+        mkEntry({ costUsd, sequence: i + 1 }),
+      );
+      const result = analyzeSession(null, entries, "cost.lhar");
+      assert.equal(result.totalCostUsd, expected);
+      if (entries.length > 0) {
+        assert.equal(identifyUserTurns(entries)[0].totalCost, expected);
+      }
+      assert.deepEqual(
+        entries.map((e) => e.usage_ext.cost_usd),
+        costs,
+      );
+    });
+  }
+});
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -37,6 +70,10 @@ function mkEntry(overrides: {
     count: number;
   }>;
 }): LharRecord {
+  let cost = overrides.costUsd;
+  if (cost === undefined) {
+    cost = 0.01;
+  }
   return {
     type: "entry",
     id: "test-id",
@@ -75,7 +112,7 @@ function mkEntry(overrides: {
       cache_read_tokens: 0,
       cache_write_tokens: 0,
       thinking_tokens: 0,
-      cost_usd: overrides.costUsd ?? 0.01,
+      cost_usd: cost,
     },
     http: {
       method: "POST",
