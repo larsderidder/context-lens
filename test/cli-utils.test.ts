@@ -137,13 +137,41 @@ describe("cli-utils", () => {
   });
 
   it("returns default mitm config", () => {
-    const mitm = getMitmConfig();
+    const mitm = getMitmConfig({});
     assert.equal(mitm.port, 8080);
     assert.equal(mitm.proxyUrl, "http://localhost:8080");
     assert.deepEqual(mitm.extraArgs, []);
     assert.equal(mitm.lensSource, "commandName");
     assert.equal(mitm.lensSessionId, "random");
     assert.ok(mitm.addonPath.endsWith("mitm_addon.py"));
+  });
+
+  it("uses a per-launch MITM port for both listener and child proxy URL", () => {
+    for (const port of [1, 24082, 65535]) {
+      const mitm = getMitmConfig({ CONTEXT_LENS_MITM_PORT: String(port) });
+      assert.equal(mitm.port, port);
+      const child = toMitmToolConfig(getToolConfig("pi"), mitm);
+      assert.equal(child.childEnv.https_proxy, `http://localhost:${port}`);
+      assert.equal(child.childEnv.WSS_PROXY, `http://localhost:${port}`);
+    }
+  });
+
+  it("rejects invalid per-launch MITM ports", () => {
+    for (const port of [
+      "",
+      "0",
+      "65536",
+      "-1",
+      "8082.5",
+      "abc",
+      " 8082",
+      "0x1f92",
+    ]) {
+      assert.throws(
+        () => getMitmConfig({ CONTEXT_LENS_MITM_PORT: port }),
+        /CONTEXT_LENS_MITM_PORT must be an integer from 1 to 65535/,
+      );
+    }
   });
 
   it("addProvidersBasedOnAuthJson", () => {
@@ -169,10 +197,40 @@ describe("cli-utils", () => {
     assert.deepEqual(providers, expectedProvidersValue);
   });
 
+  it("uses an inherited source instead of an absolute custom launcher path", () => {
+    const previousSource = process.env.CONTEXT_LENS_SOURCE;
+    try {
+      process.env.CONTEXT_LENS_SOURCE = "pi";
+      assert.equal(resolveLensSource("commandName", process.execPath), "pi");
+    } finally {
+      if (previousSource === undefined) {
+        delete process.env.CONTEXT_LENS_SOURCE;
+      } else {
+        process.env.CONTEXT_LENS_SOURCE = previousSource;
+      }
+    }
+    for (const setting of ["commandName", "auto", "fixed-source"]) {
+      assert.equal(
+        resolveLensSource(setting, process.execPath, {
+          CONTEXT_LENS_SOURCE: "pi",
+        }),
+        "pi",
+      );
+      assert.equal(
+        resolveLensSource(setting, process.execPath, {
+          CONTEXT_LENS_SOURCE: "",
+        }),
+        "",
+      );
+    }
+  });
   it("resolves mitm lens source and session id settings", () => {
-    assert.equal(resolveLensSource("commandName", "codex"), "codex");
-    assert.equal(resolveLensSource("auto", "codex"), "");
-    assert.equal(resolveLensSource("fixed-source", "codex"), "fixed-source");
+    assert.equal(resolveLensSource("commandName", "codex", {}), "codex");
+    assert.equal(resolveLensSource("auto", "codex", {}), "");
+    assert.equal(
+      resolveLensSource("fixed-source", "codex", {}),
+      "fixed-source",
+    );
 
     assert.equal(
       resolveLensSessionId("none", () => "abcd1234"),
@@ -189,7 +247,7 @@ describe("cli-utils", () => {
   });
 
   it("converts reverse-proxy tool config to mitm proxy config", () => {
-    const mitm = toMitmToolConfig(getToolConfig("claude"), getMitmConfig());
+    const mitm = toMitmToolConfig(getToolConfig("claude"), getMitmConfig({}));
 
     assert.equal(mitm.needsMitm, true);
     assert.deepEqual(mitm.extraArgs, []);

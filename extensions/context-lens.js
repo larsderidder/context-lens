@@ -195,7 +195,7 @@ export default function contextLens(
         if (result.code !== 0) {
           throw new Error("mitmdump is unavailable. Install mitmproxy first.");
         }
-        await preflight();
+        await preflight(runtime.env);
         if (
           !ctx.isIdle() ||
           ctx.cwd !== invocationCwd ||
@@ -234,6 +234,7 @@ export default function contextLens(
         Object.entries(runtime.env).filter(([, value]) => value !== undefined),
       );
       env.CONTEXT_LENS_ACTIVE = "1";
+      env.CONTEXT_LENS_SOURCE = "pi";
 
       // Replace Pi only after its shutdown hooks and terminal cleanup have run.
       // Keeping the PID avoids racing the parent shell for terminal input.

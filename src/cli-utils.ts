@@ -395,15 +395,37 @@ export const CLI_CONSTANTS = {
   COMMAND_ALIASES,
   KNOWN_PRIVACY_LEVELS,
 } as const;
-export function getMitmConfig(): MitmConfig {
-  const port = Number.isNaN(config.mitm.port) ? 8080 : config.mitm.port;
+/** Resolve MITM settings, allowing shell wrappers to select a private port per launch. */
+export function getMitmConfig(
+  env: NodeJS.ProcessEnv = process.env,
+): MitmConfig {
+  // Pi can retry preflight after the user edits config.toml.
+  const mitm = loadConfig().mitm;
+  let port = mitm.port;
+  if (Number.isNaN(port)) {
+    port = 8080;
+  }
+  if (env.CONTEXT_LENS_MITM_PORT !== undefined) {
+    const value = env.CONTEXT_LENS_MITM_PORT;
+    port = Number(value);
+    if (
+      !/^\d+$/.test(value) ||
+      !Number.isInteger(port) ||
+      port < 1 ||
+      port > 65535
+    ) {
+      throw new Error(
+        "CONTEXT_LENS_MITM_PORT must be an integer from 1 to 65535",
+      );
+    }
+  }
   return {
     port,
     proxyUrl: `http://localhost:${port}`,
-    extraArgs: config.mitm.extraArgs,
+    extraArgs: mitm.extraArgs,
     addonPath: join(__dirname, "..", "mitm_addon.py"),
-    lensSource: config.mitm.lensSource,
-    lensSessionId: config.mitm.lensSessionId,
+    lensSource: mitm.lensSource,
+    lensSessionId: mitm.lensSessionId,
   };
 }
 
@@ -470,9 +492,17 @@ export function addProvidersBasedOnEnvVars(
 export function resolveLensSource(
   setting: string,
   commandName: string,
+  env: NodeJS.ProcessEnv = process.env,
 ): string {
-  if (setting === "commandName") return commandName;
-  if (setting === "auto") return "";
+  if (env.CONTEXT_LENS_SOURCE !== undefined) {
+    return env.CONTEXT_LENS_SOURCE;
+  }
+  if (setting === "commandName") {
+    return commandName;
+  }
+  if (setting === "auto") {
+    return "";
+  }
   return setting;
 }
 

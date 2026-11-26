@@ -8,7 +8,7 @@ export function checkMitmPort(port) {
       if (error.code === "EADDRINUSE") {
         reject(
           new Error(
-            `Port ${port} is already in use. Set a free [mitm] port in ~/.context-lens/config.toml, then retry /context-lens.`,
+            `Port ${port} is already in use. Set CONTEXT_LENS_MITM_PORT to a free port or change [mitm] port in ~/.context-lens/config.toml, then retry /context-lens.`,
           ),
         );
       } else {
@@ -28,7 +28,7 @@ export function checkMitmPort(port) {
 }
 
 /** Read the same configuration as the bundled CLI on every attempt. */
-export async function preflightCapture() {
-  const { loadConfig } = await import("../dist/config.js");
-  await checkMitmPort(loadConfig().mitm.port);
+export async function preflightCapture(env = process.env) {
+  const { getMitmConfig } = await import("../dist/cli-utils.js");
+  await checkMitmPort(getMitmConfig(env).port);
 }

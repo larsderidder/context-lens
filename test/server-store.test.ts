@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import {
   mkdirSync,
   mkdtempSync,
@@ -292,6 +293,86 @@ describe("Store", () => {
         restored.getCapturedRequests().map((entry) => entry.healthScore),
         [...chronological].reverse().map((entry) => entry.healthScore),
       );
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("backfills health with linear detail reads within a constrained heap", () => {
+    const { store, dir, cleanup } = makeStore();
+    const stateFile = path.join(dir, "data", "state.jsonl");
+    try {
+      const context = parseContextInfo(
+        "chatgpt",
+        {
+          model: "gpt-6.1-sol",
+          input: [{ role: "user", content: "Health backfill fixture" }],
+        },
+        "responses",
+      );
+      const template = store.storeRequest(context, { raw: true }, null);
+      const entryCount = 80;
+      const entries = Array.from({ length: entryCount }, (_, index) => ({
+        ...template,
+        id: index + 1,
+        conversationId: "affected",
+        timestamp: new Date(Date.UTC(2026, 0, 1, 0, 0, index)).toISOString(),
+        contextLimit: 128_000,
+      }));
+      const unaffected = {
+        ...template,
+        id: entryCount + 1,
+        conversationId: "unaffected",
+      };
+      writeFileSync(
+        stateFile,
+        `${[unaffected, ...entries.reverse()]
+          .map((data) => JSON.stringify({ type: "entry", data }))
+          .join("\n")}\n`,
+      );
+      // Isolate scoring from unrelated one-time token migrations.
+      for (const marker of [
+        ".image-token-migrate-done",
+        ".token-restore-done",
+      ]) {
+        writeFileSync(path.join(dir, "data", marker), "");
+      }
+      const result = spawnSync(
+        process.execPath,
+        [
+          "--max-old-space-size=96",
+          "--input-type=module",
+          "-e",
+          `
+            import assert from "node:assert/strict";
+            import { Store } from ${JSON.stringify(new URL("../src/server/store.js", import.meta.url).href)};
+            const store = new Store({
+              dataDir: ${JSON.stringify(path.join(dir, "data"))},
+              stateFile: ${JSON.stringify(stateFile)},
+              maxSessions: 10,
+            });
+            const reads = [];
+            store.getEntryDetail = (id) => {
+              reads.push(id);
+              assert.ok(id <= ${entryCount}, "unaffected session detail read");
+              const context = ${JSON.stringify(context)};
+              // Each read owns a flat 2 MiB string, not a shared or lazy rope.
+              context.messages[0].content = JSON.parse('"' + 'x'.repeat(2 * 1024 * 1024) + '"');
+              return context;
+            };
+            store.loadState();
+            assert.deepEqual(reads, Array.from({ length: ${entryCount} }, (_, i) => i + 1));
+            assert.equal(store.getCapturedRequests().length, ${entryCount + 1});
+            assert.ok(store.getCapturedRequests().every((entry) => entry.healthScore));
+            reads.length = 0;
+            store.loadState();
+            assert.deepEqual(reads, [], "already scored sessions need no details");
+          `,
+        ],
+        { encoding: "utf8", timeout: 30_000 },
+      );
+      assert.equal(result.error, undefined);
+      assert.equal(result.status, 0, result.stderr || result.stdout);
     } finally {
       cleanup();
     }

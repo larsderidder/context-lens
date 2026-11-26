@@ -169,7 +169,7 @@ if (parsedArgs.commandName === "analyze") {
   function isProxyRunning(): Promise<boolean> {
     return new Promise((resolve) => {
       const socket = net.connect(
-        { port: CLI_CONSTANTS.PROXY_PORT, host: "localhost" },
+        { port: CLI_CONSTANTS.PROXY_PORT, host: "127.0.0.1" },
         () => {
           socket.end();
           resolve(true);
@@ -206,7 +206,7 @@ if (parsedArgs.commandName === "analyze") {
   function isAnalysisRunning(): Promise<boolean> {
     return new Promise((resolve) => {
       const socket = net.connect(
-        { port: CLI_CONSTANTS.UI_PORT, host: "localhost" },
+        { port: CLI_CONSTANTS.UI_PORT, host: "127.0.0.1" },
         () => {
           socket.end();
           resolve(true);
