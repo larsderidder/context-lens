@@ -485,8 +485,8 @@ export class Store {
     const sameConvo = conversationId
       ? this.capturedRequests.filter((e) => e.conversationId === conversationId)
       : [];
-    const prevMain = sameConvo
-      .filter((e) => !e.agentKey)
+    const previousAgentTurn = sameConvo
+      .filter((e) => e.agentKey === entry.agentKey)
       .sort(
         (a, b) =>
           new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
@@ -504,10 +504,11 @@ export class Store {
       sessionToolsUsed.add(tool);
     }
 
-    const turnCount = sameConvo.filter((e) => !e.agentKey).length + 1;
+    const turnCount =
+      sameConvo.filter((e) => e.agentKey === entry.agentKey).length + 1;
     entry.healthScore = computeHealthScore(
       entry,
-      prevMain ? prevMain.contextInfo.totalTokens : null,
+      previousAgentTurn?.contextInfo.totalTokens ?? null,
       sessionToolsUsed,
       turnCount,
     );
@@ -743,6 +744,21 @@ export class Store {
       (a, b) =>
         new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
     );
+    const contexts = new Map<number, ContextInfo>();
+    const scoringContext = (entry: CapturedEntry): ContextInfo => {
+      let context = contexts.get(entry.id);
+      if (!context) {
+        const detail = this.getEntryDetail(entry.id);
+        context = { ...entry.contextInfo };
+        if (detail) {
+          // Compacted state omits tool definitions and some message content.
+          context.tools = detail.tools;
+          context.messages = detail.messages;
+        }
+        contexts.set(entry.id, context);
+      }
+      return context;
+    };
     for (const entry of sorted) {
       if (entry.healthScore) continue;
 
@@ -754,8 +770,8 @@ export class Store {
                 new Date(entry.timestamp).getTime(),
           )
         : [];
-      const prevMain = sameConvo
-        .filter((e) => !e.agentKey)
+      const previousAgentTurn = sameConvo
+        .filter((e) => e.agentKey === entry.agentKey)
         .sort(
           (a, b) =>
             new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
@@ -764,17 +780,17 @@ export class Store {
       // Collect all tools used across the conversation (up to this entry)
       const sessionToolsUsed = new Set<string>();
       for (const e of [...sameConvo, entry]) {
-        for (const tool of extractToolsUsed(e.contextInfo.messages)) {
+        for (const tool of extractToolsUsed(scoringContext(e).messages)) {
           sessionToolsUsed.add(tool);
         }
       }
 
       const turnCount =
-        sameConvo.filter((e) => !e.agentKey).length + (entry.agentKey ? 0 : 1);
+        sameConvo.filter((e) => e.agentKey === entry.agentKey).length + 1;
 
       entry.healthScore = computeHealthScore(
-        entry,
-        prevMain ? prevMain.contextInfo.totalTokens : null,
+        { ...entry, contextInfo: scoringContext(entry) },
+        previousAgentTurn?.contextInfo.totalTokens ?? null,
         sessionToolsUsed,
         turnCount,
       );
