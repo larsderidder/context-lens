@@ -1,6 +1,6 @@
 import type { JsonValue } from "@contextio/core";
 import { Hono } from "hono";
-import { streamSSE } from "hono/streaming";
+import { stream, streamSSE } from "hono/streaming";
 import * as v from "valibot";
 
 import { ingestCapture } from "../analysis/ingest.js";
@@ -8,7 +8,7 @@ import { computeFingerprint, extractSessionId } from "../core/conversation.js";
 import { classifyRequest } from "../core/routing.js";
 import { parseContextInfo, sumCosts } from "../core.js";
 import { importSessions } from "../importers/index.js";
-import { toLharJson, toLharJsonl } from "../lhar.js";
+import { buildSessionLine, traceIdFromConversation } from "../lhar.js";
 import {
   IngestCapturePayloadSchema,
   IngestLegacyPayloadSchema,
@@ -20,6 +20,8 @@ import type {
   ConversationGroup,
   PrivacyLevel,
 } from "../types.js";
+import { VERSION } from "../version.generated.js";
+import { ExportArchive } from "./export-archive.js";
 import { projectEntry } from "./projection.js";
 import type { Store } from "./store.js";
 
@@ -588,27 +590,97 @@ export function createApiApp(store: Store): Hono {
 
   // --- Export ---
 
-  app.get("/api/export/lhar", (c) => {
-    const conversation = c.req.query("conversation");
-    const privacy = (c.req.query("privacy") || "standard") as PrivacyLevel;
-    const entries = getExportEntries(store, conversation);
-    const jsonl = toLharJsonl(entries, store.getConversations(), privacy);
-    const filename = buildExportFilename("lhar", conversation, privacy);
-    c.header("Content-Disposition", `attachment; filename="${filename}"`);
-    return c.text(jsonl, 200, {
-      "Content-Type": "application/x-ndjson",
+  for (const format of ["lhar", "lhar.json"] as const) {
+    app.get(`/api/export/${format}`, (c) => {
+      const conversation = c.req.query("conversation");
+      const privacy = (c.req.query("privacy") || "standard") as PrivacyLevel;
+      const entries = getExportEntries(store, conversation)
+        .slice()
+        .sort(
+          (a, b) =>
+            new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime() ||
+            a.id - b.id,
+        );
+      const filename = buildExportFilename(format, conversation, privacy);
+      c.header("Content-Disposition", `attachment; filename="${filename}"`);
+      let contentType = "application/x-ndjson";
+      if (format === "lhar.json") {
+        contentType = "application/json";
+      }
+      c.header("Content-Type", contentType);
+      return stream(c, async (output) => {
+        const controller = new AbortController();
+        const signal = AbortSignal.any([c.req.raw.signal, controller.signal]);
+        output.onAbort(() => controller.abort());
+        const archive = new ExportArchive(signal);
+        const sessions = new Map<string, ReturnType<typeof buildSessionLine>>();
+        const traces = new Map<number, string>();
+        for (const entry of entries) {
+          const trace = traceIdFromConversation(entry.conversationId);
+          traces.set(entry.id, trace);
+          if (sessions.has(trace)) {
+            continue;
+          }
+          const convo = store
+            .getConversations()
+            .get(entry.conversationId ?? "");
+          if (convo) {
+            sessions.set(
+              trace,
+              buildSessionLine(convo.id, convo, entry.contextInfo.model),
+            );
+          } else if (format === "lhar.json") {
+            sessions.set(trace, {
+              type: "session",
+              trace_id: trace,
+              started_at: entry.timestamp,
+              tool: entry.source || "unknown",
+              model: entry.contextInfo.model,
+            });
+          }
+        }
+        if (format === "lhar.json") {
+          await output.write(
+            `{"lhar":{"version":"0.1.0","creator":{"name":"context-lens","version":${JSON.stringify(VERSION)}},"sessions":${JSON.stringify([...sessions.values()])},"entries":[`,
+          );
+        }
+        const emitted = new Set<string>();
+        let first = true;
+        for (const entry of entries) {
+          if (output.aborted) {
+            break;
+          }
+          let record: Awaited<ReturnType<Store["getExportRecord"]>>;
+          try {
+            record = await store.getExportRecord(entry, privacy, archive);
+          } catch (error) {
+            if (signal.aborted) {
+              return;
+            }
+            throw error;
+          }
+          record.trace_id = traces.get(entry.id) ?? record.trace_id;
+          if (format === "lhar") {
+            const session = sessions.get(record.trace_id);
+            if (session && !emitted.has(record.trace_id)) {
+              await output.write(`${JSON.stringify(session)}\n`);
+              emitted.add(record.trace_id);
+            }
+            await output.write(`${JSON.stringify(record)}\n`);
+          } else {
+            if (!first) {
+              await output.write(",");
+            }
+            await output.write(JSON.stringify(record));
+            first = false;
+          }
+        }
+        if (format === "lhar.json") {
+          await output.write("]}}");
+        }
+      });
     });
-  });
-
-  app.get("/api/export/lhar.json", (c) => {
-    const conversation = c.req.query("conversation");
-    const privacy = (c.req.query("privacy") || "standard") as PrivacyLevel;
-    const entries = getExportEntries(store, conversation);
-    const wrapped = toLharJson(entries, store.getConversations(), privacy);
-    const filename = buildExportFilename("lhar.json", conversation, privacy);
-    c.header("Content-Disposition", `attachment; filename="${filename}"`);
-    return c.json(wrapped);
-  });
+  }
 
   return app;
 }

@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { loadConfig } from "./config.js";
+import { validateUpstreamProxy } from "./http/upstream-proxy.js";
 import type { MitmConfig, ToolConfig } from "./types.js";
 import { VERSION } from "./version.generated.js";
 
@@ -48,6 +49,7 @@ export interface ParsedCliArgs {
   privacyLevel?: string;
   redactPreset?: RedactPreset;
   rehydrate?: boolean;
+  upstreamProxy?: string;
   commandName?: string;
   commandArguments: string[];
   error?: string;
@@ -186,6 +188,7 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
   let privacyLevel: string | undefined;
   let redactPreset: RedactPreset | undefined;
   let rehydrate = false;
+  let upstreamProxy: string | undefined;
   let explicitSeparator = false;
   let commandStartIndex = -1;
   for (let i = 0; i < args.length; i++) {
@@ -221,6 +224,28 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
     }
     if (arg === "--mitm") {
       useMitm = true;
+      continue;
+    }
+    if (arg === "--upstream-proxy" || arg.startsWith("--upstream-proxy=")) {
+      let value = arg.slice("--upstream-proxy=".length);
+      if (arg === "--upstream-proxy") {
+        value = args[++i];
+      }
+      try {
+        upstreamProxy = validateUpstreamProxy(value);
+      } catch {
+        return {
+          showHelp,
+          showVersion,
+          noOpen,
+          noUi,
+          noUpdateCheck,
+          useMitm,
+          commandArguments: [],
+          error:
+            "Error: --upstream-proxy requires an http:// or https:// proxy URL",
+        };
+      }
       continue;
     }
     if (arg === "--redact") {
@@ -327,6 +352,7 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
     privacyLevel,
     redactPreset,
     rehydrate,
+    upstreamProxy,
     commandName,
     commandArguments,
   };
@@ -356,6 +382,7 @@ export function formatHelpText(): string {
     `  --no-open         Don't auto-open ${UI_URL}`,
     "  --no-ui           Run proxy only, without analysis or web UI",
     "  --mitm            Force mitmproxy interception, mainly for Pi subscription models",
+    "  --upstream-proxy URL  Route provider requests through an HTTP(S) proxy, without direct fallback",
     "",
     "Examples:",
     "  context-lens claude",

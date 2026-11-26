@@ -76,12 +76,15 @@ export function createCaptureWriter(captureDir: string) {
 export function createCaptureIngestor(ingestUrl: string) {
   const parsed = new URL(ingestUrl);
   const protocol = parsed.protocol === "https:" ? https : http;
+  // Capture delivery is separate from provider egress, including local ingestion.
+  const agent = new protocol.Agent({ proxyEnv: {} });
 
   function post(capture: CaptureData): void {
     const body = JSON.stringify(capture);
     const req = protocol.request(
       {
         hostname: parsed.hostname,
+        agent,
         port: parsed.port || (parsed.protocol === "https:" ? 443 : 80),
         path: parsed.pathname + (parsed.search || ""),
         method: "POST",

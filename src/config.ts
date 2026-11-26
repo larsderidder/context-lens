@@ -13,11 +13,14 @@ import { join } from "node:path";
 
 import { parse } from "smol-toml";
 
+import { validateUpstreamProxy } from "./http/upstream-proxy.js";
+
 export interface ContextLensConfig {
   proxy: {
     port: number;
     redact?: "secrets" | "pii" | "strict";
     rehydrate: boolean;
+    upstreamProxy?: string;
   };
   ui: {
     port: number;
@@ -63,25 +66,21 @@ export function getConfigPath(): string {
  * Load and parse the user config file.
  *
  * Returns merged defaults + file values. Missing keys fall back to defaults.
- * Parse errors are logged and defaults are returned.
+ * Existing unreadable or malformed files abort startup to avoid losing egress settings.
  */
 export function loadConfig(): ContextLensConfig {
   const configPath = getConfigPath();
-
-  if (!fs.existsSync(configPath)) {
-    return structuredClone(DEFAULTS);
-  }
 
   let raw: unknown;
   try {
     const text = fs.readFileSync(configPath, "utf8");
     raw = parse(text);
-  } catch (err: unknown) {
-    console.warn(
-      `Warning: Could not parse config file ${configPath}:`,
-      err instanceof Error ? err.message : String(err),
-    );
-    return structuredClone(DEFAULTS);
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      return structuredClone(DEFAULTS);
+    }
+    // Parser diagnostics can contain proxy credentials from the source line.
+    throw new Error(`Could not parse config file ${configPath}`);
   }
 
   return mergeConfig(raw);
@@ -95,6 +94,7 @@ type RawSection = {
   redact?: unknown;
   rehydrate?: unknown;
   no_open?: unknown;
+  upstream_proxy?: unknown;
   level?: unknown;
   extra_args?: unknown;
   lens_source?: unknown;
@@ -125,6 +125,9 @@ function mergeConfig(raw: unknown): ContextLensConfig {
     }
     if (typeof proxy.rehydrate === "boolean") {
       cfg.proxy.rehydrate = proxy.rehydrate;
+    }
+    if (proxy.upstream_proxy !== undefined) {
+      cfg.proxy.upstreamProxy = validateUpstreamProxy(proxy.upstream_proxy);
     }
   }
 
@@ -174,6 +177,7 @@ export function exampleConfig(): string {
     "# port = 4040",
     '# redact = "secrets"   # secrets | pii | strict',
     "# rehydrate = false",
+    '# upstream_proxy = "http://127.0.0.1:8888"',
     "",
     "[mitm]",
     "# port = 8080",

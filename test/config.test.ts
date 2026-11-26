@@ -112,23 +112,26 @@ port = 1234
     assert.deepEqual(loadConfig(), expected);
   });
 
-  it("warns and returns defaults for malformed TOML", (t) => {
-    const expected = loadConfig();
-    const warning = t.mock.method(console, "warn", () => {});
+  it("rejects malformed TOML instead of discarding egress settings", () => {
     writeFileSync(getConfigPath(), '[proxy\nport = "unfinished');
-    assert.deepEqual(loadConfig(), expected);
-    assert.match(
-      warning.mock.calls[0].arguments[0],
-      /Could not parse config file/,
-    );
+    assert.throws(loadConfig, /Could not parse config file/);
   });
 
-  it("warns and returns defaults when the config path cannot be read", (t) => {
-    const expected = loadConfig();
-    const warning = t.mock.method(console, "warn", () => {});
+  it("rejects an unreadable config instead of discarding egress settings", () => {
     mkdirSync(getConfigPath());
-    assert.deepEqual(loadConfig(), expected);
-    assert.equal(warning.mock.callCount(), 1);
+    assert.throws(loadConfig, /Could not parse config file/);
+  });
+
+  it("loads and validates the upstream proxy", () => {
+    writeFileSync(
+      getConfigPath(),
+      '[proxy]\nupstream_proxy = "http://127.0.0.1:8888"',
+    );
+    assert.equal(loadConfig().proxy.upstreamProxy, "http://127.0.0.1:8888/");
+    for (const value of ['"socks5://localhost:1080"', '""', "false"]) {
+      writeFileSync(getConfigPath(), `[proxy]\nupstream_proxy = ${value}`);
+      assert.throws(loadConfig, /Upstream proxy must be/);
+    }
   });
 
   it("returns independent default objects", () => {

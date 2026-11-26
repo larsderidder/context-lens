@@ -38,6 +38,27 @@ CONTEXT_LENS_SESSION_ID = os.environ.get("CONTEXT_LENS_SESSION_ID", "").strip()
 # API endpoint they hit. Set by the CLI when launching a specific tool.
 CONTEXT_LENS_SOURCE = os.environ.get("CONTEXT_LENS_SOURCE", "").strip() or None
 
+
+class _NoIngestRedirect(urllib.request.HTTPRedirectHandler):
+    """Keep captures at the explicitly configured ingestion endpoint."""
+
+    def redirect_request(
+        self, req: urllib.request.Request, fp: object, code: int, msg: str, headers: object, newurl: str
+    ) -> None:
+        """Reject redirects rather than disclose captures to another destination."""
+        return None
+
+
+_INGEST_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoIngestRedirect())
+
+
+def _post_capture(payload: bytes) -> None:
+    """Deliver captures directly, independent of inherited provider proxy settings."""
+    req = urllib.request.Request(INGEST_URL, data=payload, headers={"Content-Type": "application/json"})
+    with _INGEST_OPENER.open(req, timeout=5):
+        pass
+
+
 # Patterns to capture: (host_substring, path_substring) -> (provider, source)
 # More specific patterns must come before generic ones.
 CAPTURE_PATTERNS = [
@@ -195,12 +216,7 @@ def websocket_message(flow: http.HTTPFlow):
 
         payload = json.dumps(capture).encode()
         try:
-            req = urllib.request.Request(
-                INGEST_URL,
-                data=payload,
-                headers={"Content-Type": "application/json"},
-            )
-            urllib.request.urlopen(req, timeout=5)
+            _post_capture(payload)
             model = request_data.get("model", "unknown")
             print(f"[context-lens] Captured WS {source}/codex request (model={model})")
         except Exception as e:
@@ -291,12 +307,7 @@ def response(flow: http.HTTPFlow):
     payload = json.dumps(capture).encode()
 
     try:
-        req = urllib.request.Request(
-            INGEST_URL,
-            data=payload,
-            headers={"Content-Type": "application/json"},
-        )
-        urllib.request.urlopen(req, timeout=5)
+        _post_capture(payload)
         model = request_body.get("model", "unknown")
         print(f"[context-lens] Captured {source}/{provider} request (model={model})")
     except Exception as e:

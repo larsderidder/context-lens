@@ -20,6 +20,7 @@ import {
   rescaleContextTokens,
   scanSecurity,
 } from "../core.js";
+import { redactHeaders } from "../http/headers.js";
 import {
   analyzeComposition,
   buildLharRecord,
@@ -28,6 +29,7 @@ import {
   normalizeComposition,
   parseResponseUsage,
 } from "../lhar.js";
+import type { LharRecord } from "../lhar-types.generated.js";
 import { ConversationLineSchema, EntryLineSchema } from "../schemas.js";
 import { safeFilenamePart } from "../server-utils.js";
 import type {
@@ -40,6 +42,11 @@ import type {
   RequestMeta,
   ResponseData,
 } from "../types.js";
+import {
+  ExportArchive,
+  parseRetainedExportRecord,
+  type RetainedExportRecord,
+} from "./export-archive.js";
 import {
   estimatePpqCost,
   isPpqTarget,
@@ -991,6 +998,11 @@ export class Store {
         detailPath,
         JSON.stringify({
           contextInfo: entry.contextInfo,
+          exportRecord: buildLharRecord(
+            entry,
+            this.capturedRequests,
+            this.privacy,
+          ),
         }),
       );
     } catch (err: unknown) {
@@ -1013,6 +1025,76 @@ export class Store {
     } catch {
       return null;
     }
+  }
+
+  /** Read one retained record without restoring full contexts to the store. */
+  async getExportRecord(
+    entry: CapturedEntry,
+    privacy: PrivacyLevel,
+    archive = new ExportArchive(),
+  ): Promise<LharRecord> {
+    archive.signal?.throwIfAborted();
+    let retained: RetainedExportRecord | undefined;
+    try {
+      const detail = JSON.parse(
+        fs.readFileSync(path.join(this.detailDir, `${entry.id}.json`), "utf8"),
+      );
+      retained = parseRetainedExportRecord(detail.exportRecord);
+    } catch {
+      // Legacy entries may only have the append-only LHAR archive.
+    }
+    if (!retained) {
+      const sameTimestamp = this.capturedRequests.filter(
+        (candidate) =>
+          candidate.conversationId === entry.conversationId &&
+          candidate.source === entry.source &&
+          candidate.timestamp === entry.timestamp,
+      );
+      // Legacy archives have no local entry ID. Never guess between tied turns.
+      if (sameTimestamp.length === 1) {
+        const source = safeFilenamePart(entry.source || "unknown");
+        let filename = "ungrouped.lhar";
+        if (entry.conversationId) {
+          filename = `${source}-${safeFilenamePart(entry.conversationId)}.lhar`;
+        }
+        try {
+          retained = await archive.read(
+            path.join(this.dataDir, filename),
+            entry.timestamp,
+            entry.contextInfo.model,
+            entry.source || "unknown",
+          );
+        } catch {
+          // Missing or concurrently removed payloads remain unavailable.
+        }
+      }
+    }
+    archive.signal?.throwIfAborted();
+    const record = buildLharRecord(entry, this.capturedRequests, privacy);
+    // Usage and costs come from current state, including asynchronous repricing.
+    // Payloads and request parameters come only from the retained record.
+    record.raw = { request_body: null, response_body: null };
+    if (retained) {
+      record.gen_ai.request = retained.gen_ai.request;
+      record.http.request_headers = redactHeaders(
+        retained.http.request_headers,
+      );
+      record.http.response_headers = redactHeaders(
+        retained.http.response_headers,
+      );
+      record.http.stream = retained.http.stream;
+      record.context_lens.tool_definitions =
+        retained.context_lens.tool_definitions;
+      record.context_lens.tool_calls = retained.context_lens.tool_calls;
+      if (privacy === "full") {
+        record.raw = retained.raw;
+      }
+    }
+    if (privacy === "minimal") {
+      record.http.request_headers = {};
+      record.http.response_headers = {};
+    }
+    return record;
   }
 
   /**

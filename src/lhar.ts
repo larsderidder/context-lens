@@ -18,7 +18,11 @@ export type { ParsedLhar } from "./lhar/reader.js";
 // LHAR file reader
 export { parseLharContent, readLharFile } from "./lhar/reader.js";
 // Record & session builders
-export { buildLharRecord, buildSessionLine } from "./lhar/record.js";
+export {
+  buildLharRecord,
+  buildSessionLine,
+  traceIdFromConversation,
+} from "./lhar/record.js";
 export type { ParsedResponseUsage } from "./lhar/response.js";
 // Response usage parsing
 export { extractResponseId, parseResponseUsage } from "./lhar/response.js";
