@@ -27,6 +27,21 @@ export function readLharFile(filepath: string): ParsedLhar {
  * Useful for testing and for piped input.
  */
 export function parseLharContent(content: string): ParsedLhar {
+  if (/^\s*\{\s*"lhar"\s*:/.test(content)) {
+    try {
+      const wrapper = JSON.parse(content).lhar;
+      if (Array.isArray(wrapper?.entries)) {
+        return {
+          session: wrapper.sessions?.[0] ?? null,
+          entries: wrapper.entries.filter(
+            (record: LharRecord) => record?.type === "entry",
+          ),
+        };
+      }
+    } catch {
+      return { session: null, entries: [] };
+    }
+  }
   let session: LharSessionLine | null = null;
   const entries: LharRecord[] = [];
 
