@@ -19,6 +19,7 @@ import { createProxy } from "@contextio/proxy";
 
 import { createCaptureIngestor, createCaptureWriter } from "./capture.js";
 import { loadProxyConfig } from "./config.js";
+import { configureUpstreamProxy } from "./egress.js";
 import { createPrunePlugin } from "./prune.js";
 
 async function loadRedactPlugin(): Promise<ProxyPlugin | null> {
@@ -94,6 +95,12 @@ async function loadPluginsFromEnv(): Promise<ProxyPlugin[]> {
 
 async function main(): Promise<void> {
   const config = loadProxyConfig();
+  if (config.upstreamProxy !== undefined) {
+    configureUpstreamProxy(config.upstreamProxy);
+    console.log(
+      `Egress proxy: ${new URL(config.upstreamProxy).origin} (no direct fallback)`,
+    );
+  }
   const plugins = await loadPluginsFromEnv();
   const redactPlugin = await loadRedactPlugin();
   if (redactPlugin) plugins.unshift(redactPlugin);

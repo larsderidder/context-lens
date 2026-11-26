@@ -47,6 +47,16 @@ afterEach(() => {
 });
 
 describe("proxy/config", () => {
+  it("validates explicit upstream proxy settings without direct fallback", () => {
+    withEnv({ CONTEXT_LENS_UPSTREAM_PROXY: "http://localhost:8888" }, () => {
+      assert.equal(loadProxyConfig().upstreamProxy, "http://localhost:8888/");
+    });
+    for (const value of ["", "socks5://localhost:1080"]) {
+      withEnv({ CONTEXT_LENS_UPSTREAM_PROXY: value }, () => {
+        assert.throws(loadProxyConfig, /Upstream proxy must be/);
+      });
+    }
+  });
   it("has safe defaults when no env vars are set", () => {
     withEnv(
       {

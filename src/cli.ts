@@ -18,6 +18,7 @@ import {
   decrementLockRefCount,
   incrementLockRefCount,
 } from "./cli/lockfile.js";
+import { buildMitmArgs } from "./cli/mitm.js";
 import { checkForUpdate } from "./cli/update-check.js";
 import {
   CLI_CONSTANTS,
@@ -30,6 +31,7 @@ import {
   toMitmToolConfig,
 } from "./cli-utils.js";
 import { loadConfig } from "./config.js";
+import { validateUpstreamProxy } from "./http/upstream-proxy.js";
 import { VERSION } from "./version.generated.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -52,6 +54,15 @@ if (parsedArgs.showVersion) {
 }
 // Load user config — CLI flags take precedence over config file values
 const userConfig = loadConfig();
+let upstreamProxy: string | undefined;
+const requestedProxy =
+  parsedArgs.upstreamProxy ??
+  process.env.CONTEXT_LENS_UPSTREAM_PROXY ??
+  userConfig.proxy.upstreamProxy;
+if (requestedProxy !== undefined) {
+  upstreamProxy = validateUpstreamProxy(requestedProxy);
+  process.env.CONTEXT_LENS_UPSTREAM_PROXY = upstreamProxy;
+}
 
 const envKeyToValue: Record<string, string> = {
   CONTEXT_LENS_PROXY_PORT: String(CLI_CONSTANTS.PROXY_PORT),
@@ -156,6 +167,7 @@ if (parsedArgs.commandName === "analyze") {
   let toolConfig = getToolConfig(commandName);
   if (useMitm || toolConfig.needsMitm) {
     toolConfig = toMitmToolConfig(toolConfig, mitmConfig);
+    buildMitmArgs(mitmConfig, upstreamProxy);
   }
 
   if (noUi && toolConfig.needsMitm) {
@@ -223,6 +235,12 @@ if (parsedArgs.commandName === "analyze") {
   // Start proxy and analysis server (or attach to existing ones)
   async function initializeServers(): Promise<void> {
     const proxyAlreadyRunning = await isProxyRunning();
+    if (proxyAlreadyRunning && upstreamProxy !== undefined) {
+      console.error(
+        "Cannot verify the egress of an existing Context Lens proxy. Stop it before launching with --upstream-proxy.",
+      );
+      process.exit(1);
+    }
     const analysisAlreadyRunning = requiresAnalysis
       ? await isAnalysisRunning()
       : false;
@@ -389,34 +407,21 @@ if (parsedArgs.commandName === "analyze") {
   }
 
   function startMitm(): void {
-    const addonPath = mitmConfig.addonPath;
+    const mitmArgs = buildMitmArgs(mitmConfig, upstreamProxy);
     console.log(
       "🔒 Starting mitmproxy (forward proxy for HTTPS interception)...",
     );
-    mitmProcess = spawn(
-      "mitmdump",
-      [
-        "-s",
-        addonPath,
-        "--quiet",
-        "--listen-port",
-        String(mitmConfig.port),
-        ...mitmConfig.extraArgs,
-      ],
-      {
-        stdio: ["ignore", "pipe", "pipe"],
-        env: {
-          ...process.env,
-          CONTEXT_LENS_SOURCE: resolveLensSource(
-            mitmConfig.lensSource,
-            commandName,
-          ),
-          CONTEXT_LENS_SESSION_ID: resolveLensSessionId(
-            mitmConfig.lensSessionId,
-          ),
-        },
+    mitmProcess = spawn("mitmdump", mitmArgs, {
+      stdio: ["ignore", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        CONTEXT_LENS_SOURCE: resolveLensSource(
+          mitmConfig.lensSource,
+          commandName,
+        ),
+        CONTEXT_LENS_SESSION_ID: resolveLensSessionId(mitmConfig.lensSessionId),
       },
-    );
+    });
     // Capture stderr so binding errors ("address already in use") are visible.
     let mitmStderr = "";
     if (mitmProcess.stderr) {

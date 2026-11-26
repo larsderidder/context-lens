@@ -259,6 +259,12 @@ export async function backgroundStart(
 ): Promise<number> {
   const existing = readBackgroundState(runtime);
   if (existing && isBackgroundRunning(existing, runtime)) {
+    if (runtime.env.CONTEXT_LENS_UPSTREAM_PROXY !== undefined) {
+      runtime.error(
+        "Cannot verify the egress of an existing Context Lens proxy. Stop it before starting with an upstream proxy.",
+      );
+      return 1;
+    }
     runtime.log("Background status: already running");
     runtime.log(`  proxy pid: ${existing.proxyPid}`);
     return 0;
