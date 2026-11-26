@@ -9,14 +9,14 @@ importers:
   .:
     dependencies:
       '@contextio/core':
-        specifier: ^0.4.0
-        version: 0.4.0
+        specifier: ^0.5.0
+        version: 0.5.0
       '@contextio/proxy':
-        specifier: ^0.2.5
-        version: 0.2.5
+        specifier: ^0.2.6
+        version: 0.2.6
       '@contextio/redact':
-        specifier: ^0.3.2
-        version: 0.3.2
+        specifier: ^0.3.3
+        version: 0.3.3
       '@hono/node-server':
         specifier: ^2.1.6
         version: 2.1.8(hono@4.13.18)
@@ -117,15 +117,15 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@contextio/core@0.4.0':
-    resolution: {integrity: sha512-8YfxMojiPqcGClDJ4aV+JM4UTGZS7Ud0Rq4eQ8JcI8GXYRnUBN5DOG5/jDrCJVuR8pdsTJRp8tEa99PNATSBuQ==}
+  '@contextio/core@0.5.0':
+    resolution: {integrity: sha512-mCt4Sv7AhyJyEv1S9qtEGxIBxl45G5nGiWlae1A/PBGQY7VlJb1kgTqp/yTDSbQp9Qb4YlQBvmWUXVoIP9+VuQ==}
 
-  '@contextio/proxy@0.2.5':
-    resolution: {integrity: sha512-Y2A5ADO1YsAtrRjG4edjUrMEOeTeDasvhKphxHvA6c2eJnVZ6V/OVg+ERbgNgtQ8v+/yA6CDNIORfRScXTxPZg==}
+  '@contextio/proxy@0.2.6':
+    resolution: {integrity: sha512-R+00pbRj3eEt0tzSUWgPjpZpVH1pGtiFKzbAPONFKCBusQOvcqtmzhvDqglEcafxLh0FiQBcjVuanSAKbkqd1A==}
     hasBin: true
 
-  '@contextio/redact@0.3.2':
-    resolution: {integrity: sha512-RzWIHGIuTdI/XcyyCI3LMgOkWypeYt10x/smQ7/eb25sXStdvCXEn6/Vxzlw5ieoLo3/ua5U9haZw4vKqRtqlQ==}
+  '@contextio/redact@0.3.3':
+    resolution: {integrity: sha512-hOmr1XmVUTNot+Mqdn2nhl/vLcgLb0aK8D82Q2XdnyXg92IMdcCfwjvSfPIZAA4X2cqRc79iWc5edS/4C705Rg==}
 
   '@hono/node-server@2.1.8':
     resolution: {integrity: sha512-jdf7FHh6A1lzjpHHQUgxsg2GeER2vMetnAOfeActzcoli6jamlK+NAwL6Dsr5Fl3BS3tYUQzCdtZjU8Qxv7bEA==}
@@ -393,15 +393,15 @@ snapshots:
   '@biomejs/cli-win32-x64@2.6.7':
     optional: true
 
-  '@contextio/core@0.4.0': {}
+  '@contextio/core@0.5.0': {}
 
-  '@contextio/proxy@0.2.5':
+  '@contextio/proxy@0.2.6':
     dependencies:
-      '@contextio/core': 0.4.0
+      '@contextio/core': 0.5.0
 
-  '@contextio/redact@0.3.2':
+  '@contextio/redact@0.3.3':
     dependencies:
-      '@contextio/core': 0.4.0
+      '@contextio/core': 0.5.0
 
   '@hono/node-server@2.1.8(hono@4.13.18)':
     dependencies:
