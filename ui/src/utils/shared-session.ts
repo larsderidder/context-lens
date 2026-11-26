@@ -5,6 +5,7 @@
  * ConversationGroup shape the store expects.
  */
 
+import { sumCosts } from '@/utils/cost'
 import type {
   ConversationGroup,
   ConversationSummary,
@@ -271,7 +272,7 @@ export async function loadSharedSession(url: string): Promise<SharedSessionData>
 
     const agents = buildAgentGroups(sessionEntries)
     const label = sessionLabel(session, sessionEntries)
-    const totalCost = sessionEntries.reduce((sum, e) => sum + (e.costUsd ?? 0), 0)
+    const totalCost = sumCosts(sessionEntries.map(e => e.costUsd))
     const latestEntry = sessionEntries[sessionEntries.length - 1]
     const latestTokens = latestEntry.usage?.inputTokens ?? latestEntry.contextInfo.totalTokens
 
@@ -314,7 +315,7 @@ export async function loadSharedSession(url: string): Promise<SharedSessionData>
   if (conversations.length === 0 && allEntries.length > 0) {
     const id = 'shared'
     const agents = buildAgentGroups(allEntries)
-    const totalCost = allEntries.reduce((sum, e) => sum + (e.costUsd ?? 0), 0)
+    const totalCost = sumCosts(allEntries.map(e => e.costUsd))
     const latest = allEntries[allEntries.length - 1]
 
     conversations.push({

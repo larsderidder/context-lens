@@ -118,6 +118,34 @@ describe("analysis HTTP adapter", { timeout: 10000 }, () => {
     assert.equal(data.conversations[0].source, "http-test");
   });
 
+  for (const [name, costs, expected] of [
+    ["unknown", [null, null], null],
+    ["mixed", [0.25, null], null],
+    ["zero", [0, 0], 0],
+    ["known", [0.25, 0.5], 0.75],
+  ] as const) {
+    it(`preserves ${name} costs in session summaries`, async () => {
+      for (const cost of costs) {
+        const res = await fetch(`${baseUrl}/api/ingest`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        assert.equal(res.status, 200);
+        const entry = store.getCapturedRequests()[0];
+        entry.costUsd = cost;
+      }
+      const response = await fetch(`${baseUrl}/api/requests?summary=true`);
+      const data = await response.json();
+      assert.equal(data.conversations.length, 1);
+      assert.equal(data.conversations[0].totalCost, expected);
+      assert.deepEqual(
+        store.getCapturedRequests().map((e) => e.costUsd),
+        [...costs].reverse(),
+      );
+    });
+  }
+
   it("serves JavaScript assets and the SPA fallback through the adapter", async () => {
     const asset = await fetch(`${baseUrl}/app.js`);
     assert.equal(asset.status, 200);

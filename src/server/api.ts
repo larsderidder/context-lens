@@ -6,7 +6,7 @@ import * as v from "valibot";
 import { ingestCapture } from "../analysis/ingest.js";
 import { computeFingerprint, extractSessionId } from "../core/conversation.js";
 import { classifyRequest } from "../core/routing.js";
-import { parseContextInfo } from "../core.js";
+import { parseContextInfo, sumCosts } from "../core.js";
 import { importSessions } from "../importers/index.js";
 import { toLharJson, toLharJsonl } from "../lhar.js";
 import {
@@ -487,7 +487,7 @@ export function createApiApp(store: Store): Hono {
           firstSeen: entries[entries.length - 1].timestamp,
         };
         const latest = entries[0];
-        const totalCost = entries.reduce((sum, e) => sum + (e.costUsd ?? 0), 0);
+        const totalCost = sumCosts(entries.map((e) => e.costUsd));
 
         const keyCounts = new Map<string, number>();
         for (const e of entries) {

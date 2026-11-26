@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useSessionStore } from '@/stores/session'
+import { sumCosts } from '@/utils/cost'
 import { fmtTokens, fmtCost, fmtPct, fmtDuration, healthColor } from '@/utils/format'
 import { classifyEntries, SIMPLE_GROUPS, SIMPLE_META, groupMessagesByCategory, getCategoryLabel, getCategoryColor } from '@/utils/messages'
 import { computeRecommendations } from '@/utils/recommendations'
@@ -337,7 +338,7 @@ function handleTreemapFileClick(filePath: string) {
       <div class="stat-card">
         <div class="stat-readout green">{{ fmtCost(entry.costUsd) }}</div>
         <div class="stat-label">Turn cost</div>
-        <div class="stat-detail">{{ fmtCost(session?.entries.reduce((s, e) => s + (e.costUsd ?? 0), 0) ?? 0) }} session</div>
+        <div class="stat-detail">{{ fmtCost(sumCosts(session?.entries.map(e => e.costUsd) ?? [])) }} session</div>
         <div
           v-if="sessionBloatCost !== null && sessionBloatCost > 0.001"
           class="stat-detail stat-detail--bloat"

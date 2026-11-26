@@ -257,7 +257,7 @@ export interface ConversationSummary extends Conversation {
   latestModel: string;
   latestTotalTokens: number;
   contextLimit: number;
-  totalCost: number;
+  totalCost: number | null;
   healthScore: HealthScore | null;
   /** Per-entry totalTokens in chronological order (oldest → newest), for sparkline rendering */
   tokenHistory: number[];

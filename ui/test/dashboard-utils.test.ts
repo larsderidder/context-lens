@@ -32,6 +32,22 @@ function summary(overrides: Partial<ConversationSummary>): ConversationSummary {
 }
 
 describe('dashboard helpers', () => {
+  it.each([
+    { costs: [], expected: 0 },
+    { costs: [null, null], expected: null },
+    { costs: [0.2, null], expected: null },
+    { costs: [0, 0], expected: 0 },
+    { costs: [0.2, 0.3], expected: 0.5 },
+  ])('aggregates complete cost only: $costs', ({ costs, expected }) => {
+    expect(computeDashboardKpis(costs.map(totalCost => summary({ totalCost }))).totalCost).toBe(expected)
+  })
+
+  it('sorts unknown costs last and keeps priority finite', () => {
+    const unknown = summary({ id: 'unknown', totalCost: null })
+    const zero = summary({ id: 'zero', totalCost: 0 })
+    expect(sortSummaries([unknown, zero], 'cost').map(s => s.id)).toEqual(['zero', 'unknown'])
+    expect(sortSummaries([unknown, zero], 'priority')).toHaveLength(2)
+  })
   it('filters by source, query, and tag without changing the source list', () => {
     const sessions = [
       summary({ id: 'a', source: 'claude', workingDirectory: '/home/lars/alpha', tags: ['work'] }),

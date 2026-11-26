@@ -64,8 +64,10 @@ const maxTokenVal = computed(() => {
 const maxCostVal = computed(() => {
   let max = 0
   for (const item of filtered.value) {
-    const val = item.entry.costUsd ?? 0
-    if (val > max) max = val
+    const val = item.entry.costUsd
+    if (val !== null && val > max) {
+      max = val
+    }
   }
   return max
 })
@@ -124,7 +126,10 @@ function getStackSegments(item: { entry: ProjectedEntry }): GroupSegment[] {
 }
 
 function getCostBarHeight(item: { entry: ProjectedEntry }): number {
-  return calculateBarHeight(item.entry.costUsd ?? 0, maxCostVal.value)
+  if (item.entry.costUsd === null) {
+    return 0
+  }
+  return calculateBarHeight(item.entry.costUsd, maxCostVal.value)
 }
 
 function selectTurn(entry: ProjectedEntry) {
@@ -175,7 +180,12 @@ function getBarHeightWithLimit(item: { entry: ProjectedEntry }): number {
 
 // Y ticks adjusted when limit overlay changes the ceiling
 const yTicksWithLimit = computed(() => calculateYTicks(chartMaxWithLimit.value))
-const costYTicks = computed(() => calculateYTicks(maxCostVal.value))
+const costYTicks = computed(() => {
+  if (!filtered.value.some(item => item.entry.costUsd !== null)) {
+    return []
+  }
+  return calculateYTicks(maxCostVal.value)
+})
 
 const yTicksNormalized = [0, 25, 50, 75, 100]
 
@@ -447,18 +457,20 @@ watch(
         <div class="chart-container">
           <div class="y-axis">
             <span v-for="tick in [...costYTicks].reverse()" :key="'cost-' + tick">{{ formatYTick(tick, 'cost') }}</span>
+            <span v-if="costYTicks.length === 0">--</span>
           </div>
           <div ref="costChartScrollEl" class="chart-scroll">
             <div class="bars-wrap" :class="{ sparse: isSparse }">
               <div class="bars" :class="{ sparse: isSparse }">
                 <div
                   v-for="item in filtered" :key="'cost-' + item.entry.id"
-                  class="bar" :class="{ active: entry?.id === item.entry.id }"
+                  class="bar" :class="{ active: entry?.id === item.entry.id, 'bar--unknown': item.entry.costUsd === null }"
                   :style="{ height: getCostBarHeight(item) + '%' }"
                   v-tooltip="barTooltip(item.entry, item.isMain)"
                   @click="selectTurn(item.entry)"
                 >
-                  <div class="bar-cost" :style="{ background: barColor(item.entry.contextInfo.model, item.isMain) }" />
+                  <div v-if="item.entry.costUsd !== null" class="bar-cost" :style="{ background: barColor(item.entry.contextInfo.model, item.isMain) }" />
+                  <span v-if="item.entry.costUsd === null" class="unknown-cost">--</span>
                 </div>
               </div>
             </div>
@@ -720,6 +732,14 @@ watch(
 .bar-cost {
   width: 100%;
   height: 100%;
+}
+
+.bar--unknown {
+  min-height: 16px;
+  overflow: visible;
+  background: transparent;
+  text-align: center;
+  color: var(--text-muted);
 }
 
 .bar-segment {

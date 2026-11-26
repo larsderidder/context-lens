@@ -10,6 +10,7 @@ import type {
   LharRecord,
   LharSessionLine,
 } from "../lhar-types.generated.js";
+import { sumCosts } from "./cost.js";
 
 // ---------------------------------------------------------------------------
 // Result types
@@ -42,7 +43,7 @@ export interface UserTurn {
   endEntryIndex: number;
   numApiCalls: number;
   modelsUsed: string[];
-  totalCost: number;
+  totalCost: number | null;
   peakContextTokens: number;
   compactionsInTurn: number;
 }
@@ -95,7 +96,7 @@ export interface SessionAnalysis {
   contextTimeline: Array<[number, number]>;
   growthBlocks: GrowthBlock[];
   compactions: CompactionEvent[];
-  totalCostUsd: number;
+  totalCostUsd: number | null;
   compositionLast: CompositionEntry[];
   /** (entryIndex, composition) pairs for entries right before each compaction */
   compositionsPreCompaction: Array<[number, CompositionEntry[]]>;
@@ -319,14 +320,15 @@ function buildUserTurn(
   turnEntries: LharRecord[],
 ): UserTurn {
   const models = new Set<string>();
-  let cost = 0;
+  let cost = sumCosts(turnEntries.map(costUsd));
+  if (cost !== null) {
+    cost = Math.round(cost * 1_000_000) / 1_000_000;
+  }
   let peak = 0;
   let compactions = 0;
 
   for (const e of turnEntries) {
     models.add(model(e));
-    const c = costUsd(e);
-    if (c) cost += c;
     const ct = cumTokens(e);
     if (ct > peak) peak = ct;
     if (isCompaction(e)) compactions++;
@@ -338,7 +340,7 @@ function buildUserTurn(
     endEntryIndex: end,
     numApiCalls: turnEntries.length,
     modelsUsed: [...models].sort(),
-    totalCost: Math.round(cost * 1_000_000) / 1_000_000,
+    totalCost: cost,
     peakContextTokens: peak,
     compactionsInTurn: compactions,
   };
@@ -494,12 +496,18 @@ export function analyzeSession(
   filename: string,
   opts: AnalyzeOptions = {},
 ): SessionAnalysis {
+  // Total cost (across all entries, including subagent)
+  let totalCost = sumCosts(allEntries.map(costUsd));
+  if (totalCost !== null) {
+    totalCost = Math.round(totalCost * 10_000) / 10_000;
+  }
+
   const entries = opts.mainOnly
     ? allEntries.filter((e) => agentRole(e) === "main")
     : allEntries;
 
   if (entries.length === 0) {
-    return emptyAnalysis(filename, session);
+    return { ...emptyAnalysis(filename, session), totalCostUsd: totalCost };
   }
 
   // Primary model: most common model among main agent entries
@@ -549,13 +557,6 @@ export function analyzeSession(
   // User turns
   const userTurns = identifyUserTurns(entries);
 
-  // Total cost (across all entries, including subagent)
-  let totalCost = 0;
-  for (const e of allEntries) {
-    const c = costUsd(e);
-    if (c) totalCost += c;
-  }
-
   // Composition: last main agent entry
   let lastMain = entries.filter((e) => agentRole(e) === "main");
   if (lastMain.length === 0) lastMain = entries;
@@ -598,7 +599,7 @@ export function analyzeSession(
     contextTimeline,
     growthBlocks,
     compactions,
-    totalCostUsd: Math.round(totalCost * 10_000) / 10_000,
+    totalCostUsd: totalCost,
     compositionLast,
     compositionsPreCompaction,
     agentPaths,

@@ -1,5 +1,6 @@
 import type { ConversationSummary } from '@/api-types'
 import { computeSessionPriority } from '@/utils/priority'
+import { sumCosts } from '@/utils/cost'
 
 export type DashboardSortMode = 'recent' | 'priority' | 'cost'
 export type KpiScope = 'today' | 'all'
@@ -14,7 +15,7 @@ export interface DashboardKpis {
   totalSessions: number
   totalRequests: number
   totalTokens: number
-  totalCost: number
+  totalCost: number | null
   avgHealth: number
 }
 
@@ -60,7 +61,7 @@ export function filterSummaries(summaries: ConversationSummary[], filters: Summa
 export function maxSummaryCost(summaries: ConversationSummary[]): number {
   let max = 0
   for (const summary of summaries) {
-    max = Math.max(max, summary.totalCost)
+    max = Math.max(max, summary.totalCost ?? 0)
   }
   return max
 }
@@ -79,7 +80,7 @@ export function sortSummaries(
       return bScore - aScore
     })
   } else if (sortMode === 'cost') {
-    list.sort((a, b) => b.totalCost - a.totalCost)
+    list.sort((a, b) => (b.totalCost ?? -1) - (a.totalCost ?? -1))
   }
 
   return list
@@ -103,7 +104,7 @@ export function computeDashboardKpis(summaries: ConversationSummary[]): Dashboar
   const totalSessions = summaries.length
   const totalRequests = summaries.reduce((sum, summary) => sum + summary.entryCount, 0)
   const totalTokens = summaries.reduce((sum, summary) => sum + summary.latestTotalTokens, 0)
-  const totalCost = summaries.reduce((sum, summary) => sum + summary.totalCost, 0)
+  const totalCost = sumCosts(summaries.map(summary => summary.totalCost))
 
   const withHealth = summaries.filter((summary) => summary.healthScore?.overall != null)
   const avgHealth = withHealth.length === 0
