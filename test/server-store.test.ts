@@ -138,6 +138,165 @@ describe("Store", () => {
     });
   }
 
+  it("refreshes multi-turn health using earlier tokens and tools after reload", () => {
+    const { store, dir, cleanup } = makeStore();
+    const stateFile = path.join(dir, "data", "state.jsonl");
+    try {
+      for (const [index, tokens] of [
+        120_000, 140_000, 450_000, 260_000,
+      ].entries()) {
+        const body = {
+          model: "gpt-6.1-sol",
+          tools: [
+            "read",
+            "edit",
+            "write",
+            "bash",
+            "grep",
+            "search",
+            "find",
+            "list",
+            "move",
+            "copy",
+          ].map((name) => ({
+            type: "function",
+            name,
+            description: "Fixture tool",
+            parameters: { type: "object", properties: {} },
+          })),
+          input: [
+            {
+              role: "user",
+              content: "History-dependent health fixture. ".repeat(400),
+            },
+          ],
+        };
+        if (index === 2) {
+          body.input[0].content = "Independent subagent task.";
+        }
+        const context = parseContextInfo("chatgpt", body, "responses");
+        if (index === 0) {
+          context.messages[0].contentBlocks = [
+            {
+              type: "tool_use",
+              id: "read-1",
+              name: "read",
+              input: {},
+            },
+          ];
+        }
+        store.storeRequest(
+          context,
+          { usage: { input_tokens: tokens, output_tokens: 5 } },
+          "test",
+          body,
+          undefined,
+          {},
+          "health-history-fixture",
+        );
+      }
+      const lines = readFileSync(stateFile, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+      const entries = lines
+        .filter((line) => line.type === "entry")
+        .map((line) => line.data);
+      assert.equal(entries.length, 4);
+      assert.equal(
+        new Set(entries.map((entry) => entry.conversationId)).size,
+        1,
+      );
+      for (const [index, entry] of entries.entries()) {
+        entry.timestamp = `2026-01-01T00:00:0${index}.000Z`;
+        entry.contextLimit = 128_000;
+        entry.healthScore = computeHealthScore(entry, null, new Set(), 1);
+      }
+      const originalUsage = entries.map((entry) => ({
+        contextInfo: structuredClone(entry.contextInfo),
+        costUsd: entry.costUsd,
+      }));
+      writeFileSync(
+        stateFile,
+        `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`,
+      );
+      const restored = new Store({
+        dataDir: path.join(dir, "data"),
+        stateFile,
+        maxSessions: 10,
+        maxCompactMessages: 2,
+      });
+      restored.loadState();
+      const chronological = [...restored.getCapturedRequests()].reverse();
+      assert.equal(chronological.length, 4);
+      for (const [index, entry] of chronological.entries()) {
+        assert.equal(entry.contextLimit, 500_000);
+        assert.deepEqual(entry.contextInfo, originalUsage[index].contextInfo);
+        assert.equal(entry.costUsd, originalUsage[index].costUsd);
+      }
+      const compactLatest = chronological[3];
+      const detail = restored.getEntryDetail(compactLatest.id);
+      assert.ok(detail);
+      const latest = {
+        ...compactLatest,
+        contextInfo: {
+          ...compactLatest.contextInfo,
+          tools: detail.tools,
+          messages: detail.messages,
+        },
+      };
+      assert.ok(latest.agentKey);
+      assert.equal(latest.agentKey, chronological[0].agentKey);
+      assert.notEqual(latest.agentKey, chronological[2].agentKey);
+      const expected = computeHealthScore(
+        latest,
+        140_000,
+        new Set(["read"]),
+        3,
+      );
+      assert.deepEqual(latest.healthScore, expected);
+      assert.notDeepEqual(
+        expected,
+        computeHealthScore(compactLatest, 140_000, new Set(["read"]), 3),
+      );
+      assert.notDeepEqual(
+        expected,
+        computeHealthScore(latest, null, new Set(["read"]), 3),
+      );
+      assert.notDeepEqual(
+        expected,
+        computeHealthScore(latest, 140_000, new Set(), 3),
+      );
+      assert.notDeepEqual(
+        expected,
+        computeHealthScore(latest, 140_000, new Set(["read"]), 1),
+      );
+      assert.notDeepEqual(
+        expected,
+        computeHealthScore(latest, 450_000, new Set(["read"]), 4),
+      );
+      const corrected = readFileSync(stateFile, "utf8");
+      const saved = corrected
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line))
+        .filter((line) => line.type === "entry")
+        .map((line) => line.data);
+      assert.deepEqual(
+        saved.map((entry) => entry.healthScore),
+        chronological.map((entry) => entry.healthScore),
+      );
+      restored.loadState();
+      assert.equal(readFileSync(stateFile, "utf8"), corrected);
+      assert.deepEqual(
+        restored.getCapturedRequests().map((entry) => entry.healthScore),
+        [...chronological].reverse().map((entry) => entry.healthScore),
+      );
+    } finally {
+      cleanup();
+    }
+  });
+
   it("groups turns into one conversation when session ID is stable", () => {
     const { store, cleanup } = makeStore();
 

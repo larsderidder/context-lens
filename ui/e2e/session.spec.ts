@@ -52,6 +52,26 @@ test('the dashboard receives a new session through SSE without reloading', async
   await expect(page.locator('.toolbar')).toContainText('1 req')
 })
 
+test('Codex utilization uses its 500k window on the dashboard and in the inspector', async ({ page, request }) => {
+  const response = await request.post('/api/ingest', {
+    data: {
+      provider: 'chatgpt',
+      apiFormat: 'responses',
+      source: 'codex-context-test',
+      body: { model: 'gpt-6.1-sol', input: [{ role: 'user', content: 'Context utilization fixture.' }] },
+      response: { usage: { input_tokens: 200000, output_tokens: 100 } },
+    },
+  })
+  expect(response.ok()).toBe(true)
+  await expect(page.locator('.util-chip')).toHaveText('40%')
+  await page.getByRole('link', { name: 'Open in inspector' }).click()
+  await page.getByRole('button', { name: 'Overview', exact: true }).click()
+  const contextCard = page.locator('.stat-card').filter({ hasText: 'Context' }).first()
+  await expect(contextCard.locator('.stat-readout')).toHaveText('40.0%')
+  await expect(contextCard.locator('.stat-detail')).toHaveText('200.0K / 500.0K')
+  await expect(page.getByText(/Context utilization critical/)).toHaveCount(0)
+})
+
 test('Markdown renders while HTML and script links remain inert', async ({ page, request }) => {
   await openMessages(page, request)
   await page.locator('.chrono-row').filter({ hasText: 'Browser fixture' }).click()

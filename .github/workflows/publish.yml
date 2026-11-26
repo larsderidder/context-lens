@@ -26,4 +26,6 @@ jobs:
       - run: pnpm --dir ui test:e2e
       - name: Verify npm package contents
         run: npm pack --dry-run --json | node scripts/check-package.mjs
+      - name: Smoke test installed npm package
+        run: node scripts/test-package.mjs
       - run: npm publish --access public
