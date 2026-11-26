@@ -245,8 +245,9 @@ export class Store {
       const migrated = this.migrateImageTokenCounts();
       this.backfillTotalTokensFromUsage();
       const tokenFixups = this.restoreTokenCountsFromDetails();
+      const contextLimitFixups = this.restoreContextLimits();
       this.backfillHealthScores();
-      if (migrated > 0 || tokenFixups > 0) {
+      if (migrated > 0 || tokenFixups > 0 || contextLimitFixups > 0) {
         this.saveState();
       }
       console.log(
@@ -460,7 +461,7 @@ export class Store {
       timestamp: new Date().toISOString(),
       contextInfo,
       response: responseData,
-      contextLimit: getContextLimit(contextInfo.model),
+      contextLimit: getContextLimit(contextInfo.model, contextInfo.provider),
       source: resolvedSource || "unknown",
       conversationId,
       agentKey,
@@ -717,6 +718,23 @@ export class Store {
   }
 
   // ----- Internals -----
+
+  /** Refresh model metadata without changing historical usage or costs. */
+  private restoreContextLimits(): number {
+    let fixed = 0;
+    for (const entry of this.capturedRequests) {
+      const contextLimit = getContextLimit(
+        entry.contextInfo.model,
+        entry.contextInfo.provider,
+      );
+      if (entry.contextLimit !== contextLimit) {
+        entry.contextLimit = contextLimit;
+        entry.healthScore = null;
+        fixed++;
+      }
+    }
+    return fixed;
+  }
 
   /** Backfill health scores for entries loaded from state that don't have one. */
   private backfillHealthScores(): void {

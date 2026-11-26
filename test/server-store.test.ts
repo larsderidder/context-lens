@@ -9,7 +9,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
-import { parseContextInfo } from "../src/core.js";
+import { computeHealthScore, parseContextInfo } from "../src/core.js";
 import { Store } from "../src/server/store.js";
 import type { ResponseData } from "../src/types.js";
 
@@ -37,6 +37,107 @@ function makeStore(opts?: Partial<{ maxSessions: number }>): {
 }
 
 describe("Store", () => {
+  for (const [provider, model, expectedLimit] of [
+    ["chatgpt", "gpt-6.1-sol", 500_000],
+    ["openai", "gpt-6.1-sol", 1_050_000],
+    ["openai", "gpt-4o", 128_000],
+    ["anthropic", "claude-sonnet-4", 200_000],
+  ] as const) {
+    function makeContext() {
+      if (provider === "anthropic") {
+        return parseContextInfo(
+          provider,
+          { model, messages: [{ role: "user", content: "hello" }] },
+          "anthropic-messages",
+        );
+      }
+      return parseContextInfo(
+        provider,
+        { model, input: [{ role: "user", content: "hello" }] },
+        "responses",
+      );
+    }
+
+    it(`uses the ${provider} context limit for ${model}`, () => {
+      const { store, cleanup } = makeStore();
+      try {
+        const context = makeContext();
+        const entry = store.storeRequest(context, { raw: true }, null);
+        assert.equal(entry.contextLimit, expectedLimit);
+      } finally {
+        cleanup();
+      }
+    });
+
+    it(`restores ${provider} ${model} limits and health without repricing usage`, () => {
+      const { store, dir, cleanup } = makeStore();
+      const stateFile = path.join(dir, "data", "state.jsonl");
+      try {
+        const context = makeContext();
+        store.storeRequest(
+          context,
+          { usage: { input_tokens: 120_000, output_tokens: 5 } },
+          null,
+        );
+        const lines = readFileSync(stateFile, "utf8")
+          .trim()
+          .split("\n")
+          .map((line) => JSON.parse(line));
+        const persisted = lines.find((line) => line.type === "entry").data;
+        // Model metadata was stale, but usage and cost remain historical facts.
+        persisted.contextLimit = 128_000;
+        persisted.costUsd = 1.23456;
+        persisted.healthScore = computeHealthScore(
+          persisted,
+          null,
+          new Set(),
+          1,
+        );
+        const originalHealth = structuredClone(persisted.healthScore);
+        const originalContext = structuredClone(persisted.contextInfo);
+        writeFileSync(
+          stateFile,
+          `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`,
+        );
+        const restored = new Store({
+          dataDir: path.join(dir, "data"),
+          stateFile,
+          maxSessions: 10,
+          maxCompactMessages: 2,
+        });
+        restored.loadState();
+        const [entry] = restored.getCapturedRequests();
+        assert.equal(restored.getCapturedRequests().length, 1);
+        assert.equal(entry.contextLimit, expectedLimit);
+        assert.deepEqual(entry.contextInfo, originalContext);
+        assert.equal(entry.costUsd, 1.23456);
+        assert.deepEqual(
+          entry.healthScore,
+          computeHealthScore(entry, null, new Set(), 1),
+        );
+        if (expectedLimit !== 128_000) {
+          assert.notDeepEqual(entry.healthScore, originalHealth);
+        } else {
+          assert.deepEqual(entry.healthScore, originalHealth);
+        }
+        const saved = readFileSync(stateFile, "utf8")
+          .trim()
+          .split("\n")
+          .map((line) => JSON.parse(line))
+          .find((line) => line.type === "entry").data;
+        assert.equal(saved.contextLimit, expectedLimit);
+        assert.deepEqual(saved.healthScore, entry.healthScore);
+        assert.equal(saved.costUsd, 1.23456);
+        assert.deepEqual(saved.contextInfo, originalContext);
+        const correctedState = readFileSync(stateFile, "utf8");
+        restored.loadState();
+        assert.equal(readFileSync(stateFile, "utf8"), correctedState);
+      } finally {
+        cleanup();
+      }
+    });
+  }
+
   it("groups turns into one conversation when session ID is stable", () => {
     const { store, cleanup } = makeStore();
 

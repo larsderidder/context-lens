@@ -16,9 +16,9 @@ describe("getContextLimit", () => {
     assert.equal(getContextLimit("gpt-4o-mini-2024-07-18"), 128000);
   });
 
-  it("returns 128000 fallback for unknown models", () => {
-    assert.equal(getContextLimit("unknown-model"), 128000);
-    assert.equal(getContextLimit("llama-70b"), 128000);
+  it("returns the 256000 heuristic fallback for unknown models", () => {
+    assert.equal(getContextLimit("unknown-model"), 256000);
+    assert.equal(getContextLimit("llama-70b"), 256000);
   });
 });
 
@@ -191,8 +191,16 @@ describe("getContextLimit - extended models", () => {
     assert.equal(getContextLimit("gpt-5.2-chat-latest"), 128_000);
   });
 
+  it("distinguishes Codex subscription windows from API windows", () => {
+    assert.equal(getContextLimit("gpt-6.1-sol", "chatgpt"), 500_000);
+    assert.equal(getContextLimit("gpt-6.1-sol", "openai"), 1_050_000);
+    assert.equal(getContextLimit("gpt-6.1-sol"), 1_050_000);
+    assert.equal(getContextLimit("gpt-6.1-sol", "unknown"), 1_050_000);
+    assert.notEqual(estimateCost("gpt-6.1-sol", 1000, 100), null);
+  });
+
   it("does not inherit metadata for unknown model variants", () => {
-    assert.equal(getContextLimit("gpt-5-not-a-real-model"), 128_000);
+    assert.equal(getContextLimit("gpt-5-not-a-real-model"), 256_000);
     assert.equal(estimateCost("gpt-5-not-a-real-model", 1000, 500), null);
   });
 
