@@ -14,13 +14,23 @@ export function projectEntry(
   // Use the canonical response parser instead of ad-hoc field access
   const usage = parseResponseUsage(e.response);
 
-  // Return null for usage if no actual data is present (all zeros)
   const hasUsageData =
-    usage.inputTokens > 0 ||
+    usage.hasInputTokens ||
     usage.outputTokens > 0 ||
     usage.cacheReadTokens > 0 ||
     usage.cacheWriteTokens > 0 ||
     usage.thinkingTokens > 0;
+
+  let projectedUsage: ProjectedEntry["usage"] = null;
+  if (hasUsageData) {
+    projectedUsage = {
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      cacheReadTokens: usage.cacheReadTokens,
+      cacheWriteTokens: usage.cacheWriteTokens,
+      thinkingTokens: usage.thinkingTokens,
+    };
+  }
 
   return {
     id: e.id,
@@ -43,15 +53,7 @@ export function projectEntry(
     securityAlerts: e.securityAlerts || [],
     outputSecurityAlerts: e.outputSecurityAlerts || [],
     toolPatterns: e.toolPatterns || [],
-    usage: hasUsageData
-      ? {
-          inputTokens: usage.inputTokens,
-          outputTokens: usage.outputTokens,
-          cacheReadTokens: usage.cacheReadTokens,
-          cacheWriteTokens: usage.cacheWriteTokens,
-          thinkingTokens: usage.thinkingTokens,
-        }
-      : null,
+    usage: projectedUsage,
     responseModel: usage.model,
     stopReason: usage.finishReasons[0] || null,
   };

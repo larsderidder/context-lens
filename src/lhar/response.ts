@@ -1,5 +1,6 @@
 export interface ParsedResponseUsage {
   inputTokens: number;
+  hasInputTokens: boolean;
   outputTokens: number;
   cacheReadTokens: number;
   cacheWriteTokens: number;
@@ -27,54 +28,79 @@ function* parseSseEvents(chunks: string): Generator<any> {
   }
 }
 
-/**
- * Apply Gemini usageMetadata to the result.
- * Gemini's promptTokenCount includes cached tokens; subtract to get non-cached input.
- * Guards against prompt === 0 to avoid overwriting valid data from other providers.
- */
+/** Apply Gemini's inclusive prompt count, preserving omitted streaming fields. */
 function applyGeminiUsage(
   usageMetadata: any,
   result: ParsedResponseUsage,
 ): void {
-  const prompt = usageMetadata.promptTokenCount || 0;
-  const cached = usageMetadata.cachedContentTokenCount || 0;
-  if (prompt > 0) {
-    result.inputTokens = prompt - cached;
-    result.cacheReadTokens = cached;
+  const prompt = usageMetadata.promptTokenCount;
+  const cached = usageMetadata.cachedContentTokenCount;
+  if (prompt != null || cached != null) {
+    const total = prompt ?? result.inputTokens + result.cacheReadTokens;
+    result.cacheReadTokens = cached ?? result.cacheReadTokens;
+    result.inputTokens = Math.max(0, total - result.cacheReadTokens);
+    result.hasInputTokens ||= prompt != null;
   }
-  result.outputTokens =
-    usageMetadata.candidatesTokenCount ||
-    (usageMetadata.totalTokenCount != null
-      ? usageMetadata.totalTokenCount - prompt
-      : 0) ||
-    result.outputTokens;
+  if (usageMetadata.candidatesTokenCount != null) {
+    result.outputTokens = usageMetadata.candidatesTokenCount;
+  } else if (usageMetadata.totalTokenCount != null) {
+    result.outputTokens =
+      usageMetadata.totalTokenCount -
+      (prompt ?? result.inputTokens + result.cacheReadTokens);
+  }
   result.thinkingTokens =
-    usageMetadata.thoughtsTokenCount || result.thinkingTokens;
+    usageMetadata.thoughtsTokenCount ?? result.thinkingTokens;
+}
+
+interface UsageAccumulator {
+  inclusiveInputTokens?: number;
+  openai?: boolean;
 }
 
 /**
- * Apply OpenAI / Anthropic / Responses API usage details to the result.
- * Detail sub-objects are checked first (most specific), then top-level aliases,
- * then the existing result value as fallback for streaming accumulation.
+ * OpenAI cached details are a subset of input; Anthropic cache counts are additive.
+ * Keep the inclusive OpenAI count separately so partial SSE usage cannot subtract twice.
  */
-function applyUsageDetails(usage: any, result: ParsedResponseUsage): void {
-  result.inputTokens =
-    usage.input_tokens || usage.prompt_tokens || result.inputTokens;
+function applyUsageDetails(
+  usage: any,
+  result: ParsedResponseUsage,
+  accumulator: UsageAccumulator,
+): void {
+  const input = usage.input_tokens ?? usage.prompt_tokens;
+  const cached =
+    usage.prompt_tokens_details?.cached_tokens ??
+    usage.input_tokens_details?.cached_tokens;
+  if (cached != null || usage.prompt_tokens != null || accumulator.openai) {
+    accumulator.openai = true;
+    accumulator.inclusiveInputTokens =
+      input ?? accumulator.inclusiveInputTokens;
+    result.cacheReadTokens = cached ?? result.cacheReadTokens;
+    if (accumulator.inclusiveInputTokens != null) {
+      result.inputTokens = Math.max(
+        0,
+        accumulator.inclusiveInputTokens - result.cacheReadTokens,
+      );
+      result.hasInputTokens = true;
+    }
+  } else if (input != null) {
+    result.inputTokens = input;
+    result.hasInputTokens = true;
+  }
+  if (input != null) {
+    accumulator.inclusiveInputTokens = input;
+  }
   result.outputTokens =
-    usage.output_tokens || usage.completion_tokens || result.outputTokens;
+    usage.output_tokens ?? usage.completion_tokens ?? result.outputTokens;
   result.thinkingTokens =
-    usage.completion_tokens_details?.reasoning_tokens ||
-    usage.output_tokens_details?.reasoning_tokens ||
-    usage.thinking_tokens ||
-    usage.reasoning_tokens ||
+    usage.completion_tokens_details?.reasoning_tokens ??
+    usage.output_tokens_details?.reasoning_tokens ??
+    usage.thinking_tokens ??
+    usage.reasoning_tokens ??
     result.thinkingTokens;
   result.cacheReadTokens =
-    usage.prompt_tokens_details?.cached_tokens ||
-    usage.input_tokens_details?.cached_tokens ||
-    usage.cache_read_input_tokens ||
-    result.cacheReadTokens;
+    cached ?? usage.cache_read_input_tokens ?? result.cacheReadTokens;
   result.cacheWriteTokens =
-    usage.cache_creation_input_tokens || result.cacheWriteTokens;
+    usage.cache_creation_input_tokens ?? result.cacheWriteTokens;
 }
 
 /**
@@ -139,6 +165,7 @@ export function extractResponseId(responseData: any): string | null {
 export function parseResponseUsage(responseData: any): ParsedResponseUsage {
   const result: ParsedResponseUsage = {
     inputTokens: 0,
+    hasInputTokens: false,
     outputTokens: 0,
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
@@ -149,18 +176,19 @@ export function parseResponseUsage(responseData: any): ParsedResponseUsage {
   };
 
   if (!responseData) return result;
+  const accumulator: UsageAccumulator = {};
 
   // Streaming response: scan SSE chunks for usage
   if (responseData.streaming && typeof responseData.chunks === "string") {
     result.stream = true;
-    return parseStreamingUsage(responseData.chunks, result);
+    return parseStreamingUsage(responseData.chunks, result, accumulator);
   }
 
   // Non-streaming response
 
   // OpenAI / Anthropic / Responses API usage (direct or wrapped)
   const usage = responseData.usage ?? responseData.response?.usage;
-  if (usage) applyUsageDetails(usage, result);
+  if (usage) applyUsageDetails(usage, result, accumulator);
 
   // Gemini usageMetadata (direct or inside Code Assist wrapper .response)
   const geminiMeta =
@@ -182,36 +210,33 @@ export function parseResponseUsage(responseData: any): ParsedResponseUsage {
 function parseStreamingUsage(
   chunks: string,
   result: ParsedResponseUsage,
+  accumulator: UsageAccumulator,
 ): ParsedResponseUsage {
   for (const parsed of parseSseEvents(chunks)) {
     // Anthropic message_start: contains model
     if (parsed.type === "message_start" && parsed.message) {
       result.model = parsed.message.model || result.model;
       if (parsed.message.usage) {
-        result.inputTokens = parsed.message.usage.input_tokens || 0;
-        result.cacheReadTokens =
-          parsed.message.usage.cache_read_input_tokens || 0;
-        result.cacheWriteTokens =
-          parsed.message.usage.cache_creation_input_tokens || 0;
+        applyUsageDetails(parsed.message.usage, result, accumulator);
       }
     }
 
     // Anthropic message_delta: contains stop_reason and output token count
     if (parsed.type === "message_delta") {
       if (parsed.usage) {
-        result.outputTokens = parsed.usage.output_tokens || result.outputTokens;
+        applyUsageDetails(parsed.usage, result, accumulator);
       }
     }
 
     // OpenAI streaming: final chunk with usage
     if (parsed.usage && parsed.choices) {
-      applyUsageDetails(parsed.usage, result);
+      applyUsageDetails(parsed.usage, result, accumulator);
     }
 
     // Responses streaming: response.completed/response.created events
     // carry usage in parsed.response.usage
     if (parsed.response?.usage) {
-      applyUsageDetails(parsed.response.usage, result);
+      applyUsageDetails(parsed.response.usage, result, accumulator);
     }
 
     // Finish reasons (all providers)

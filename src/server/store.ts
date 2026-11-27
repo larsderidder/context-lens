@@ -224,6 +224,18 @@ export class Store {
                 | OutputAlert[]
                 | undefined) || [],
           };
+          const response = entry.response as Record<string, unknown>;
+          const usage = response.usage as Record<string, unknown> | undefined;
+          // Legacy compaction fabricated zero input when only output usage was known.
+          // Without cache counts or a version marker, preserve the original estimate.
+          if (
+            response._contextLensUsageVersion !== 1 &&
+            usage?.input_tokens === 0 &&
+            usage.cache_read_input_tokens === 0 &&
+            usage.cache_creation_input_tokens === 0
+          ) {
+            delete usage.input_tokens;
+          }
           loadedEntriesBuffer.push(entry);
           if (entry.id > maxId) maxId = entry.id;
           loadedEntries++;
@@ -250,11 +262,18 @@ export class Store {
       // Order matters: image migration fixes inflated per-message tokens from base64 data
       // BEFORE the usage backfill rescales everything proportionally.
       const migrated = this.migrateImageTokenCounts();
-      this.backfillTotalTokensFromUsage();
       const tokenFixups = this.restoreTokenCountsFromDetails();
+      const usageFixups = this.normalizeRetainedOpenaiUsage();
+      const usageTokenFixups = this.backfillTotalTokensFromUsage();
       const contextLimitFixups = this.restoreContextLimits();
       this.backfillHealthScores();
-      if (migrated > 0 || tokenFixups > 0 || contextLimitFixups > 0) {
+      if (
+        migrated > 0 ||
+        tokenFixups > 0 ||
+        contextLimitFixups > 0 ||
+        usageFixups > 0 ||
+        usageTokenFixups > 0
+      ) {
         this.saveState();
       }
       console.log(
@@ -417,7 +436,7 @@ export class Store {
     // Validate estimation accuracy before overriding with actuals
     const actualInputTokens =
       usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens;
-    if (actualInputTokens > 0) {
+    if (usage.hasInputTokens || actualInputTokens > 0) {
       const estimated = contextInfo.totalTokens;
       const actual = actualInputTokens;
       const diff = Math.abs(actual - estimated);
@@ -446,7 +465,10 @@ export class Store {
     const httpStatus = meta?.httpStatus ?? null;
     const isSuccessResponse =
       httpStatus === null || (httpStatus >= 200 && httpStatus < 300);
-    const inputTok = usage.inputTokens || contextInfo.totalTokens;
+    let inputTok = contextInfo.totalTokens;
+    if (usage.hasInputTokens) {
+      inputTok = usage.inputTokens;
+    }
     const outputTok = usage.outputTokens;
     const needsPpqPricing = isSuccessResponse && isPpqTarget(meta?.targetUrl);
     let costUsd: number | null = 0;
@@ -633,7 +655,16 @@ export class Store {
       this.appendToState(entry, conversationId);
     }
     if (needsPpqPricing) {
-      void this.resolvePpqCost(entry, inputTok, outputTok).catch(() => {
+      // PPQ has one input rate; keep its OpenAI input count inclusive of cache.
+      let ppqInputTok = inputTok;
+      if (
+        usage.hasInputTokens &&
+        (contextInfo.provider === "openai" ||
+          contextInfo.provider === "chatgpt")
+      ) {
+        ppqInputTok += usage.cacheReadTokens;
+      }
+      void this.resolvePpqCost(entry, ppqInputTok, outputTok).catch(() => {
         console.warn("PPQ cost update failed");
       });
     }
@@ -845,25 +876,109 @@ export class Store {
     }
   }
 
+  /** Repair legacy compact usage only when a retained response proves the counts. */
+  private normalizeRetainedOpenaiUsage(): number {
+    let fixed = 0;
+    for (const entry of this.capturedRequests) {
+      const response = entry.response as Record<string, unknown>;
+      const cached = (response.usage as Record<string, unknown> | undefined)
+        ?.cache_read_input_tokens;
+      if (
+        response._contextLensUsageVersion === 1 ||
+        !["openai", "chatgpt"].includes(entry.contextInfo.provider) ||
+        typeof cached !== "number" ||
+        cached <= 0
+      ) {
+        continue;
+      }
+      const detailPath = path.join(this.detailDir, `${entry.id}.json`);
+      try {
+        // Read one existing privacy-filtered payload at a time, never raw archives.
+        const detail = JSON.parse(fs.readFileSync(detailPath, "utf8"));
+        const retained = parseRetainedExportRecord(detail.exportRecord);
+        if (
+          !retained ||
+          retained.timestamp !== entry.timestamp ||
+          retained.gen_ai.request.model !== entry.contextInfo.model ||
+          retained.source.tool !== entry.source
+        ) {
+          continue;
+        }
+        const body = retained.raw.response_body;
+        if (!body) {
+          continue;
+        }
+        let original: ResponseData;
+        if (typeof body === "string") {
+          original = { streaming: true, chunks: body };
+        } else {
+          original = body;
+        }
+        const usage = parseResponseUsage(original);
+        if (!usage.hasInputTokens || usage.cacheReadTokens === 0) {
+          continue;
+        }
+        const total =
+          usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens;
+        rescaleContextTokens(entry.contextInfo, total);
+        normalizeComposition(entry.composition, total);
+        entry.healthScore = null;
+        // Preserve unknown and provider-specific pricing; errors remain unbilled.
+        if (entry.costUsd !== null && !isPpqTarget(entry.targetUrl)) {
+          if (
+            entry.httpStatus !== null &&
+            (entry.httpStatus < 200 || entry.httpStatus >= 300)
+          ) {
+            entry.costUsd = 0;
+          } else {
+            entry.costUsd = estimateCost(
+              entry.contextInfo.model,
+              usage.inputTokens,
+              usage.outputTokens,
+              usage.cacheReadTokens,
+              usage.cacheWriteTokens,
+            );
+          }
+        }
+        entry.response = original;
+        this.compactEntry(entry);
+        fixed++;
+        if (detail.contextInfo) {
+          rescaleContextTokens(detail.contextInfo, total);
+          fs.writeFileSync(detailPath, JSON.stringify(detail));
+        }
+      } catch {
+        // Missing or unreadable evidence is never replaced with inferred counts.
+      }
+    }
+    return fixed;
+  }
+
   /**
    * Backfill totalTokens from API usage data for entries that only have estimates.
    * The estimate (chars/4) can be wildly inaccurate; the API's real token count
    * (input + cacheRead + cacheWrite) is authoritative.
    */
-  private backfillTotalTokensFromUsage(): void {
+  private backfillTotalTokensFromUsage(): number {
     let fixed = 0;
     for (const entry of this.capturedRequests) {
       const usage = parseResponseUsage(entry.response);
       const actual =
         usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens;
-      if (actual > 0 && actual !== entry.contextInfo.totalTokens) {
+      if (
+        (usage.hasInputTokens || actual > 0) &&
+        actual !== entry.contextInfo.totalTokens
+      ) {
         rescaleContextTokens(entry.contextInfo, actual);
+        normalizeComposition(entry.composition, actual);
+        entry.healthScore = null;
         fixed++;
       }
     }
     if (fixed > 0) {
       console.log(`Fixed totalTokens from API usage for ${fixed} entries`);
     }
+    return fixed;
   }
 
   /**
@@ -1264,15 +1379,21 @@ export class Store {
   private compactEntry(entry: CapturedEntry): void {
     // Extract and preserve usage data from response before dropping it
     const usage = parseResponseUsage(entry.response);
+    let inputTokens: number | undefined;
+    if (usage.hasInputTokens) {
+      inputTokens = usage.inputTokens;
+    }
     entry.response = {
       usage: {
-        input_tokens: usage.inputTokens,
+        input_tokens: inputTokens,
         output_tokens: usage.outputTokens,
         cache_read_input_tokens: usage.cacheReadTokens,
         cache_creation_input_tokens: usage.cacheWriteTokens,
         thinking_tokens: usage.thinkingTokens,
       },
       model: usage.model,
+      // Version 1 stores fresh input with additive cache counts.
+      _contextLensUsageVersion: 1,
       stop_reason: usage.finishReasons[0] || null,
     } as ResponseData;
 
