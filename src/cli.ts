@@ -404,7 +404,7 @@ if (parsedArgs.commandName === "analyze") {
         ...mitmConfig.extraArgs,
       ],
       {
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: ["ignore", "ignore", "pipe"],
         env: {
           ...process.env,
           CONTEXT_LENS_SOURCE: resolveLensSource(
@@ -421,7 +421,9 @@ if (parsedArgs.commandName === "analyze") {
     let mitmStderr = "";
     if (mitmProcess.stderr) {
       mitmProcess.stderr.on("data", (chunk: Buffer) => {
-        mitmStderr += chunk.toString();
+        if (!mitmReady) {
+          mitmStderr = (mitmStderr + chunk.toString()).slice(-8192);
+        }
       });
     }
     mitmProcess.on("error", (err) => {
@@ -448,6 +450,7 @@ if (parsedArgs.commandName === "analyze") {
           socket.end();
           if (!mitmReady) {
             mitmReady = true;
+            mitmStderr = "";
             clearInterval(pollMitm);
             console.log(`🔒 mitmproxy listening on port ${mitmConfig.port}`);
             startChild();

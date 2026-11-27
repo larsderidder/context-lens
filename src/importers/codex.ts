@@ -170,10 +170,18 @@ export function parseCodexSession(filePath: string): ImportedSession | null {
         tokenCountIndex++;
       }
 
+      let inputTokens: number | null = null;
+      if (usage) {
+        // Codex reports cached input as a subset of its inclusive input count.
+        inputTokens = Math.max(
+          0,
+          usage.input_tokens - (usage.cached_input_tokens ?? 0),
+        );
+      }
       turns.push({
         timestamp: item.timestamp,
         messages: [...accumulated],
-        inputTokens: usage?.input_tokens ?? null,
+        inputTokens,
         outputTokens: usage?.output_tokens ?? null,
         cacheReadTokens: usage?.cached_input_tokens ?? null,
         cacheWriteTokens: null,

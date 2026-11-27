@@ -65,7 +65,7 @@ function ingestTurn(
           role: "assistant",
           model: session.model,
           usage: {
-            input_tokens: turn.inputTokens ?? 0,
+            input_tokens: turn.inputTokens ?? undefined,
             output_tokens: turn.outputTokens ?? 0,
             cache_read_input_tokens: turn.cacheReadTokens ?? 0,
             cache_creation_input_tokens: turn.cacheWriteTokens ?? 0,
@@ -77,8 +77,10 @@ function ingestTurn(
           object: "response",
           model: session.model,
           usage: {
-            input_tokens: turn.inputTokens ?? 0,
+            input_tokens: turn.inputTokens ?? undefined,
             output_tokens: turn.outputTokens ?? 0,
+            cache_read_input_tokens: turn.cacheReadTokens ?? 0,
+            cache_creation_input_tokens: turn.cacheWriteTokens ?? 0,
             total_tokens: (turn.inputTokens ?? 0) + (turn.outputTokens ?? 0),
           },
           output: [],

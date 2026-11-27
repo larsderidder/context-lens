@@ -57,6 +57,10 @@ export function buildLharRecord(
       ? entry.composition
       : analyzeComposition(ci, entry.rawBody);
   const usage = parseResponseUsage(entry.response);
+  let inputTokens = ci.totalTokens;
+  if (usage.hasInputTokens) {
+    inputTokens = usage.inputTokens;
+  }
 
   // Sequence + growth must be derived from a stable ordering.
   // Use oldest-first timestamp ordering within the conversation; tie-break by id.
@@ -167,10 +171,9 @@ export function buildLharRecord(
         finish_reasons: usage.finishReasons,
       },
       usage: {
-        input_tokens: usage.inputTokens || ci.totalTokens,
+        input_tokens: inputTokens,
         output_tokens: usage.outputTokens,
-        total_tokens:
-          (usage.inputTokens || ci.totalTokens) + usage.outputTokens,
+        total_tokens: inputTokens + usage.outputTokens,
       },
     },
 
