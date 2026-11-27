@@ -10,15 +10,25 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { runAnalyze } from "./cli/analyze-command.js";
-import { backgroundStop, runBackgroundCommand } from "./cli/background.js";
+import {
+  backgroundStop,
+  createNodeBackgroundRuntime,
+  runBackgroundCommand,
+} from "./cli/background.js";
 import { prepareChildLaunch } from "./cli/child-launch.js";
 import { runDoctor } from "./cli/doctor.js";
+import { withoutEgressCredentials, withoutMitmAuth } from "./cli/egress-env.js";
 import {
   clearStaleLockfile,
   decrementLockRefCount,
   incrementLockRefCount,
 } from "./cli/lockfile.js";
-import { buildMitmArgs } from "./cli/mitm.js";
+import { buildMitmArgs, buildMitmEnv } from "./cli/mitm.js";
+import {
+  assertMitmPortAvailable,
+  monitorMitm,
+  spawnMitmProcess,
+} from "./cli/mitm-lifecycle.js";
 import { checkForUpdate } from "./cli/update-check.js";
 import {
   CLI_CONSTANTS,
@@ -52,16 +62,46 @@ if (parsedArgs.showVersion) {
   console.log(VERSION);
   process.exit(0);
 }
+// Management commands must remain usable when forwarding configuration is broken.
+if (parsedArgs.commandName === "doctor") {
+  process.exit(await runDoctor());
+}
+if (parsedArgs.commandName === "stop") {
+  process.exit(backgroundStop());
+}
+if (
+  parsedArgs.commandName === "background" &&
+  ["stop", "status"].includes(parsedArgs.commandArguments[0] ?? "")
+) {
+  process.exit(
+    await runBackgroundCommand(parsedArgs.commandArguments, parsedArgs.noUi),
+  );
+}
 // Load user config — CLI flags take precedence over config file values
-const userConfig = loadConfig();
+let userConfig: ReturnType<typeof loadConfig>;
+try {
+  userConfig = loadConfig();
+} catch {
+  console.error("Could not load Context Lens configuration.");
+  process.exit(1);
+}
 let upstreamProxy: string | undefined;
 const requestedProxy =
   parsedArgs.upstreamProxy ??
   process.env.CONTEXT_LENS_UPSTREAM_PROXY ??
   userConfig.proxy.upstreamProxy;
 if (requestedProxy !== undefined) {
-  upstreamProxy = validateUpstreamProxy(requestedProxy);
-  process.env.CONTEXT_LENS_UPSTREAM_PROXY = upstreamProxy;
+  try {
+    upstreamProxy = validateUpstreamProxy(requestedProxy);
+    buildMitmEnv({}, upstreamProxy);
+  } catch {
+    console.error("Invalid upstream proxy configuration.");
+    process.exit(1);
+  }
+}
+const proxyEnv: NodeJS.ProcessEnv = {};
+if (upstreamProxy !== undefined) {
+  proxyEnv.CONTEXT_LENS_UPSTREAM_PROXY = upstreamProxy;
 }
 
 const envKeyToValue: Record<string, string> = {
@@ -98,9 +138,13 @@ if (parsedArgs.commandName === "analyze") {
 } else if (parsedArgs.commandName === "stop") {
   process.exit(backgroundStop());
 } else if (parsedArgs.commandName === "background") {
-  void runBackgroundCommand(parsedArgs.commandArguments, parsedArgs.noUi).then(
-    (exitCode) => process.exit(exitCode),
-  );
+  const runtime = createNodeBackgroundRuntime();
+  runtime.env = { ...withoutEgressCredentials(process.env), ...proxyEnv };
+  void runBackgroundCommand(
+    parsedArgs.commandArguments,
+    parsedArgs.noUi,
+    runtime,
+  ).then((exitCode) => process.exit(exitCode));
 } else if (!parsedArgs.commandName && !parsedArgs.useMitm) {
   // Warn if PI_CODING_AGENT_DIR is set in the environment but no command was
   // given. The user likely expected this to launch pi — point them to the
@@ -119,7 +163,7 @@ if (parsedArgs.commandName === "analyze") {
     const proxyPath = join(__dirname, "proxy", "server.js");
     const proxy = spawn("node", [proxyPath], {
       stdio: "inherit",
-      env: { ...process.env },
+      env: { ...withoutEgressCredentials(process.env), ...proxyEnv },
     });
     function shutdownStandaloneProxyOnly(code: number): void {
       if (!proxy.killed) proxy.kill();
@@ -136,13 +180,14 @@ if (parsedArgs.commandName === "analyze") {
     const proxy = spawn("node", [proxyPath], {
       stdio: "inherit",
       env: {
-        ...process.env,
+        ...withoutEgressCredentials(process.env),
+        ...proxyEnv,
         CONTEXT_LENS_ANALYSIS_URL: CLI_CONSTANTS.UI_URL,
       },
     });
     const analysis = spawn("node", [analysisPath], {
       stdio: "inherit",
-      env: { ...process.env },
+      env: withoutEgressCredentials(process.env),
     });
     function shutdownStandalone(code: number): void {
       if (!proxy.killed) proxy.kill();
@@ -200,7 +245,6 @@ if (parsedArgs.commandName === "analyze") {
   let mitmProcess: ChildProcess | null = null;
   let proxyReady = false;
   let analysisReady = false;
-  let mitmReady = false;
   let childProcess: ChildProcess | null = null;
   let piAgentDirToCleanup: string | null = null;
   let brytiDataDirToCleanup: string | null = null;
@@ -234,6 +278,14 @@ if (parsedArgs.commandName === "analyze") {
 
   // Start proxy and analysis server (or attach to existing ones)
   async function initializeServers(): Promise<void> {
+    if (toolConfig.needsMitm) {
+      try {
+        await assertMitmPortAvailable(mitmConfig.port);
+      } catch {
+        console.error(`MITM port ${mitmConfig.port} is unavailable.`);
+        process.exit(1);
+      }
+    }
     const proxyAlreadyRunning = await isProxyRunning();
     if (proxyAlreadyRunning && upstreamProxy !== undefined) {
       console.error(
@@ -264,12 +316,13 @@ if (parsedArgs.commandName === "analyze") {
     incrementLockRefCount();
     shouldShutdownServers = true;
 
-    const serverEnv = {
+    const serverEnv = withoutMitmAuth({
       ...toolConfig.serverEnv,
-      ...process.env,
+      ...withoutEgressCredentials(process.env),
+      ...proxyEnv,
       CONTEXT_LENS_CLI: "1",
       CONTEXT_LENS_ANALYSIS_URL: CLI_CONSTANTS.UI_URL,
-    };
+    });
 
     // Start proxy
     if (proxyAlreadyRunning) {
@@ -325,7 +378,7 @@ if (parsedArgs.commandName === "analyze") {
       analysisProcess = spawn("node", [analysisPath], {
         stdio: ["ignore", "pipe", "pipe"],
         detached: false,
-        env: serverEnv,
+        env: withoutEgressCredentials(serverEnv),
       });
 
       analysisProcess.stdout?.on("data", (data: Buffer) => {
@@ -380,88 +433,39 @@ if (parsedArgs.commandName === "analyze") {
       return;
     }
 
-    // Pre-flight: check if the mitm port is already in use.
-    // Without this, mitmproxy exits silently and the poll loop connects
-    // to whatever is already on that port, falsely reporting success.
-    const probe = net.connect(
-      { port: mitmConfig.port, host: "localhost" },
-      () => {
-        probe.end();
-        console.error(
-          `\nError: port ${mitmConfig.port} is already in use (mitmproxy cannot bind).`,
-        );
-        console.error(
-          `Set a different port in ~/.context-lens/config.toml:\n\n  [mitm]\n  port = 8082\n`,
-        );
-        cleanup(1);
-      },
-    );
-    probe.on("error", () => {
-      // Port is free, proceed
-      startMitm();
-    });
-    probe.setTimeout(500, () => {
-      probe.destroy();
-      startMitm();
-    });
+    startMitm();
   }
 
   function startMitm(): void {
     const mitmArgs = buildMitmArgs(mitmConfig, upstreamProxy);
+    const readyToken = randomBytes(24).toString("hex");
     console.log(
       "🔒 Starting mitmproxy (forward proxy for HTTPS interception)...",
     );
-    mitmProcess = spawn("mitmdump", mitmArgs, {
-      stdio: ["ignore", "pipe", "pipe"],
-      env: {
-        ...process.env,
-        CONTEXT_LENS_SOURCE: resolveLensSource(
-          mitmConfig.lensSource,
-          commandName,
-        ),
-        CONTEXT_LENS_SESSION_ID: resolveLensSessionId(mitmConfig.lensSessionId),
-      },
+    mitmProcess = spawnMitmProcess(mitmArgs, {
+      ...buildMitmEnv(process.env, upstreamProxy),
+      CONTEXT_LENS_MITM_READY_TOKEN: readyToken,
+      CONTEXT_LENS_SOURCE: resolveLensSource(
+        mitmConfig.lensSource,
+        commandName,
+      ),
+      CONTEXT_LENS_SESSION_ID: resolveLensSessionId(mitmConfig.lensSessionId),
     });
-    // Capture stderr so binding errors ("address already in use") are visible.
-    let mitmStderr = "";
-    if (mitmProcess.stderr) {
-      mitmProcess.stderr.on("data", (chunk: Buffer) => {
-        mitmStderr += chunk.toString();
-      });
-    }
-    mitmProcess.on("error", (err) => {
-      console.error("Failed to start mitmproxy:", err.message);
-      console.error("Install it: pipx install mitmproxy");
-      cleanup(1);
-    });
-    mitmProcess.on("exit", (code) => {
-      if (!mitmReady) {
-        const detail = mitmStderr.trim();
-        if (detail) {
-          console.error(`mitmproxy failed to start:\n${detail}`);
-        } else {
-          console.error("mitmproxy exited unexpectedly");
+    // Never relay MITM diagnostics: upstream authentication may be included.
+    mitmProcess.stderr?.resume();
+    monitorMitm(
+      mitmProcess,
+      readyToken,
+      () => {
+        if (!cleanupDidRun) {
+          startChild();
         }
-        cleanup(code || 1);
-      }
-    });
-    // Poll until mitmproxy is accepting connections
-    const pollMitm = setInterval(() => {
-      const socket = net.connect(
-        { port: mitmConfig.port, host: "localhost" },
-        () => {
-          socket.end();
-          if (!mitmReady) {
-            mitmReady = true;
-            clearInterval(pollMitm);
-            console.log(`🔒 mitmproxy listening on port ${mitmConfig.port}`);
-            startChild();
-          }
-        },
-      );
-      socket.on("error", () => {}); // not ready yet
-      socket.setTimeout(500, () => socket.destroy());
-    }, 200);
+      },
+      () => {
+        console.error("mitmproxy stopped or failed to start");
+        cleanup(1, true);
+      },
+    );
   }
   // Start the child command
   function startChild(): void {
@@ -631,9 +635,18 @@ if (parsedArgs.commandName === "analyze") {
   }
 
   // Cleanup on exit
-  function cleanup(exitCode: number): void {
+  function cleanup(exitCode: number, mitmFailed = false): void {
     if (cleanupDidRun) return;
     cleanupDidRun = true;
+    if (
+      mitmFailed &&
+      childProcess &&
+      childProcess.exitCode === null &&
+      childProcess.signalCode === null
+    ) {
+      // A tool must not keep routing through a replacement listener after MITM exits.
+      childProcess.kill("SIGKILL");
+    }
 
     const remainingRefs = decrementLockRefCount();
 
@@ -677,6 +690,22 @@ if (parsedArgs.commandName === "analyze") {
 
   // SIGTERM: external shutdown request, forward to child
   process.on("SIGTERM", () => {
-    if (childProcess && !childProcess.killed) childProcess.kill("SIGTERM");
+    if (childProcess && !childProcess.killed) {
+      childProcess.kill("SIGTERM");
+    } else if (!childProcess) {
+      cleanup(143);
+    }
+  });
+  // SIGHUP must not orphan the isolated MITM process when the terminal closes.
+  process.on("SIGHUP", () => {
+    if (
+      childProcess &&
+      childProcess.exitCode === null &&
+      childProcess.signalCode === null
+    ) {
+      childProcess.kill("SIGHUP");
+    } else {
+      cleanup(129);
+    }
   });
 }

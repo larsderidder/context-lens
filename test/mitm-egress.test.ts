@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { it } from "node:test";
 import { setTimeout } from "node:timers/promises";
 
-import { buildMitmArgs } from "../src/cli/mitm.js";
+import { buildMitmArgs, buildMitmEnv } from "../src/cli/mitm.js";
 import { getMitmConfig } from "../src/cli-utils.js";
 
 async function listen(server: http.Server): Promise<number> {
@@ -101,6 +101,10 @@ it("mitmproxy retains captures and never falls back to direct egress", {
   });
   const egress = http.createServer((req, res) => {
     proxyRequests++;
+    assert.equal(
+      req.headers["proxy-authorization"],
+      `Basic ${Buffer.from("fixture:dummy-password").toString("base64")}`,
+    );
     if (new URL(req.url ?? "").pathname === "/api/ingest") {
       ingestPaths.push(req.url ?? "");
       req.resume();
@@ -133,11 +137,17 @@ it("mitmproxy retains captures and never falls back to direct egress", {
   config.addonPath = join(process.cwd(), "mitm_addon.py");
   const child = spawn(
     "mitmdump",
-    buildMitmArgs(config, `http://127.0.0.1:${egressPort}`),
+    buildMitmArgs(
+      config,
+      `http://fixture:dummy-password@127.0.0.1:${egressPort}`,
+    ),
     {
       stdio: "ignore",
       env: {
-        ...process.env,
+        ...buildMitmEnv(
+          process.env,
+          `http://fixture:dummy-password@127.0.0.1:${egressPort}`,
+        ),
         CONTEXT_LENS_INGEST_URL: `http://127.0.0.1:${ingestPort}/api/ingest`,
         NO_PROXY: "",
         no_proxy: "",

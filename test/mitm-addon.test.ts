@@ -18,6 +18,7 @@ import types
 
 mitmproxy = types.ModuleType("mitmproxy")
 mitmproxy.http = types.SimpleNamespace(HTTPFlow=object)
+mitmproxy.ctx = types.SimpleNamespace(options=types.SimpleNamespace(upstream_auth=""))
 sys.modules["mitmproxy"] = mitmproxy
 
 import mitm_addon

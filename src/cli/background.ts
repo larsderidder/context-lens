@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { CLI_CONSTANTS } from "../cli-utils.js";
+import { withoutEgressCredentials, withoutMitmAuth } from "./egress-env.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -271,17 +272,17 @@ export async function backgroundStart(
   }
   if (existing) runtime.clearState();
 
-  const proxyEnv: NodeJS.ProcessEnv = {
+  const proxyEnv = withoutMitmAuth({
     ...runtime.env,
     CONTEXT_LENS_CLI: "1",
     ...(noUi ? {} : { CONTEXT_LENS_ANALYSIS_URL: runtime.uiUrl }),
-  };
+  });
   const proxy = runtime.spawnDetached("node", [runtime.proxyPath], proxyEnv);
 
   let analysis: DetachedProcess | null = null;
   if (!noUi) {
     analysis = runtime.spawnDetached("node", [runtime.analysisPath], {
-      ...runtime.env,
+      ...withoutEgressCredentials(runtime.env),
       CONTEXT_LENS_CLI: "1",
     });
   }

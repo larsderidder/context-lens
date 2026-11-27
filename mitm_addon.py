@@ -25,7 +25,7 @@ import json
 import os
 import time
 import urllib.request
-from mitmproxy import http
+from mitmproxy import ctx, http
 
 # WebSocket state: keyed by flow id, stores pending request bodies
 # so we can pair response.create (client) with response.completed (server).
@@ -37,6 +37,24 @@ CONTEXT_LENS_SESSION_ID = os.environ.get("CONTEXT_LENS_SESSION_ID", "").strip()
 # When set, all captures are attributed to this tool regardless of which
 # API endpoint they hit. Set by the CLI when launching a specific tool.
 CONTEXT_LENS_SOURCE = os.environ.get("CONTEXT_LENS_SOURCE", "").strip() or None
+
+
+def configure(updated: set[str]) -> None:
+    """Restore child-only upstream authentication after option configuration."""
+    auth = os.environ.get("CONTEXT_LENS_MITM_UPSTREAM_AUTH")
+    if auth is None:
+        return
+    if any(ord(char) < 32 or ord(char) == 127 for char in auth):
+        raise ValueError("Invalid upstream proxy credentials")
+    if ctx.options.upstream_auth != auth:
+        ctx.options.update(upstream_auth=auth)
+
+
+def running() -> None:
+    """Signal readiness from this child after mitmproxy has bound its listeners."""
+    token = os.environ.get("CONTEXT_LENS_MITM_READY_TOKEN", "")
+    if token:
+        print(f"CONTEXT_LENS_MITM_READY:{token}", flush=True)
 
 
 class _NoIngestRedirect(urllib.request.HTTPRedirectHandler):
@@ -147,10 +165,7 @@ def _parse_sse_response(text: str) -> str:
 
 def _is_codex_ws(flow: http.HTTPFlow) -> bool:
     """Check if this WebSocket connection is a Codex responses stream."""
-    return (
-        "chatgpt.com" in flow.request.pretty_host
-        and "/backend-api/codex/responses" in flow.request.path
-    )
+    return "chatgpt.com" in flow.request.pretty_host and "/backend-api/codex/responses" in flow.request.path
 
 
 def websocket_message(flow: http.HTTPFlow):
@@ -263,19 +278,31 @@ def response(flow: http.HTTPFlow):
     safe_request_headers = {}
     for k, v in flow.request.headers.items():
         lower = k.lower()
-        if lower in ("content-type", "content-encoding", "accept",
-                      "user-agent", "anthropic-version", "openai-beta",
-                      "x-request-id"):
+        if lower in (
+            "content-type",
+            "content-encoding",
+            "accept",
+            "user-agent",
+            "anthropic-version",
+            "openai-beta",
+            "x-request-id",
+        ):
             safe_request_headers[k] = v
 
     safe_response_headers = {}
     for k, v in flow.response.headers.items():
         lower = k.lower()
-        if lower in ("content-type", "x-request-id", "x-ratelimit-limit-requests",
-                      "x-ratelimit-remaining-requests", "x-ratelimit-limit-tokens",
-                      "x-ratelimit-remaining-tokens", "openai-processing-ms",
-                      "anthropic-ratelimit-requests-limit",
-                      "anthropic-ratelimit-requests-remaining"):
+        if lower in (
+            "content-type",
+            "x-request-id",
+            "x-ratelimit-limit-requests",
+            "x-ratelimit-remaining-requests",
+            "x-ratelimit-limit-tokens",
+            "x-ratelimit-remaining-tokens",
+            "openai-processing-ms",
+            "anthropic-ratelimit-requests-limit",
+            "anthropic-ratelimit-requests-remaining",
+        ):
             safe_response_headers[k] = v
 
     capture = {
@@ -299,8 +326,11 @@ def response(flow: http.HTTPFlow):
             "send_ms": 0,
             "wait_ms": 0,
             "receive_ms": 0,
-            "total_ms": int((flow.response.timestamp_end - flow.request.timestamp_start) * 1000)
-            if flow.response.timestamp_end and flow.request.timestamp_start else 0,
+            "total_ms": (
+                int((flow.response.timestamp_end - flow.request.timestamp_start) * 1000)
+                if flow.response.timestamp_end and flow.request.timestamp_start
+                else 0
+            ),
         },
     }
 
