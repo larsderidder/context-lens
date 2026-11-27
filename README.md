@@ -78,7 +78,6 @@ Persistent settings live in `~/.context-lens/config.toml`. CLI flags always over
 # port = 4040
 # redact = "secrets"   # secrets | pii | strict
 # rehydrate = false
-# upstream_proxy = "http://127.0.0.1:8888"
 
 [ui]
 # port = 4041
@@ -89,21 +88,6 @@ Persistent settings live in `~/.context-lens/config.toml`. CLI flags always over
 ```
 
 Run `context-lens doctor` to see the active config path and current values.
-
-### Upstream proxy
-
-Route provider requests through a proxy you operate, such as Gluetun's HTTP proxy:
-
-```bash
-context-lens --upstream-proxy http://127.0.0.1:8888 claude
-context-lens --upstream-proxy http://127.0.0.1:8888 --mitm pi
-```
-
-Supports HTTP and HTTPS proxy URLs, including Basic authentication in the URL. Set `proxy.upstream_proxy` in the config file for a persistent default, or `CONTEXT_LENS_UPSTREAM_PROXY` for an environment override. The CLI flag takes precedence over both.
-
-Capture stays enabled in reverse-proxy and mitmproxy modes. If the configured proxy fails, requests fail instead of falling back to a direct connection. Stop any existing Context Lens proxy before launching with this setting so the new process uses the selected egress. Unreadable or malformed config files abort startup.
-
-Provider traffic leaving Context Lens uses the proxy's exit IP. Route separate agent-tool connections through your VPN or proxy as well if those need IP protection.
 
 ## Docker
 

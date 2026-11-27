@@ -3,13 +3,21 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { loadConfig, loadControlConfig } from "./config.js";
-import { validateUpstreamProxy } from "./http/upstream-proxy.js";
+import { loadConfig } from "./config.js";
 import type { MitmConfig, ToolConfig } from "./types.js";
 import { VERSION } from "./version.generated.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+// Known tool config: env vars for the child process, extra CLI args, server env vars, and whether mitmproxy is needed
+const config = loadConfig();
+
+const PROXY_PORT = Number.isNaN(config.proxy.port) ? 4040 : config.proxy.port;
+const PROXY_URL = `http://localhost:${PROXY_PORT}`;
+
+const UI_PORT = Number.isNaN(config.ui.port) ? 4041 : config.ui.port;
+const UI_URL = `http://localhost:${UI_PORT}`;
 
 const PI_AGENT_DIR_PREFIX = join(tmpdir(), "context-lens-pi-agent-");
 const BRYTI_DATA_DIR_PREFIX = join(tmpdir(), "context-lens-bryti-");
@@ -40,7 +48,6 @@ export interface ParsedCliArgs {
   privacyLevel?: string;
   redactPreset?: RedactPreset;
   rehydrate?: boolean;
-  upstreamProxy?: string;
   commandName?: string;
   commandArguments: string[];
   error?: string;
@@ -50,112 +57,108 @@ function isPrivacyLevel(value: string): value is PrivacyLevel {
   return (KNOWN_PRIVACY_LEVELS as readonly string[]).includes(value);
 }
 
-function getKnownToolConfigs(PROXY_URL: string): Record<string, ToolConfig> {
-  return {
-    claude: {
-      childEnv: { ANTHROPIC_BASE_URL: `${PROXY_URL}/claude` },
-      extraArgs: [],
-      serverEnv: {},
-      needsMitm: false,
+const TOOL_CONFIG: Record<string, ToolConfig> = {
+  claude: {
+    childEnv: { ANTHROPIC_BASE_URL: `${PROXY_URL}/claude` },
+    extraArgs: [],
+    serverEnv: {},
+    needsMitm: false,
+  },
+  codex: {
+    // Codex (v0.101+) is a Rust binary that connects directly to
+    // chatgpt.com over HTTPS. It ignores chatgpt_base_url for subscription
+    // mode and does not support OPENAI_BASE_URL (OAuth token lacks scopes).
+    //
+    // We use mitmproxy as a forward HTTPS proxy to intercept traffic.
+    // The mitmproxy addon captures requests and POSTs them to the
+    // analysis server's ingest API.
+    childEnv: {},
+    extraArgs: [],
+    serverEnv: {},
+    needsMitm: true,
+  },
+  cline: {
+    // Cline with Anthropic OAuth routes through api.cline.bot (their own
+    // backend), not directly to api.anthropic.com. Setting ANTHROPIC_BASE_URL
+    // has no effect in OAuth mode, so we use mitmproxy to intercept the
+    // HTTPS traffic to api.cline.bot and capture the /v1/messages calls.
+    //
+    // Cline is a Node.js process. Node ignores SSL_CERT_FILE and requires
+    // NODE_EXTRA_CA_CERTS to trust the mitmproxy CA certificate.
+    childEnv: {},
+    extraArgs: [],
+    serverEnv: {},
+    needsMitm: true,
+  },
+  copilot: {
+    // GitHub Copilot CLI (@github/copilot) supports COPILOT_API_URL to
+    // redirect all API traffic to a custom endpoint. We point it at the
+    // reverse proxy so captures work without mitmproxy.
+    //
+    // The proxy needs to forward openai-classified traffic to
+    // api.githubcopilot.com instead of api.openai.com, so we override
+    // UPSTREAM_OPENAI_URL in the server (proxy) environment.
+    childEnv: { COPILOT_API_URL: `${PROXY_URL}/copilot` },
+    extraArgs: [],
+    serverEnv: { UPSTREAM_OPENAI_URL: "https://api.githubcopilot.com" },
+    needsMitm: false,
+  },
+  aider: {
+    childEnv: {
+      ANTHROPIC_BASE_URL: `${PROXY_URL}/aider`,
+      OPENAI_BASE_URL: `${PROXY_URL}/aider`,
     },
-    codex: {
-      // Codex (v0.101+) is a Rust binary that connects directly to
-      // chatgpt.com over HTTPS. It ignores chatgpt_base_url for subscription
-      // mode and does not support OPENAI_BASE_URL (OAuth token lacks scopes).
-      //
-      // We use mitmproxy as a forward HTTPS proxy to intercept traffic.
-      // The mitmproxy addon captures requests and POSTs them to the
-      // analysis server's ingest API.
-      childEnv: {},
-      extraArgs: [],
-      serverEnv: {},
-      needsMitm: true,
+    extraArgs: [],
+    serverEnv: {},
+    needsMitm: false,
+  },
+  opencode: {
+    // OpenCode connects directly to each provider's official API over HTTPS
+    // and cannot be redirected via base URL env vars alone when using multiple
+    // providers simultaneously. We use mitmproxy as a forward HTTPS proxy so
+    // all provider traffic is captured regardless of which model is active.
+    childEnv: {},
+    extraArgs: [],
+    serverEnv: {},
+    needsMitm: true,
+  },
+  gemini: {
+    childEnv: {
+      GOOGLE_GEMINI_BASE_URL: `${PROXY_URL}/gemini/`, // API-key auth path
+      GOOGLE_VERTEX_BASE_URL: `${PROXY_URL}/gemini/`, // Vertex AI auth path
+      CODE_ASSIST_ENDPOINT: `${PROXY_URL}/gemini`, // OAuth/Google login path
     },
-    cline: {
-      // Cline with Anthropic OAuth routes through api.cline.bot (their own
-      // backend), not directly to api.anthropic.com. Setting ANTHROPIC_BASE_URL
-      // has no effect in OAuth mode, so we use mitmproxy to intercept the
-      // HTTPS traffic to api.cline.bot and capture the /v1/messages calls.
-      //
-      // Cline is a Node.js process. Node ignores SSL_CERT_FILE and requires
-      // NODE_EXTRA_CA_CERTS to trust the mitmproxy CA certificate.
-      childEnv: {},
-      extraArgs: [],
-      serverEnv: {},
-      needsMitm: true,
+    extraArgs: [],
+    serverEnv: {},
+    needsMitm: false,
+  },
+  pi: {
+    // Pi ignores standard base URL env vars. We point it at a temporary agent
+    // directory where cli.ts writes a proxy-aware models.json.
+    childEnv: {
+      PI_CODING_AGENT_DIR: PI_AGENT_DIR_PREFIX,
     },
-    copilot: {
-      // GitHub Copilot CLI (@github/copilot) supports COPILOT_API_URL to
-      // redirect all API traffic to a custom endpoint. We point it at the
-      // reverse proxy so captures work without mitmproxy.
-      //
-      // The proxy needs to forward openai-classified traffic to
-      // api.githubcopilot.com instead of api.openai.com, so we override
-      // UPSTREAM_OPENAI_URL in the server (proxy) environment.
-      childEnv: { COPILOT_API_URL: `${PROXY_URL}/copilot` },
-      extraArgs: [],
-      serverEnv: { UPSTREAM_OPENAI_URL: "https://api.githubcopilot.com" },
-      needsMitm: false,
+    extraArgs: [],
+    // Allow x-target-url header so providers with non-standard upstreams
+    // (e.g. opencode, kilo) can tell the proxy their real destination URL.
+    serverEnv: { CONTEXT_LENS_ALLOW_TARGET_OVERRIDE: "1" },
+    needsMitm: false,
+  },
+  bryti: {
+    // Bryti reads base_url from its config.yml, not env vars. We point it at
+    // a temporary data dir where cli.ts writes a proxy-aware config.yml copy.
+    // Everything else in the temp dir is symlinked back to the real data dir
+    // so all runtime writes (history, memory DB, etc.) go to the right place.
+    childEnv: {
+      BRYTI_DATA_DIR: BRYTI_DATA_DIR_PREFIX,
     },
-    aider: {
-      childEnv: {
-        ANTHROPIC_BASE_URL: `${PROXY_URL}/aider`,
-        OPENAI_BASE_URL: `${PROXY_URL}/aider`,
-      },
-      extraArgs: [],
-      serverEnv: {},
-      needsMitm: false,
-    },
-    opencode: {
-      // OpenCode connects directly to each provider's official API over HTTPS
-      // and cannot be redirected via base URL env vars alone when using multiple
-      // providers simultaneously. We use mitmproxy as a forward HTTPS proxy so
-      // all provider traffic is captured regardless of which model is active.
-      childEnv: {},
-      extraArgs: [],
-      serverEnv: {},
-      needsMitm: true,
-    },
-    gemini: {
-      childEnv: {
-        GOOGLE_GEMINI_BASE_URL: `${PROXY_URL}/gemini/`, // API-key auth path
-        GOOGLE_VERTEX_BASE_URL: `${PROXY_URL}/gemini/`, // Vertex AI auth path
-        CODE_ASSIST_ENDPOINT: `${PROXY_URL}/gemini`, // OAuth/Google login path
-      },
-      extraArgs: [],
-      serverEnv: {},
-      needsMitm: false,
-    },
-    pi: {
-      // Pi ignores standard base URL env vars. We point it at a temporary agent
-      // directory where cli.ts writes a proxy-aware models.json.
-      childEnv: {
-        PI_CODING_AGENT_DIR: PI_AGENT_DIR_PREFIX,
-      },
-      extraArgs: [],
-      // Allow x-target-url header so providers with non-standard upstreams
-      // (e.g. opencode, kilo) can tell the proxy their real destination URL.
-      serverEnv: { CONTEXT_LENS_ALLOW_TARGET_OVERRIDE: "1" },
-      needsMitm: false,
-    },
-    bryti: {
-      // Bryti reads base_url from its config.yml, not env vars. We point it at
-      // a temporary data dir where cli.ts writes a proxy-aware config.yml copy.
-      // Everything else in the temp dir is symlinked back to the real data dir
-      // so all runtime writes (history, memory DB, etc.) go to the right place.
-      childEnv: {
-        BRYTI_DATA_DIR: BRYTI_DATA_DIR_PREFIX,
-      },
-      extraArgs: [],
-      serverEnv: {},
-      needsMitm: false,
-    },
-  };
-}
+    extraArgs: [],
+    serverEnv: {},
+    needsMitm: false,
+  },
+};
 
 export function getToolConfig(toolName: string): ToolConfig {
-  const PROXY_URL = `http://localhost:${loadConfig().proxy.port}`;
-  const TOOL_CONFIG = getKnownToolConfigs(PROXY_URL);
   return (
     TOOL_CONFIG[toolName] || {
       childEnv: {
@@ -183,7 +186,6 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
   let privacyLevel: string | undefined;
   let redactPreset: RedactPreset | undefined;
   let rehydrate = false;
-  let upstreamProxy: string | undefined;
   let explicitSeparator = false;
   let commandStartIndex = -1;
   for (let i = 0; i < args.length; i++) {
@@ -219,28 +221,6 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
     }
     if (arg === "--mitm") {
       useMitm = true;
-      continue;
-    }
-    if (arg === "--upstream-proxy" || arg.startsWith("--upstream-proxy=")) {
-      let value = arg.slice("--upstream-proxy=".length);
-      if (arg === "--upstream-proxy") {
-        value = args[++i];
-      }
-      try {
-        upstreamProxy = validateUpstreamProxy(value);
-      } catch {
-        return {
-          showHelp,
-          showVersion,
-          noOpen,
-          noUi,
-          noUpdateCheck,
-          useMitm,
-          commandArguments: [],
-          error:
-            "Error: --upstream-proxy requires an http:// or https:// proxy URL",
-        };
-      }
       continue;
     }
     if (arg === "--redact") {
@@ -347,7 +327,6 @@ export function parseCliArgs(args: string[]): ParsedCliArgs {
     privacyLevel,
     redactPreset,
     rehydrate,
-    upstreamProxy,
     commandName,
     commandArguments,
   };
@@ -374,10 +353,9 @@ export function formatHelpText(): string {
     "Options:",
     "  -h, --help        Show this help text",
     "  -v, --version     Show version",
-    `  --no-open         Don't auto-open ${CLI_CONSTANTS.UI_URL}`,
+    `  --no-open         Don't auto-open ${UI_URL}`,
     "  --no-ui           Run proxy only, without analysis or web UI",
     "  --mitm            Force mitmproxy interception, mainly for Pi subscription models",
-    "  --upstream-proxy URL  Route provider requests through an HTTP(S) proxy, without direct fallback",
     "",
     "Examples:",
     "  context-lens claude",
@@ -408,18 +386,10 @@ export function formatHelpText(): string {
 
 // Exported for tests (and to keep cli.ts smaller).
 export const CLI_CONSTANTS = {
-  get PROXY_URL() {
-    return `http://localhost:${this.PROXY_PORT}`;
-  },
-  get PROXY_PORT() {
-    return loadControlConfig().proxy.port;
-  },
-  get UI_PORT() {
-    return loadControlConfig().ui.port;
-  },
-  get UI_URL() {
-    return `http://localhost:${this.UI_PORT}`;
-  },
+  PROXY_URL,
+  PROXY_PORT,
+  UI_PORT,
+  UI_URL,
   PI_AGENT_DIR_PREFIX,
   BRYTI_DATA_DIR_PREFIX,
   COMMAND_ALIASES,
@@ -575,7 +545,7 @@ export function toMitmToolConfig(
 export function injectSessionTagIntoProxyEnv(
   env: Record<string, string | undefined>,
   sessionTag: string,
-  proxyUrl = CLI_CONSTANTS.PROXY_URL,
+  proxyUrl = PROXY_URL,
 ): Record<string, string | undefined> {
   const result: Record<string, string | undefined> = { ...env };
   const proxyBase = `${proxyUrl}/`;

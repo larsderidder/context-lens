@@ -23,51 +23,12 @@ if TYPE_CHECKING:
     import mitm_addon
 else:
     # Only HTTPFlow annotations need mitmproxy; capture delivery uses real urllib.
-    with patch.dict(
-        sys.modules, {"mitmproxy": SimpleNamespace(http=SimpleNamespace(HTTPFlow=object), ctx=SimpleNamespace())}
-    ):
+    with patch.dict(sys.modules, {"mitmproxy": SimpleNamespace(http=SimpleNamespace(HTTPFlow=object))}):
         import mitm_addon
 
 
 class IngestDeliveryTests(unittest.TestCase):
     """Exercise HTTP and WebSocket capture callbacks without provider traffic."""
-
-    def test_manual_upstream_auth_is_preserved_without_child_environment(self) -> None:
-        """Leave manually configured authentication untouched outside CLI launches."""
-        options = SimpleNamespace(upstream_auth="fixture:manual-password")
-        with patch.object(mitm_addon, "ctx", SimpleNamespace(options=options)):
-            with patch.dict(os.environ, {}, clear=True):
-                mitm_addon.configure(set())
-        self.assertEqual(options.upstream_auth, "fixture:manual-password")
-
-    def test_explicit_empty_child_auth_clears_manual_auth(self) -> None:
-        """An explicitly supplied empty value still overrides manual options."""
-        options = SimpleNamespace(upstream_auth="fixture:manual-password")
-        options.update = lambda **values: vars(options).update(values)
-        with patch.object(mitm_addon, "ctx", SimpleNamespace(options=options)):
-            with patch.dict(os.environ, {"CONTEXT_LENS_MITM_UPSTREAM_AUTH": ""}):
-                mitm_addon.configure(set())
-        self.assertEqual(options.upstream_auth, "")
-
-    def test_upstream_auth_is_loaded_from_child_environment(self) -> None:
-        """Keep authentication in options, without exposing it in diagnostics."""
-        options = SimpleNamespace(upstream_auth="")
-        options.update = lambda **values: vars(options).update(values)
-        with patch.object(mitm_addon, "ctx", SimpleNamespace(options=options)):
-            with patch.dict(os.environ, {"CONTEXT_LENS_MITM_UPSTREAM_AUTH": "fixture:dummy-password"}):
-                mitm_addon.configure(set())
-                self.assertEqual(options.upstream_auth, "fixture:dummy-password")
-            with patch.dict(os.environ, {"CONTEXT_LENS_MITM_UPSTREAM_AUTH": "fixture:dummy\npassword"}):
-                with self.assertRaisesRegex(ValueError, "^Invalid upstream proxy credentials$"):
-                    mitm_addon.configure(set())
-
-    def test_running_announces_child_readiness(self) -> None:
-        """Use the running hook rather than another process's open TCP port."""
-        output = io.StringIO()
-        with patch.dict(os.environ, {"CONTEXT_LENS_MITM_READY_TOKEN": "fixture-token"}):
-            with contextlib.redirect_stdout(output):
-                mitm_addon.running()
-        self.assertEqual(output.getvalue(), "CONTEXT_LENS_MITM_READY:fixture-token\n")
 
     def setUp(self) -> None:
         """Start independent ingestion and simulated ambient-proxy listeners."""

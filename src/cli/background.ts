@@ -5,7 +5,6 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { CLI_CONSTANTS } from "../cli-utils.js";
-import { withoutEgressCredentials, withoutMitmAuth } from "./egress-env.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -260,29 +259,23 @@ export async function backgroundStart(
 ): Promise<number> {
   const existing = readBackgroundState(runtime);
   if (existing && isBackgroundRunning(existing, runtime)) {
-    if (runtime.env.CONTEXT_LENS_UPSTREAM_PROXY !== undefined) {
-      runtime.error(
-        "Cannot verify the egress of an existing Context Lens proxy. Stop it before starting with an upstream proxy.",
-      );
-      return 1;
-    }
     runtime.log("Background status: already running");
     runtime.log(`  proxy pid: ${existing.proxyPid}`);
     return 0;
   }
   if (existing) runtime.clearState();
 
-  const proxyEnv = withoutMitmAuth({
+  const proxyEnv: NodeJS.ProcessEnv = {
     ...runtime.env,
     CONTEXT_LENS_CLI: "1",
     ...(noUi ? {} : { CONTEXT_LENS_ANALYSIS_URL: runtime.uiUrl }),
-  });
+  };
   const proxy = runtime.spawnDetached("node", [runtime.proxyPath], proxyEnv);
 
   let analysis: DetachedProcess | null = null;
   if (!noUi) {
     analysis = runtime.spawnDetached("node", [runtime.analysisPath], {
-      ...withoutEgressCredentials(runtime.env),
+      ...runtime.env,
       CONTEXT_LENS_CLI: "1",
     });
   }

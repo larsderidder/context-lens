@@ -19,7 +19,6 @@ import { createProxy } from "@contextio/proxy";
 
 import { createCaptureIngestor, createCaptureWriter } from "./capture.js";
 import { loadProxyConfig } from "./config.js";
-import { configureUpstreamProxy } from "./egress.js";
 import { createPrunePlugin } from "./prune.js";
 
 async function loadRedactPlugin(): Promise<ProxyPlugin | null> {
@@ -95,12 +94,6 @@ async function loadPluginsFromEnv(): Promise<ProxyPlugin[]> {
 
 async function main(): Promise<void> {
   const config = loadProxyConfig();
-  if (config.upstreamProxy !== undefined) {
-    configureUpstreamProxy(config.upstreamProxy);
-    console.log(
-      `Egress proxy: ${new URL(config.upstreamProxy).origin} (no direct fallback)`,
-    );
-  }
   const plugins = await loadPluginsFromEnv();
   const redactPlugin = await loadRedactPlugin();
   if (redactPlugin) plugins.unshift(redactPlugin);
@@ -145,11 +138,6 @@ async function main(): Promise<void> {
   } catch (err: unknown) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "EADDRINUSE") {
-      if (config.upstreamProxy !== undefined) {
-        throw new Error(
-          `Cannot verify upstream egress: proxy port ${config.port} is already in use.`,
-        );
-      }
       console.log(
         `🔍 Context Lens Proxy already running on port ${config.port}`,
       );

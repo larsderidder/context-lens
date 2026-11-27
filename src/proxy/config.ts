@@ -9,8 +9,6 @@ import { join } from "node:path";
 
 import type { Upstreams } from "@contextio/core";
 
-import { validateUpstreamProxy } from "../http/upstream-proxy.js";
-
 export interface ProxyConfig {
   upstreams: Upstreams;
   bindHost: string;
@@ -19,7 +17,6 @@ export interface ProxyConfig {
   captureDir: string;
   /** When set, POST captures to this URL instead of writing files to captureDir. */
   ingestUrl: string | null;
-  upstreamProxy?: string;
 }
 
 export function loadProxyConfig(): ProxyConfig {
@@ -68,12 +65,6 @@ export function loadProxyConfig(): ProxyConfig {
     join(homedir(), ".context-lens", "captures");
 
   const ingestUrl = process.env.CONTEXT_LENS_INGEST_URL || null;
-  let upstreamProxy: string | undefined;
-  if (process.env.CONTEXT_LENS_UPSTREAM_PROXY !== undefined) {
-    upstreamProxy = validateUpstreamProxy(
-      process.env.CONTEXT_LENS_UPSTREAM_PROXY,
-    );
-  }
 
   return {
     upstreams,
@@ -82,6 +73,5 @@ export function loadProxyConfig(): ProxyConfig {
     allowTargetOverride,
     captureDir,
     ingestUrl,
-    upstreamProxy,
   };
 }
