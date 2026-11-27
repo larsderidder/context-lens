@@ -58,6 +58,15 @@ const DEFAULTS: ContextLensConfig = {
   },
 };
 
+/** Defaults for control-plane commands only, never a forwarding fallback. */
+export function loadControlConfig(): ContextLensConfig {
+  try {
+    return loadConfig();
+  } catch {
+    return structuredClone(DEFAULTS);
+  }
+}
+
 export function getConfigPath(): string {
   return join(homedir(), ".context-lens", "config.toml");
 }

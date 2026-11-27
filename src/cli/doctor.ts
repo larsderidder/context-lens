@@ -60,6 +60,12 @@ export async function runDoctor(
   }
 
   console.log(`Context Lens doctor v${VERSION}`);
+  try {
+    loadConfig();
+  } catch {
+    report("config file", false, "Could not load Context Lens configuration.");
+    return 1;
+  }
 
   report("node", true, process.version);
 
@@ -136,11 +142,19 @@ export async function runDoctor(
       : `not present — create ${configPath} to set defaults`,
   );
   if (configExists) {
-    const cfg = loadConfig();
-    if (cfg.proxy.redact) info("config: redact", cfg.proxy.redact);
-    if (cfg.proxy.rehydrate) info("config: rehydrate", "true");
-    if (cfg.ui.noOpen) info("config: no_open", "true");
-    if (cfg.privacy.level) info("config: privacy", cfg.privacy.level);
+    try {
+      const cfg = loadConfig();
+      if (cfg.proxy.redact) info("config: redact", cfg.proxy.redact);
+      if (cfg.proxy.rehydrate) info("config: rehydrate", "true");
+      if (cfg.ui.noOpen) info("config: no_open", "true");
+      if (cfg.privacy.level) info("config: privacy", cfg.privacy.level);
+    } catch {
+      report(
+        "config file",
+        false,
+        "Could not load Context Lens configuration.",
+      );
+    }
   }
 
   if (hasFailures) {

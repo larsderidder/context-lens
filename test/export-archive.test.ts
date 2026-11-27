@@ -13,7 +13,10 @@ import path from "node:path";
 import { it } from "node:test";
 import { parseContextInfo } from "../src/core.js";
 import { parseLharContent } from "../src/lhar.js";
-import { ExportArchive } from "../src/server/export-archive.js";
+import {
+  ExportArchive,
+  type RetainedExportRecord,
+} from "../src/server/export-archive.js";
 import { Store } from "../src/server/store.js";
 import { createApp } from "../src/server/webui.js";
 
@@ -204,6 +207,158 @@ for (const disconnect of ["request", "body"]) {
       await stopped;
       if (disconnect === "request") {
         await response.body.cancel();
+      }
+    } finally {
+      rmSync(f.dir, { recursive: true, force: true });
+    }
+  });
+}
+
+for (const ending of ["", "\r\n"]) {
+  it(`indexes large UTF-8 records with linear copying and scanning (ending=${JSON.stringify(ending)})`, async (t) => {
+    const f = fixture();
+    try {
+      const updated = structuredClone(f.record);
+      updated.raw.response_body = { content: "é 🐈".repeat(300_000) };
+      const other = structuredClone(f.record);
+      other.timestamp = "other-turn";
+      other.raw.response_body = { content: "中".repeat(300_000) };
+      const content = `${JSON.stringify(f.record)}\r\n\nnot-json\n${JSON.stringify(other)}\n${JSON.stringify(updated)}${ending}`;
+      writeFileSync(f.file, content);
+      const bytes = Buffer.byteLength(content);
+      let copied = 0;
+      let scanned = 0;
+      const concat = Buffer.concat;
+      const indexOf = Buffer.prototype.indexOf;
+      const concatMock = t.mock.method(
+        Buffer,
+        "concat",
+        (list: readonly Uint8Array[], length?: number) => {
+          copied += list.reduce((total, buffer) => total + buffer.length, 0);
+          return concat(list, length);
+        },
+      );
+      const scanMock = t.mock.method(
+        Buffer.prototype,
+        "indexOf",
+        function (
+          this: Buffer,
+          value: string | number | Uint8Array,
+          offset = 0,
+          encoding?: BufferEncoding,
+        ) {
+          const found = indexOf.call(this, value, offset, encoding);
+          if (value === 10) {
+            let end = this.length;
+            if (found !== -1) {
+              end = found + 1;
+            }
+            scanned += end - offset;
+          }
+          return found;
+        },
+      );
+      const archive = new ExportArchive(undefined, (file) => {
+        return createReadStream(file, { highWaterMark: 64 * 1024 });
+      });
+      let result: RetainedExportRecord | undefined;
+      let otherResult: RetainedExportRecord | undefined;
+      try {
+        result = await archive.read(
+          f.file,
+          f.entry.timestamp,
+          f.entry.contextInfo.model,
+          f.entry.source,
+        );
+        otherResult = await archive.read(
+          f.file,
+          other.timestamp,
+          f.entry.contextInfo.model,
+          f.entry.source,
+        );
+      } finally {
+        concatMock.mock.restore();
+        scanMock.mock.restore();
+      }
+      assert.deepEqual(result?.raw, updated.raw);
+      assert.deepEqual(otherResult?.raw, other.raw);
+      assert.equal(scanned, bytes, "each archive byte must be scanned once");
+      assert.ok(
+        copied <= bytes,
+        `copied ${copied} bytes for ${bytes} archive bytes`,
+      );
+    } finally {
+      rmSync(f.dir, { recursive: true, force: true });
+    }
+  });
+}
+
+for (const grouping of ["grouped", "missing-conversation", "ungrouped"]) {
+  it(`exports schema-compatible wrapper sessions for ${grouping} records`, async () => {
+    const f = fixture();
+    try {
+      const second = f.store.storeRequest(
+        parseContextInfo(
+          "anthropic",
+          { model: "unknown", messages: [{ role: "user", content: "second" }] },
+          "anthropic-messages",
+        ),
+        { content: [{ type: "text", text: "second response" }] },
+        "test",
+      );
+      second.conversationId = f.entry.conversationId;
+      if (grouping === "missing-conversation") {
+        f.store.getConversations().clear();
+      } else if (grouping === "ungrouped") {
+        f.entry.conversationId = null;
+        second.conversationId = null;
+      }
+      const schema = JSON.parse(
+        readFileSync(path.resolve("schema/lhar.schema.json"), "utf8"),
+      );
+      const sessionSchema =
+        schema.definitions.LharJsonWrapper.properties.lhar.properties.sessions
+          .items;
+      assert.equal(sessionSchema.additionalProperties, false);
+      const response = await createApp(f.store, "test").request(
+        "/api/export/lhar.json?privacy=full",
+      );
+      const text = await response.text();
+      const { sessions, entries } = JSON.parse(text).lhar;
+      assert.equal(entries.length, 2);
+      let expectedSessions = 1;
+      if (grouping === "ungrouped") {
+        expectedSessions = 2;
+      }
+      assert.equal(sessions.length, expectedSessions);
+      for (const session of sessions) {
+        assert.deepEqual(
+          Object.keys(session).sort(),
+          Object.keys(sessionSchema.properties).sort(),
+        );
+        for (const key of sessionSchema.required) {
+          assert.equal(typeof session[key], sessionSchema.properties[key].type);
+        }
+        assert.equal(session.tool, "test");
+        assert.equal(session.model, "unknown");
+      }
+      assert.deepEqual(
+        new Set(entries.map((entry: { trace_id: string }) => entry.trace_id)),
+        new Set(
+          sessions.map((session: { trace_id: string }) => session.trace_id),
+        ),
+      );
+      assert.equal(parseLharContent(text).entries.length, 2);
+      if (grouping === "grouped") {
+        const jsonl = await createApp(f.store, "test").request(
+          "/api/export/lhar",
+        );
+        const lines = (await jsonl.text())
+          .trim()
+          .split("\n")
+          .map((line) => JSON.parse(line));
+        assert.equal(lines[0].type, "session");
+        assert.equal(lines[0].trace_id, sessions[0].trace_id);
       }
     } finally {
       rmSync(f.dir, { recursive: true, force: true });

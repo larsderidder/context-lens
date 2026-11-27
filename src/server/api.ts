@@ -9,6 +9,7 @@ import { classifyRequest } from "../core/routing.js";
 import { parseContextInfo, sumCosts } from "../core.js";
 import { importSessions } from "../importers/index.js";
 import { buildSessionLine, traceIdFromConversation } from "../lhar.js";
+import type { LharJsonWrapper } from "../lhar-types.generated.js";
 import {
   IngestCapturePayloadSchema,
   IngestLegacyPayloadSchema,
@@ -640,8 +641,11 @@ export function createApiApp(store: Store): Hono {
           }
         }
         if (format === "lhar.json") {
+          const wrapperSessions: LharJsonWrapper["lhar"]["sessions"] = [
+            ...sessions.values(),
+          ].map(({ type: _type, ...session }) => session);
           await output.write(
-            `{"lhar":{"version":"0.1.0","creator":{"name":"context-lens","version":${JSON.stringify(VERSION)}},"sessions":${JSON.stringify([...sessions.values()])},"entries":[`,
+            `{"lhar":{"version":"0.1.0","creator":{"name":"context-lens","version":${JSON.stringify(VERSION)}},"sessions":${JSON.stringify(wrapperSessions)},"entries":[`,
           );
         }
         const emitted = new Set<string>();

@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import { injectSessionTagIntoProxyEnv } from "../cli-utils.js";
 import type { ToolConfig } from "../types.js";
 import { prepareBrytiDataDir as prepareBrytiDataDirDefault } from "./bryti-config.js";
+import { withoutEgressCredentials } from "./egress-env.js";
 import { preparePiAgentDir as preparePiAgentDirDefault } from "./pi-config.js";
 
 interface PrepareBrytiOptions {
@@ -60,10 +61,10 @@ export function prepareChildLaunch(
     ...options.toolConfig.extraArgs,
     ...options.commandArguments,
   ];
-  const env: NodeJS.ProcessEnv = {
+  const env = withoutEgressCredentials({
     ...(options.baseEnv ?? process.env),
     ...options.toolConfig.childEnv,
-  };
+  });
   const warnings: string[] = [];
   let piAgentDirToCleanup: string | undefined;
   let brytiDataDirToCleanup: string | undefined;

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import http from "node:http";
@@ -8,6 +9,7 @@ import net from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it, type TestContext } from "node:test";
+import { promisify } from "node:util";
 import { createProxyHandler } from "@contextio/proxy";
 
 import { validateUpstreamProxy } from "../src/http/upstream-proxy.js";
@@ -16,6 +18,7 @@ import {
   createCaptureIngestor,
 } from "../src/proxy/capture.js";
 import { configureUpstreamProxy } from "../src/proxy/egress.js";
+import { createPrunePlugin } from "../src/proxy/prune.js";
 
 async function listen(server: http.Server): Promise<number> {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -25,10 +28,12 @@ async function listen(server: http.Server): Promise<number> {
 function request(
   port: number,
   method: string,
+  path = "/v1/messages",
+  body = '{"model":"test","messages":[]}',
 ): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
     const req = http.request(
-      { host: "127.0.0.1", port, path: "/v1/messages", method, agent: false },
+      { host: "127.0.0.1", port, path, method, agent: false },
       (res) => {
         let body = "";
         res.setEncoding("utf8");
@@ -42,18 +47,32 @@ function request(
     );
     req.on("error", reject);
     if (method === "POST") {
-      req.write('{"model":"test","messages":[]}');
+      req.write(body);
     }
     req.end();
   });
 }
 
-async function setup(t: TestContext, secure = false, trustCertificate = true) {
+async function setup(
+  t: TestContext,
+  secure = false,
+  trustCertificate = true,
+  analysisUrl?: string,
+) {
   const sockets = new Set<net.Socket>();
   const captures: unknown[] = [];
   const proxyRequests: string[] = [];
   let upstreamRequests = 0;
-  const respond: http.RequestListener = (_req, res) => {
+  const upstreamBodies: string[] = [];
+  const respond: http.RequestListener = (req, res) => {
+    let body = "";
+    req.setEncoding("utf8");
+    req.on("data", (chunk: string) => {
+      body += chunk;
+    });
+    req.on("end", () => {
+      upstreamBodies.push(body);
+    });
     upstreamRequests++;
     res.writeHead(200, { "content-type": "text/event-stream" });
     res.write("data: first\n\n");
@@ -138,6 +157,10 @@ async function setup(t: TestContext, secure = false, trustCertificate = true) {
     https.globalAgent.options.ca = ca;
   }
   const target = `${protocol}://localhost:${upstreamPort}`;
+  const prunePlugins = [];
+  if (analysisUrl) {
+    prunePlugins.push(createPrunePlugin(analysisUrl));
+  }
   const lens = http.createServer(
     createProxyHandler({
       upstreams: {
@@ -149,6 +172,7 @@ async function setup(t: TestContext, secure = false, trustCertificate = true) {
         vertex: target,
       },
       plugins: [
+        ...prunePlugins,
         {
           name: "test-capture",
           onCapture: (capture) => {
@@ -182,6 +206,7 @@ async function setup(t: TestContext, secure = false, trustCertificate = true) {
     egress,
     captures,
     proxyRequests,
+    upstreamBodies,
     get upstreamRequests() {
       return upstreamRequests;
     },
@@ -189,6 +214,95 @@ async function setup(t: TestContext, secure = false, trustCertificate = true) {
 }
 
 describe("upstream proxy", () => {
+  it("prunes through direct analysis lookup while provider traffic uses egress", async (t) => {
+    const analysisPaths: string[] = [];
+    const analysis = http.createServer((req, res) => {
+      analysisPaths.push(req.url ?? "");
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ prunedMessages: ["user:0"] }));
+    });
+    const analysisPort = await listen(analysis);
+    t.after(
+      () =>
+        new Promise<void>((resolve) => {
+          analysis.close(() => resolve());
+          analysis.closeAllConnections();
+        }),
+    );
+    const fixture = await setup(
+      t,
+      false,
+      true,
+      `http://127.0.0.1:${analysisPort}`,
+    );
+    const sessionId = "ab12cd34";
+    const conversationId = createHash("sha256")
+      .update(sessionId)
+      .digest("hex")
+      .slice(0, 16);
+    const messages = [
+      { role: "user", content: "remove this private message" },
+      { role: "user", content: "keep this message" },
+    ];
+    const response = await request(
+      fixture.lensPort,
+      "POST",
+      `/pi/${sessionId}/v1/messages`,
+      JSON.stringify({ model: "test", messages }),
+    );
+    assert.equal(response.status, 200);
+    assert.deepEqual(analysisPaths, [`/api/sessions/${conversationId}/prunes`]);
+    assert.equal(fixture.proxyRequests.length, 1);
+    assert.ok(fixture.proxyRequests[0].endsWith("/v1/messages"));
+    assert.ok(fixture.proxyRequests.every((path) => !path.includes("/prunes")));
+    assert.equal(fixture.upstreamRequests, 1);
+    assert.deepEqual(JSON.parse(fixture.upstreamBodies[0]).messages, [
+      messages[1],
+    ]);
+  });
+
+  for (const withEgress of [true, false]) {
+    it(`handles an occupied entrypoint port with egress=${withEgress}`, async (t) => {
+      const occupied = http.createServer();
+      const port = await listen(occupied);
+      t.after(
+        () => new Promise<void>((resolve) => occupied.close(() => resolve())),
+      );
+      const home = mkdtempSync(join(tmpdir(), "context-lens-busy-proxy-"));
+      t.after(() => rmSync(home, { recursive: true, force: true }));
+      const env: NodeJS.ProcessEnv = {
+        PATH: process.env.PATH,
+        HOME: home,
+        CONTEXT_LENS_CAPTURE_DIR: join(home, "captures"),
+        CONTEXT_LENS_BIND_HOST: "127.0.0.1",
+        CONTEXT_LENS_PROXY_PORT: String(port),
+      };
+      if (withEgress) {
+        env.CONTEXT_LENS_UPSTREAM_PROXY = `http://127.0.0.1:${port}`;
+      }
+      const run = promisify(execFile)(
+        process.execPath,
+        [new URL("../src/proxy/server.js", import.meta.url).pathname],
+        { env, timeout: 5000 },
+      );
+      if (withEgress) {
+        await assert.rejects(run, (err: unknown) => {
+          const failure = err as Error & {
+            code: number;
+            stderr: string;
+            stdout: string;
+          };
+          assert.equal(failure.code, 1);
+          assert.match(failure.stderr, /cannot verify.*egress/i);
+          assert.doesNotMatch(failure.stdout, /already running/);
+          return true;
+        });
+      } else {
+        const result = await run;
+        assert.match(result.stdout, /already running/);
+      }
+    });
+  }
   it("keeps capture ingestion separate from provider egress", async (t) => {
     const fixture = await setup(t);
     await request(fixture.lensPort, "POST");

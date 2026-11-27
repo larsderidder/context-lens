@@ -81,7 +81,8 @@ export class ExportArchive {
     if (!index) {
       const builtIndex = new Map<string, Location>();
       index = builtIndex;
-      let pending = Buffer.alloc(0);
+      let segments: Buffer[] = [];
+      let pendingLength = 0;
       let start = 0;
       const indexLine = (line: Buffer, length: number) => {
         this.signal?.throwIfAborted();
@@ -113,18 +114,27 @@ export class ExportArchive {
         this.signal?.throwIfAborted();
         for await (const chunk of input) {
           this.signal?.throwIfAborted();
-          pending = Buffer.concat([pending, chunk]);
-          let newline = pending.indexOf(10);
+          let offset = 0;
+          let newline = chunk.indexOf(10, offset);
           while (newline !== -1) {
-            const length = newline + 1;
-            indexLine(pending.subarray(0, newline), length);
-            pending = pending.subarray(length);
-            newline = pending.indexOf(10);
+            const segment = chunk.subarray(offset, newline + 1);
+            segments.push(segment);
+            pendingLength += segment.length;
+            indexLine(Buffer.concat(segments, pendingLength), pendingLength);
+            segments = [];
+            pendingLength = 0;
+            offset = newline + 1;
+            newline = chunk.indexOf(10, offset);
+          }
+          if (offset < chunk.length) {
+            const segment = chunk.subarray(offset);
+            segments.push(segment);
+            pendingLength += segment.length;
           }
         }
         this.signal?.throwIfAborted();
-        if (pending.length > 0) {
-          indexLine(pending, pending.length);
+        if (pendingLength > 0) {
+          indexLine(Buffer.concat(segments, pendingLength), pendingLength);
         }
         // Never reuse a partial index after failure or cancellation.
         this.indexes.set(file, index);

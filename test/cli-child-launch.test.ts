@@ -24,6 +24,26 @@ const mitmTool: ToolConfig = {
 };
 
 describe("child launch planning", () => {
+  it("strips mixed-case forwarding secrets after merging tool configuration", () => {
+    const plan = prepareChildLaunch({
+      commandName: "custom",
+      commandArguments: [],
+      useMitm: false,
+      sessionTag: "fixture",
+      proxyUrl: "http://localhost:4040",
+      baseEnv: {
+        context_lens_upstream_proxy: "http://dummy:fixture@localhost:8888",
+      },
+      toolConfig: {
+        ...reverseProxyTool,
+        childEnv: {
+          Context_Lens_Mitm_Upstream_Auth: "dummy:fixture",
+          Context_Lens_Upstream_Proxy: "http://dummy:fixture@localhost:8888",
+        },
+      },
+    });
+    assert.deepEqual(plan.env, {});
+  });
   it("injects session tags into reverse proxy env vars", () => {
     const plan = prepareChildLaunch({
       commandName: "custom",
