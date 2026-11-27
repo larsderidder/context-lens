@@ -25,7 +25,7 @@ import json
 import os
 import time
 import urllib.request
-from mitmproxy import ctx, http
+from mitmproxy import http
 
 # WebSocket state: keyed by flow id, stores pending request bodies
 # so we can pair response.create (client) with response.completed (server).
@@ -37,24 +37,6 @@ CONTEXT_LENS_SESSION_ID = os.environ.get("CONTEXT_LENS_SESSION_ID", "").strip()
 # When set, all captures are attributed to this tool regardless of which
 # API endpoint they hit. Set by the CLI when launching a specific tool.
 CONTEXT_LENS_SOURCE = os.environ.get("CONTEXT_LENS_SOURCE", "").strip() or None
-
-
-def configure(updated: set[str]) -> None:
-    """Restore child-only upstream authentication after option configuration."""
-    auth = os.environ.get("CONTEXT_LENS_MITM_UPSTREAM_AUTH")
-    if auth is None:
-        return
-    if any(ord(char) < 32 or ord(char) == 127 for char in auth):
-        raise ValueError("Invalid upstream proxy credentials")
-    if ctx.options.upstream_auth != auth:
-        ctx.options.update(upstream_auth=auth)
-
-
-def running() -> None:
-    """Signal readiness from this child after mitmproxy has bound its listeners."""
-    token = os.environ.get("CONTEXT_LENS_MITM_READY_TOKEN", "")
-    if token:
-        print(f"CONTEXT_LENS_MITM_READY:{token}", flush=True)
 
 
 class _NoIngestRedirect(urllib.request.HTTPRedirectHandler):

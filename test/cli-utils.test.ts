@@ -20,36 +20,6 @@ import {
 import { VERSION } from "../src/version.generated.js";
 
 describe("cli-utils", () => {
-  it("parses upstream proxies before the tool command without changing tool arguments", () => {
-    for (const flags of [
-      ["--upstream-proxy", "http://localhost:8888"],
-      ["--upstream-proxy=http://localhost:8888"],
-    ]) {
-      const parsed = parseCliArgs([
-        ...flags,
-        "claude",
-        "--upstream-proxy=tool-argument",
-      ]);
-      assert.equal(parsed.upstreamProxy, "http://localhost:8888/");
-      assert.equal(parsed.commandName, "claude");
-      assert.deepEqual(parsed.commandArguments, [
-        "--upstream-proxy=tool-argument",
-      ]);
-    }
-  });
-
-  it("rejects missing or unsupported upstream proxy URLs", () => {
-    for (const flags of [
-      ["--upstream-proxy"],
-      ["--upstream-proxy="],
-      ["--upstream-proxy=socks5://localhost:1080"],
-    ]) {
-      assert.match(
-        parseCliArgs(flags).error ?? "",
-        /--upstream-proxy requires/,
-      );
-    }
-  });
   it("returns known tool configs", () => {
     const claude = getToolConfig("claude");
     assert.equal(claude.needsMitm, false);

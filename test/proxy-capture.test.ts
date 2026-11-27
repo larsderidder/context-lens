@@ -6,11 +6,17 @@ import {
   readFileSync,
   rmSync,
 } from "node:fs";
+import http from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
-import { type CaptureData, createCaptureWriter } from "../src/proxy/capture.js";
+import {
+  type CaptureData,
+  createCaptureIngestor,
+  createCaptureWriter,
+} from "../src/proxy/capture.js";
 
 function makeCaptureData(overrides?: Partial<CaptureData>): CaptureData {
   return {
@@ -126,5 +132,77 @@ describe("proxy/capture", () => {
     assert.equal(loaded.responseIsStreaming, true);
     assert.equal(loaded.requestBody.model, "claude-sonnet-4");
     assert.equal(loaded.timings.total_ms, 130);
+  });
+
+  it("delivers captures directly even when the global agent uses a proxy", {
+    timeout: 5000,
+  }, async (t) => {
+    let proxyRequests = 0;
+    const proxy = http.createServer((req, res) => {
+      proxyRequests++;
+      req.resume();
+      res.end();
+    });
+    const ingest = http.createServer();
+    for (const server of [proxy, ingest]) {
+      t.after(
+        () =>
+          new Promise<void>((resolve) => {
+            server.close(() => resolve());
+            server.closeAllConnections();
+          }),
+      );
+      await new Promise<void>((resolve) =>
+        server.listen(0, "127.0.0.1", resolve),
+      );
+    }
+    const proxyPort = (proxy.address() as AddressInfo).port;
+    const ingestPort = (ingest.address() as AddressInfo).port;
+    const globalAgent = http.globalAgent;
+    http.globalAgent = new http.Agent({
+      proxyEnv: { HTTP_PROXY: `http://127.0.0.1:${proxyPort}`, NO_PROXY: "" },
+    });
+    t.after(() => {
+      http.globalAgent.destroy();
+      http.globalAgent = globalAgent;
+    });
+    const url = `http://127.0.0.1:${ingestPort}/api/ingest?source=test`;
+
+    // Confirm the ambient agent really sends requests through the proxy.
+    await new Promise<void>((resolve, reject) => {
+      http
+        .get(url, (res) => {
+          res.resume();
+          res.on("end", resolve);
+        })
+        .on("error", reject);
+    });
+    assert.equal(proxyRequests, 1);
+
+    const received = new Promise<{ path: string | undefined; body: string }>(
+      (resolve) => {
+        ingest.once("request", (req, res) => {
+          let body = "";
+          req.setEncoding("utf8");
+          req.on("data", (chunk: string) => {
+            body += chunk;
+          });
+          req.on("end", () => {
+            res.end("{}");
+            resolve({ path: req.url, body });
+          });
+        });
+      },
+    );
+    const capture = makeCaptureData();
+    createCaptureIngestor(url).post(capture);
+    const result = await received;
+    assert.equal(result.path, "/api/ingest?source=test");
+    assert.deepEqual(JSON.parse(result.body), capture);
+    assert.equal(
+      proxyRequests,
+      1,
+      "capture delivery must bypass the global proxy agent",
+    );
   });
 });

@@ -3,7 +3,6 @@ import { describe, it } from "node:test";
 
 import {
   type BackgroundRuntime,
-  backgroundStart,
   backgroundStatus,
   backgroundStop,
   isSafeBackgroundPid,
@@ -42,20 +41,6 @@ function makeRuntime(state: string | null, alivePids = new Set<number>()) {
 }
 
 describe("cli background manager", () => {
-  it("refuses to reuse an existing background proxy with unverified egress", async () => {
-    const { runtime, errors } = makeRuntime(
-      JSON.stringify({
-        proxyPid: 2222,
-        analysisPid: null,
-        noUi: true,
-        startedAt: "2026-01-01T00:00:00.000Z",
-      }),
-      new Set([2222]),
-    );
-    runtime.env.CONTEXT_LENS_UPSTREAM_PROXY = "http://localhost:8888";
-    assert.equal(await backgroundStart(true, runtime), 1);
-    assert.match(errors[0], /Cannot verify the egress/);
-  });
   it("parses background command args", () => {
     assert.deepEqual(parseBackgroundArgs([], false), {
       action: "status",
