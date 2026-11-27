@@ -145,6 +145,11 @@ async function main(): Promise<void> {
   } catch (err: unknown) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "EADDRINUSE") {
+      if (config.upstreamProxy !== undefined) {
+        throw new Error(
+          `Cannot verify upstream egress: proxy port ${config.port} is already in use.`,
+        );
+      }
       console.log(
         `🔍 Context Lens Proxy already running on port ${config.port}`,
       );

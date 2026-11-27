@@ -14,7 +14,7 @@ export function configureUpstreamProxy(value: string): () => void {
   const httpsAgent = new https.Agent({ keepAlive: true, proxyEnv });
 
   // @contextio/proxy uses Node's default agents. Only this process is changed;
-  // capture ingestion uses explicit agents and pruning uses fetch separately.
+  // capture ingestion and analysis prune lookups use explicit direct agents.
   http.globalAgent = httpAgent;
   https.globalAgent = httpsAgent;
 

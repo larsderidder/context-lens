@@ -15,6 +15,9 @@ import { createHash } from "node:crypto";
 import * as http from "node:http";
 import type { ProxyPlugin, RequestContext } from "@contextio/core";
 
+// Analysis traffic must not inherit the provider egress proxy.
+const directAnalysisAgent = new http.Agent({ proxyEnv: {} });
+
 // ---------------------------------------------------------------------------
 // Message identity — index-based, no hashing
 // ---------------------------------------------------------------------------
@@ -57,6 +60,7 @@ async function fetchPrunedMessages(
         port: parsed.port || 4041,
         path: parsed.pathname + parsed.search,
         timeout: 500,
+        agent: directAnalysisAgent,
       },
       (res) => {
         let data = "";
