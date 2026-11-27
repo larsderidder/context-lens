@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import {
+import fs, {
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -394,7 +394,7 @@ describe("legacy cached usage repair", () => {
       if (stream) {
         encoding = "SSE";
       }
-      it(`repairs only retained ${privacy} ${encoding} evidence, once`, async () => {
+      it(`repairs only retained ${privacy} ${encoding} evidence, once`, async (t) => {
         const { dir, stateFile, options, store } = temporaryStore(privacy);
         try {
           const fixture = fixtures(10_000, 90_000)[0];
@@ -455,6 +455,7 @@ describe("legacy cached usage repair", () => {
           assert.equal(exported.usage_ext.cost_usd, expectedCost);
           assert.deepEqual(exported.raw, detail.exportRecord.raw);
           const state = readFileSync(stateFile, "utf8");
+          const reads = t.mock.method(fs, "readFileSync");
           const reloaded = new Store(options);
           reloaded.loadState();
           assert.equal(
@@ -462,6 +463,12 @@ describe("legacy cached usage repair", () => {
             expectedTotal,
           );
           assert.equal(readFileSync(stateFile, "utf8"), state);
+          assert.equal(
+            reads.mock.calls.filter((call) => call.arguments[0] === detailPath)
+              .length,
+            0,
+            "legacy details must not be reread after an unsuccessful repair",
+          );
         } finally {
           rmSync(dir, { recursive: true, force: true });
         }

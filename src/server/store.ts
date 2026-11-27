@@ -878,19 +878,23 @@ export class Store {
 
   /** Repair legacy compact usage only when a retained response proves the counts. */
   private normalizeRetainedOpenaiUsage(): number {
-    let fixed = 0;
+    let updated = 0;
     for (const entry of this.capturedRequests) {
       const response = entry.response as Record<string, unknown>;
       const cached = (response.usage as Record<string, unknown> | undefined)
         ?.cache_read_input_tokens;
       if (
         response._contextLensUsageVersion === 1 ||
+        response._contextLensUsageRepairChecked === true ||
         !["openai", "chatgpt"].includes(entry.contextInfo.provider) ||
         typeof cached !== "number" ||
         cached <= 0
       ) {
         continue;
       }
+      // Persist unsuccessful checks too, without claiming the counts were normalized.
+      response._contextLensUsageRepairChecked = true;
+      updated++;
       const detailPath = path.join(this.detailDir, `${entry.id}.json`);
       try {
         // Read one existing privacy-filtered payload at a time, never raw archives.
@@ -942,7 +946,6 @@ export class Store {
         }
         entry.response = original;
         this.compactEntry(entry);
-        fixed++;
         if (detail.contextInfo) {
           rescaleContextTokens(detail.contextInfo, total);
           fs.writeFileSync(detailPath, JSON.stringify(detail));
@@ -951,7 +954,7 @@ export class Store {
         // Missing or unreadable evidence is never replaced with inferred counts.
       }
     }
-    return fixed;
+    return updated;
   }
 
   /**
